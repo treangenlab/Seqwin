@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "seqwin"
+dynamic = ["version"]
+description = "Seqwin: rapid and sensitive search of clade-specific microbial marker sequences via minimizer graphs"
+readme = "README.md"
+authors = [
+    { name = "Michael X. Wang", email = "xw66@rice.edu" }
+]
+license = { text = "GPL-3.0" }
+requires-python = ">=3.10"
+
+[tool.setuptools.dynamic]
+version = { attr = "seqwin._version.__version__" }
+
+[project.scripts]
+seqwin = "seqwin.cli:app"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
