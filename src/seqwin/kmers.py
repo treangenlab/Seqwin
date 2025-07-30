@@ -99,8 +99,8 @@ class KmerGraph(object):
 
         Args:
             assemblies (Assemblies): See `Assemblies` in `assemblies.py`. 
-            kmerlen (bool): See `Config` in `config.py`. 
-            windowsize (bool): See `Config` in `config.py`. 
+            kmerlen (int): See `Config` in `config.py`. 
+            windowsize (int): See `Config` in `config.py`. 
             get_dist (bool): See `Config` in `config.py`. 
             n_cpu (int): See `Config` in `config.py`. 
         """
@@ -683,7 +683,7 @@ def _get_graph(
 
 def get_kmers(
     assemblies: Assemblies, config: Config, state: RunState
-) -> tuple[KmerGraph, pd.DataFrame | None]:
+) -> tuple[KmerGraph, np.ndarray | None]:
     """Get clustered k-mers from all assemblies, create a k-mer graph and find low-penalty subgraphs. 
 
     Args:
@@ -695,7 +695,7 @@ def get_kmers(
         Returns:
         tuple: A tuple containing
             1. kmers (KmerGraph): The KmerGraph instance. 
-            2. mash_dist (pd.DataFrame | None): Tabular output of `mash dist`. 
+            2. jaccard (np.ndarray | None): A matrix of Jaccard indexes of all assembly pairs. 
     """
     overwrite = config.overwrite
     kmerlen = config.kmerlen
@@ -729,7 +729,7 @@ def get_kmers(
         logger.info(f'Calculating penalty threshold...')
         tik = time()
 
-        mash_dist = assemblies.mash(
+        jaccard = assemblies.mash(
             kmerlen=kmerlen, 
             sketchsize=sketchsize, 
             out_path=working_dir / WORKINGDIR.mash, 
@@ -737,8 +737,6 @@ def get_kmers(
             n_cpu=n_cpu
         )
 
-        # calculate penalty_th with jaccard index
-        jaccard = np.array(mash_dist['jaccard']).reshape(len(assemblies), -1)
         # average jaccard index of all target-target pairs
         j_tar = (np.sum(jaccard[:n_tar, :n_tar]) - n_tar) / (n_tar * (n_tar - 1))
         logger.info(f' - average Jaccard within targets: {j_tar:.5f}')
@@ -756,7 +754,7 @@ def get_kmers(
         print_time_delta(time()-tik)
     else:
         logger.warning(f'Penalty threshold is provided (--penalty-th), skip running Mash')
-        mash_dist = None
+        jaccard = None
 
     # 2. calculate edge weight threshold
     # consider N as the number of assemblies that include a certain k-mer
@@ -781,4 +779,4 @@ def get_kmers(
     state.edge_weight_th = edge_weight_th
     state.min_nodes = min_nodes
     state.max_nodes = max_nodes
-    return kmers, mash_dist
+    return kmers, jaccard

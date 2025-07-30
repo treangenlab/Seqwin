@@ -19,11 +19,10 @@ Functions:
 __author__ = 'Michael X. Wang'
 __license__ = 'GPL 3.0'
 
-import shutil
-import logging
+import logging, shutil, subprocess
 from pathlib import Path
 from io import StringIO
-from collections.abc import Iterable
+from collections.abc import Iterable, Generator
 
 logger = logging.getLogger(__name__)
 
@@ -106,8 +105,8 @@ def sketch(
 
 
 def dist(ref_path: Path, query_path: Path | None=None, n_cpu: int=1) -> pd.DataFrame:
-    """Estimate the pairwise distance between (each assembly sketch in the the query) 
-    and (each assembly sketch in the reference), with `mash dist`. 
+    """Run `mash dist {ref_path} {query_path}` and parse the TSV output as a pandas DataFrame. 
+    Note: high memory usage when the number of assemblies in the sketch file is large. 
     
     Args:
         ref_path (Path): Path to the reference sketch file. It could include multiple sketches, merged with the 'mash paste' command. 
@@ -121,7 +120,7 @@ def dist(ref_path: Path, query_path: Path | None=None, n_cpu: int=1) -> pd.DataF
     if query_path is None:
         query_path = ref_path
 
-    logger.info(' - Calculating pairwise Jaccard indexes and distances...')
+    logger.info(' - Calculating Mash distances of assembly pairs...')
     cmd_out = run_cmd(
         'mash', 'dist', 
         '-p', str(n_cpu), 
@@ -133,3 +132,44 @@ def dist(ref_path: Path, query_path: Path | None=None, n_cpu: int=1) -> pd.DataF
     df[['shared', 'total']] = df['jaccard'].str.split('/', expand=True).astype('int64')
     df['jaccard'] = df['shared'] / df['total']
     return df
+
+
+def get_jaccard(ref_path: Path, query_path: Path | None=None, n_cpu: int=1, bufsize: int=1_000_000) -> Generator[float, None, None]:
+    """Estimate the pairwise Jaccard index between (each assembly sketch in the the query) 
+    and (each assembly sketch in the reference), with `mash dist`. Use a stream pipe to save memory. 
+    
+    Args:
+        ref_path (Path): Path to the reference sketch file. It could include multiple sketches, merged with the 'mash paste' command. 
+        query_path (Path | None, optional): Path to the query sketch. If None, query ref_path against itself. [None]
+        n_cpu (int, optional): Number of processes to run in parallel. [1]
+        bufsize (int, optional): `bufsize` option for `subprocess.Popen`. [1_000_000]
+
+    Yields:
+        float: Jaccard index of each assembly pair. 
+    """
+    if query_path is None:
+        query_path = ref_path
+
+    logger.info(' - Calculating Jaccard indexes of assembly pairs...')
+    proc = subprocess.Popen(
+        ('mash', 'dist', '-p', str(n_cpu), ref_path, query_path), 
+        stdout=subprocess.PIPE, 
+        stderr=subprocess.PIPE,
+        text=True, 
+        bufsize=bufsize
+    )
+
+    try:
+        # get the jaccard from mash output
+        for line in proc.stdout:
+            *_, jaccard = line.strip().split('\t')
+            shared, total = map(int, jaccard.split('/'))
+            yield shared / total
+    finally:
+        # make sure these lines are always executed no matter what happens in the try block
+        # e.g., an parsing error of mash output
+        proc.terminate() # make sure mash stops writing to stdout
+        proc.stdout.close()
+        _, stderr = proc.communicate()
+        if proc.returncode != 0:
+            log_and_raise(RuntimeError, f"'mash dist' exited with code {proc.returncode}:\n{stderr}")

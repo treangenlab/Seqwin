@@ -6,6 +6,7 @@ Create an instance for all input genome assemblies.
 
 Dependencies:
 -------------
+- numpy
 - pandas
 - blast
 - .ncbi
@@ -34,10 +35,11 @@ from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
 
+import numpy as np
 import pandas as pd
 
 from .ncbi import download_taxon
-from .mash import sketch, dist
+from .mash import sketch, get_jaccard
 from .utils import print_time_delta, log_and_raise, mkdir, file_to_write, \
     mp_wrapper, get_dups, load_paths_txt, load_fasta, GZIP_EXT
 from .config import Config, RunState, WORKINGDIR, BLASTCONFIG
@@ -67,8 +69,20 @@ class Assemblies(pd.DataFrame):
             record_ids=None
         )
         super().__init__(data)
-    
-    def mash(self, kmerlen: int, sketchsize: int, out_path: Path, overwrite: bool, n_cpu: int) -> pd.DataFrame:
+
+    def mash(self, kmerlen: int, sketchsize: int, out_path: Path, overwrite: bool, n_cpu: int) -> np.ndarray:
+        """Calculate the Jaccard indexes of all assembly pairs with Mash. 
+
+        Args:
+            kmerlen (int): K-mer length for `mash sketch`. 
+            sketchsize (int): Sketch size for `mash sketch`. 
+            out_path (Path): Output path for the Mash sketch file (.msh). 
+            overwrite (bool): If True, overwrite the existing Mash sketch file. 
+            n_cpu (int): Number of processes to run in parallel. 
+        
+        Returns:
+            np.ndarray: A matrix of Jaccard indexes of all assembly pairs. 
+        """
         mash_sketch = sketch(
             self.path.tolist(), 
             kmerlen=kmerlen, 
@@ -77,9 +91,11 @@ class Assemblies(pd.DataFrame):
             overwrite=overwrite, 
             n_cpu=n_cpu
         )
-        return dist(mash_sketch, n_cpu=n_cpu)
+        return np.array(
+            list(get_jaccard(mash_sketch, n_cpu=n_cpu))
+        ).reshape(len(self), len(self))
 
-    def fetch_seq(self, loc: pd.DataFrame, n_cpu: int=1) -> pd.Series:
+    def fetch_seq(self, loc: pd.DataFrame, n_cpu: int) -> pd.Series:
         """Fetch the actual sequences for a DataFrame of assembly locations. 
         - Fetching the sequence of each location one by one is slow, since it needs layers of indexes to 
         access the actual sequence (assembly, record, start and stop). 
@@ -91,8 +107,7 @@ class Assemblies(pd.DataFrame):
                 ordering might be different. To make sure the returned Series has the same order as `loc`, 
                 row indexes should be sorted with `ascending=True`. 
                 Required columns: ['assembly_idx', 'record_idx', 'start', 'stop']. 
-            assemblies (Assemblies): Includes data of all assemblies. 
-            n_cpu (int, optional): Number of processes to run in parallel. [1]
+            n_cpu (int): Number of processes to run in parallel. 
         
         Returns:
             pd.Series: A sequence is fetched for each row in `loc`. Indexes are sorted with `ascending=True`. 

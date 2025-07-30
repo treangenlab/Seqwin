@@ -123,8 +123,8 @@ class Seqwin(object):
         overwrite = config.overwrite
         working_dir = state.working_dir
 
-        kmers, mash_dist = get_kmers(assemblies, config, state)
-        
+        kmers, jaccard = get_kmers(assemblies, config, state)
+
         if kmers.subgraphs is None:
             # if config.no_filter is True (debug only)
             markers = None
@@ -132,7 +132,7 @@ class Seqwin(object):
             markers = get_markers(kmers, assemblies, config, state)
 
         self.kmers = kmers
-        self.mash = mash_dist
+        self.mash = jaccard
         self.markers = markers
 
         # save run instance

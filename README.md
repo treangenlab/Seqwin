@@ -18,11 +18,11 @@
 
 ## Installation
 
-### Bioconda (Linux / MacOS / [WSL](https://learn.microsoft.com/en-us/windows/wsl/install); x64 or ARM64)
+### Bioconda
 
 #### Prerequisites
 - Linux, MacOS or [WSL](https://learn.microsoft.com/en-us/windows/wsl/install)
-- x64 or ARM64 (e.g., Apple Silicon)
+- x64 or ARM64
 - conda (install with [miniforge](https://github.com/conda-forge/miniforge#install) or [miniconda](https://www.anaconda.com/docs/getting-started/miniconda/install#quickstart-install-instructions))
 
 #### 1. Create a new Conda environment called "seqwin" and install Seqwin via Bioconda
@@ -59,6 +59,7 @@ ncbi-datasets-cli
 
 #### 2. Clone this repository and install with `pip`
 ```bash
+git clone https://github.com/treangenlab/Seqwin.git
 cd Seqwin
 pip install .
 seqwin --help
