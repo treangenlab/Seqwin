@@ -54,7 +54,7 @@ class Assemblies(pd.DataFrame):
     Attributes:
         path (pd.Series[Path]): Assembly paths. 
         is_target (pd.Series[bool]): True for target assemblies. 
-        record_ids (pd.Series[tuple[str]]): Record IDs of each assembly. 
+        record_ids (pd.Series[tuple[str] | None]): Record IDs of each assembly. 
     """
     def __init__(self, tar_paths: list[Path], neg_paths: list[Path]) -> None:
         """Package all input genome assemblies as a pandas DataFrame. 

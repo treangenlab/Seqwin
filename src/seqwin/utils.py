@@ -30,6 +30,7 @@ Attributes:
 -----------
 - GZIP_EXT (str)
 - BASE_COMP (str.maketrans)
+- StartMethod (str, Enum)
 """
 
 __author__ = 'Michael X. Wang'
@@ -38,6 +39,7 @@ __license__ = 'GPL 3.0'
 import gzip, shutil, logging, datetime, subprocess, multiprocessing
 from pathlib import Path
 from time import time
+from enum import Enum
 from io import StringIO
 from typing import Literal
 from collections import Counter
@@ -53,6 +55,13 @@ except ImportError:
 
 GZIP_EXT = '.gz'
 BASE_COMP = str.maketrans('ATCGatcg', 'TAGCtagc') # Translation table for complement DNA bases
+
+class StartMethod(str, Enum):
+    """Start methods for multiprocessing. 
+    """
+    spawn = 'spawn'
+    fork = 'fork'
+    forkserver = 'forkserver'
 
 
 def print_time_delta(seconds: float) -> None:
@@ -177,7 +186,8 @@ def mp_wrapper(
     text: str | None=None, 
     starmap: bool=True, 
     unpack_output: bool=False, 
-    n_jobs: int | None=None
+    n_jobs: int | None=None, 
+    start_method: StartMethod | None=None
 ) -> list:
     """Wrapper for multiprocessing.Pool(). 
 
@@ -191,6 +201,8 @@ def mp_wrapper(
         unpack_output (bool, optional): If func has multiple output, return multiple lists instead of a single list of tuples. [False]
         n_jobs (int | None, optional): Number of elements in `all_args`. 
             Helps determine the `chunksize` option for `pool.map` and `pool.starmap`. None to let Python decide. [None]
+        start_method (str | None, optional): Set the start methods for multiprocessing ('fork', 'spawn', 'forkserver'). 
+            None to use the default method. [None]
 
     Returns:
         list: A list of func outputs, in the same order as all_args. 
@@ -202,9 +214,9 @@ def mp_wrapper(
     if n_cpu == 1:
         if starmap:
             # func_out = [func(*args) for args in tqdm(all_args, ascii=' >')]
-            func_out = [func(*args) for args in all_args]
+            func_out = list(func(*args) for args in all_args)
         else:
-            func_out = [func(args) for args in all_args]
+            func_out = list(func(args) for args in all_args)
     elif n_cpu > 1:
         # calculate chunksize (the default python way when len(args) can be determined)
         if n_jobs is not None:
@@ -214,7 +226,7 @@ def mp_wrapper(
         else:
             chunksize = None
 
-        with multiprocessing.Pool(processes=n_cpu) as pool:
+        with multiprocessing.get_context(method=start_method).Pool(processes=n_cpu) as pool:
             if starmap:
                 func_out = pool.starmap(func, all_args, chunksize=chunksize)
             else:

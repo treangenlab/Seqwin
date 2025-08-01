@@ -72,6 +72,7 @@ class Seqwin(object):
         title = config.title
         overwrite = config.overwrite
         seed = config.seed
+        n_cpu = config.n_cpu
         version = config.version
 
         # create working dir, or overwrite the existing one
@@ -93,6 +94,8 @@ class Seqwin(object):
         config_logger(working_dir / WORKINGDIR.log, logging.INFO)
 
         logger.info(f'Running Seqwin v{version}')
+        if n_cpu == 1:
+            logger.warning('Only one CPU thread is used, longer running time is expected')
 
         # save configs
         config_path = working_dir / WORKINGDIR.config

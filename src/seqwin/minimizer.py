@@ -123,27 +123,24 @@ def indexlr(
             columns=columns
         ).astype(columns, copy=False, errors='raise')
 
-        # df_record['record_id'] = record_id
         df_record['record_idx'] = _IDX_TYPE(idx)
         df_assembly.append(df_record)
     return df_assembly, tuple(idx_to_id)
 
 
-# NOTE: this function is outdated
 def indexlr_py(
     assembly_path: Path, 
     kmerlen: int=21, 
     windowsize: int=200, 
-    get_minimizer_seq: bool=False
-) -> list[pd.DataFrame]:
+) -> tuple[list[pd.DataFrame], tuple[str]]:
     """Get the minimizers for each record in an assembly with the Python module `Indexlr` from `btllib<https://github.com/bcgsc/btllib>`__. 
     - The number of threads to use is set to 1. 
     - Indexlr seems to skip sequence regions with ambiguous bases. So long runs of 'N's will be ignored and k-mer coordinates will seem discontinuous. 
     (e.g., NZ_QJGJ01000182.1 in assembly GCF_003200995.1). 
     - To run this function with multiprocessing, set start method to `spawn`:
     ```python
-    if __name__ == "__main__":
-        multiprocessing.set_start_method('spawn')
+    with multiprocessing.get_context(method='spawn').Pool(processes=n_cpu) as pool:
+        func_out = pool.starmap(indexlr_py, all_args)
     ```
     Check `Python docs <https://docs.python.org/3/library/multiprocessing.html#contexts-and-start-methods>`__ 
     for more details. 
@@ -152,43 +149,35 @@ def indexlr_py(
         assembly_path (Path): Path to the assembly file in FASTA format. 
         kmerlen (int, optional): k-mer length. [21]
         windowsize (int, optional): Window size for minimizer sketch. [200]
-        get_minimizer_seq (bool, optional): Include minimizer sequence in the output if True. [False]
 
     Returns:
-        list[pd.DataFrame]: A list of pandas DataFrames for each sequence record in the assembly. 
-            Each row represents a minimizer in the sequence record, with columns, 
-            1. 'hash' (uint64): Hash value of the minimizer. 
-            2. 'pos' (int64): Position of the first base of the minimizer. 
-            3. 'strand' (category): Which strand (+/-) has the smaller hash value. Use category type to save memory. 
-            4. 'record_id' (str): ID of the sequence record. 
-            5. 'seq' (str, optional): sequence of the minimizer (forward strand), available if `get_minimizer_seq=True`. 
+        tuple: A tuple containing
+            1. list[pd.DataFrame]: A list of pandas DataFrames for each sequence record in the assembly. 
+                Each row represents a minimizer in the sequence record, with columns, 
+                - 'hash' (uint64): Hash value of the minimizer. 
+                - 'pos' (int64): Position of the first base of the minimizer. 
+                - 'record_idx' (int): 0-based index of the sequence records, in the same order as they appear in the FASTA file. 
+            2. tuple[str]: Record IDs of the assembly. 
     """
-    if get_minimizer_seq:
-        seq_flag = IndexlrFlag.SEQ
-        columns = ('hash', 'pos', 'strand', 'seq')
-        get_attr = lambda m: (m.out_hash, m.pos, '+' if m.forward else '-', m.seq)
-    else:
-        seq_flag = 0
-        columns = ('hash', 'pos', 'strand')
-        get_attr = lambda m: (m.out_hash, m.pos, '+' if m.forward else '-')
-
     df_assembly: list[pd.DataFrame] = list()
-    with Indexlr(assembly_path, kmerlen, windowsize, seq_flag+IndexlrFlag.LONG_MODE, 1) as assembly:
-        # Flag: return kmer sequence; optimize for sketching long sequence
-        # use 1 thread (max 5)
-        # for NCBI complete assemblies, first record is the chromosome
-        for record in assembly:
-            # m.forward: 
-                # True if the forward k-mer has smaller hash value, compared to the reverse complement k-mer
-                # the actual hash value (m.out_hash) of a k-mer is the sum of its forward hash and reverse hash
-                # so that a k-mer and its reverse complement have the same hash value
-            # m.seq
-                # output sequence is always the forward k-mer, even if the reverse k-mer has smaller hash value
-                # kind of useless since we already know the position of the k-mer
-            df_record = pd.DataFrame(
-                list(get_attr(m) for m in record.minimizers), 
-                columns=columns
-            )
-            df_record['record_id'] = record.id
-            df_assembly.append(df_record)
-    return df_assembly
+    idx_to_id: list[str] = list()
+    with Indexlr(
+        str(assembly_path), # must convert to string, or TypeError will be raised
+        kmerlen, windowsize, 
+        IndexlrFlag.LONG_MODE, # optimize for sketching long sequence
+        1 # use 1 thread (max 5)
+    ) as assembly:
+        for idx, record in enumerate(assembly):
+            idx_to_id.append(record.id)
+
+            # record.minimizers is a list; empty if current record has no minimizer (shorter than windowsize)
+            if record.minimizers:
+                df_record = pd.DataFrame(
+                    # m.forward and m.seq for strand and sequence
+                    ((m.out_hash, m.pos) for m in record.minimizers), 
+                    columns=_INDEXLR_COL
+                ).astype(_INDEXLR_COL, copy=False, errors='raise')
+
+                df_record['record_idx'] = _IDX_TYPE(idx)
+                df_assembly.append(df_record)
+    return df_assembly, tuple(idx_to_id)

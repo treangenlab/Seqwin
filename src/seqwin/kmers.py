@@ -47,9 +47,9 @@ except ImportError:
     _HAS_SCIPY = False
 
 from .assemblies import Assemblies
-from .minimizer import indexlr
+from .minimizer import indexlr_py
 from .graph import WeightedGraph, compose_weighted_graphs, EDGE_W
-from .utils import print_time_delta, log_and_raise, mp_wrapper, get_chunks
+from .utils import StartMethod, print_time_delta, log_and_raise, mp_wrapper, get_chunks
 from .config import Config, RunState, WORKINGDIR, NODE_P
 
 _IDX_TYPE = np.uint16 # dtype for assembly_idx
@@ -168,15 +168,16 @@ class KmerGraph(object):
                 repeat(windowsize, n_cpu)
             )
             kmers, graph, isolates, all_record_ids = mp_wrapper(
-                _get_graph, graph_args, n_cpu, unpack_output=True
+                _get_graph, graph_args, n_cpu, unpack_output=True, 
+                start_method=StartMethod.spawn # must use spawn for the indexlr python wrapper
             )
             # merge outputs from multiple processes
             logger.info(' - Merging from all threads...')
             kmers = pd.concat(kmers, ignore_index=True)
             graph = compose_weighted_graphs(graph)
             isolates = set.union(*isolates)
-            all_record_ids = chain.from_iterable(all_record_ids)
-        assemblies.record_ids = list(all_record_ids) # save record IDs
+            all_record_ids = list(chain.from_iterable(all_record_ids))
+        assemblies.record_ids = all_record_ids # save record IDs
 
         # convert to a networkx graph
         graph = graph.to_nxGraph()
@@ -652,7 +653,7 @@ def _get_graph(
 
     for idx, assembly in assemblies.iterrows():
         # get the minimizer sketch of the current assembly
-        kmers_assembly, record_ids = indexlr(assembly.path, kmerlen, windowsize)
+        kmers_assembly, record_ids = indexlr_py(assembly.path, kmerlen, windowsize)
 
         graph_assembly: set[tuple[int, int]] = set() # unique edges of the current assembly
         for kmers_record in kmers_assembly:
