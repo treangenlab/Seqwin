@@ -254,8 +254,7 @@ def get_chunks(ls: Sequence, n: int=1) -> Generator[Sequence, None, None]:
         Sequence: Chunks of ls. 
     """
     l = len(ls)
-    remainder = l%n
-    size = l//n
+    size, remainder = divmod(l, n)
     stop = 0
     for i in range(n):
         start = stop

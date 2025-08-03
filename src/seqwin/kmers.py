@@ -211,8 +211,9 @@ class KmerGraph(object):
         logger.info(f'Calculating penalty score for each k-mer node...')
         tik = time()
 
-        tar_idx = set(assemblies[assemblies.is_target == True].index)
-        neg_idx = set(assemblies[assemblies.is_target == False].index)
+        n_assemblies = len(assemblies)
+        n_tar = sum(assemblies.is_target)
+        n_neg = n_assemblies - n_tar
 
         if get_dist and (not _HAS_SCIPY):
             logger.error(' - SciPy is not installed, skip assembly distance calculation')
@@ -221,10 +222,17 @@ class KmerGraph(object):
         # choose which clustering function to use
         if get_dist:
             logger.warning(' - Assembly distance calculation is turned on, extra time and memory needed')
-            clusters, cnt_mtx = KmerGraph.__cluster_dist(kmers, tar_idx, neg_idx)
+            clusters, cnt_mtx = KmerGraph.__cluster_dist(kmers, n_assemblies)
         else:
-            clusters = KmerGraph.__cluster(kmers, tar_idx, neg_idx)
+            clusters = KmerGraph.__cluster(kmers)
             cnt_mtx = None
+
+        # true positive rate & false positive rate
+        clusters['frac_tar'] = clusters['n_tar'] / n_tar
+        clusters['frac_neg'] = clusters['n_neg'] / n_neg
+
+        # calculate cluster penalty based on Euclidean distance to frac_tar=1 and frac_neg=0
+        clusters['penalty'] = _penalty_func(clusters['frac_tar'], clusters['frac_neg'])
 
         clusters.sort_values(
             ['penalty', 'hash'], # 'hash' is the index
@@ -235,15 +243,14 @@ class KmerGraph(object):
 
     @staticmethod
     def __cluster_dist(
-        kmers: pd.DataFrame, tar_idx: set[int], neg_idx: set[int]
+        kmers: pd.DataFrame, n_assemblies: int
     ) -> tuple[pd.DataFrame, np.ndarray | None]:
         """Cluster k-mers by their hash values with `df.groupby()`, and calculate the penalty for each cluster. 
         `KmerGraph.cnt_mtx` is also calculated. Only used when distance calculation is turned on. 
 
         Args:
             kmers (pd.DataFrame): See `KmerGraph.kmers`. 
-            tar_idx (set[int]): See `KmerGraph.__cluster()`. 
-            neg_idx (set[int]): See `KmerGraph.__cluster()`. 
+            n_assemblies (int): Number of assemblies. 
 
         Returns:
             tuple: A tuple containing
@@ -269,13 +276,6 @@ class KmerGraph(object):
         # formatting
         clusters['n_neg'] = clusters.pop('total') - clusters['n_tar']
 
-        # true positive rate & false positive rate
-        clusters['true_pos'] = clusters['n_tar']/len(tar_idx)
-        clusters['false_pos'] = clusters['n_neg']/len(neg_idx)
-
-        # calculate cluster penalty based on distance to true_pos=1 and false_pos=0
-        clusters['penalty'] = ((1 - clusters['true_pos'])**2 + clusters['false_pos']**2)**0.5
-
         # calculate cnt_mtx
         # 1. build a membership matrix (use a sparse matrix to save memory)
         # each row represents a k-mer cluster, each column represents an assembly
@@ -289,7 +289,7 @@ class KmerGraph(object):
                 np.ones(len(kmer_idx)), (kmer_idx, assembly_idx)
             ), 
             shape=( # N_kmers, N_assemblies
-                len(clusters), len(tar_idx)+len(neg_idx)
+                len(clusters), n_assemblies
             )
         ).tocsr() # convert to sparse
 
@@ -299,13 +299,11 @@ class KmerGraph(object):
         return clusters, cnt_mtx.toarray()
 
     @staticmethod
-    def __cluster(kmers: pd.DataFrame, tar_idx: set[int], neg_idx: set[int]) -> pd.DataFrame:
+    def __cluster(kmers: pd.DataFrame) -> pd.DataFrame:
         """Cluster k-mers by their hash values with `df.groupby()`, and calculate the penalty for each cluster. 
 
         Args:
             kmers (pd.DataFrame): See `KmerGraph.kmers`. 
-            tar_idx (set[int]): See `KmerGraph.__cluster()`. 
-            neg_idx (set[int]): See `KmerGraph.__cluster()`. 
 
         Returns:
             pd.DataFrame: See `KmerGraph.clusters`. 
@@ -330,13 +328,6 @@ class KmerGraph(object):
         # when NaNs are inserted by pd.merge(), int64 is converted to float64
         # here the index (k-mer hash values) is not converted, and remains uint64
         clusters = clusters.astype('int64', copy=False, errors='raise')
-
-        # true positive rate & false positive rate
-        clusters['true_pos'] = clusters['n_tar'] / len(tar_idx)
-        clusters['false_pos'] = clusters['n_neg'] / len(neg_idx)
-
-        # calculate cluster penalty based on distance to true_pos=1 and false_pos=0
-        clusters['penalty'] = ((1 - clusters['true_pos'])**2 + clusters['false_pos']**2)**0.5
 
         return clusters
 
@@ -680,6 +671,12 @@ def _get_graph(
     kmers = pd.concat(kmers, ignore_index=True)
     graph = WeightedGraph(graph) # get edge weight; a dict of {edge: weight}
     return kmers, graph, isolates, all_record_ids
+
+
+def _penalty_func(frac_tar: pd.Series | float, frac_neg: pd.Series | float) -> pd.Series | float:
+    """The penalty function. 
+    """
+    return ((1 - frac_tar)**2 + frac_neg**2)**0.5
 
 
 def get_kmers(
