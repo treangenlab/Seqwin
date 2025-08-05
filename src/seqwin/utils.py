@@ -4,6 +4,7 @@ Utilities
 
 Dependencies:
 -------------
+- numpy
 - biopython (optional)
 
 Functions:
@@ -42,11 +43,15 @@ from time import time
 from enum import Enum
 from io import StringIO
 from typing import Literal
+from dataclasses import dataclass
+from multiprocessing.shared_memory import SharedMemory
 from collections import Counter
 from collections.abc import Callable, Iterable, Generator, Sequence, Hashable
 
 logger = logging.getLogger(__name__)
 
+import numpy as np
+from numpy.typing import DTypeLike
 try:
     from Bio import SeqIO
     _HAS_BIO = True
@@ -56,12 +61,27 @@ except ImportError:
 GZIP_EXT = '.gz'
 BASE_COMP = str.maketrans('ATCGatcg', 'TAGCtagc') # Translation table for complement DNA bases
 
+
 class StartMethod(str, Enum):
     """Start methods for multiprocessing. 
     """
     spawn = 'spawn'
     fork = 'fork'
     forkserver = 'forkserver'
+
+
+@dataclass(slots=True, frozen=True)
+class SharedArr:
+    """Class for a Numpy array attached to a SharedMemory instance. 
+
+    Attributes:
+        name (str): Name of the SharedMemory instance. 
+        shape (tuple): Shape of the Numpy array. 
+        dtype (DTypeLike): dtype of the Numpy array. 
+    """
+    name: str
+    shape: tuple[int]
+    dtype: DTypeLike
 
 
 def print_time_delta(seconds: float) -> None:
@@ -277,6 +297,98 @@ def get_dups(iterable: Iterable[Hashable]) -> set:
         else:
             seen.add(i)
     return set(duplicates)
+
+
+def concat_to_shm(arrays: Sequence[np.ndarray]) -> SharedArr:
+    """Concat Numpy arrays along the first dimension into a shared memory block. 
+    Each individual array is deleted during this process to save memory. 
+
+    Args:
+        arrays (Sequence[np.ndarray]): Arrays to be concatenated. 
+    
+    Returns:
+        SharedArr: The concatenated array attached to a SharedMemory instance. 
+    """
+    if not arrays:
+        log_and_raise(ValueError, 'No array is provided')
+    dtype = arrays[0].dtype
+    trailing_shape = arrays[0].shape[1:]
+
+    # validation
+    for arr in arrays:
+        if arr.dtype != dtype:
+            log_and_raise(TypeError, 'Arrays must have the same dtype')
+        elif arr.shape[1:] != trailing_shape:
+            log_and_raise(ValueError, 'Arrays must match on dimensions 1...N')
+
+    # create shared memory
+    n0 = sum(arr.shape[0] for arr in arrays)
+    out_shape = (n0, *trailing_shape)
+    out_shm = SharedMemory(
+        create=True, 
+        size=int(np.prod(out_shape, dtype=np.int64) * dtype.itemsize)
+    )
+    try:
+        out_view = np.ndarray(out_shape, dtype=dtype, buffer=out_shm.buf)
+
+        # copy each array into its slot in out_shm
+        start = 0 # position in out_view
+        for arr in arrays:
+            stop = start + arr.shape[0]
+            out_view[start:stop] = arr
+            start = stop
+            try:
+                arr.resize((0,), refcheck=False) # release memory
+            except:
+                pass
+    finally:
+        out_shm.close()
+    return SharedArr(out_shm.name, out_shape, dtype)
+
+
+def concat_from_shm(arrays: Sequence[SharedArr]) -> np.ndarray:
+    """Concat SharedArr instances along the first dimension into a Numpy array. 
+    Each SharedArr is unlinked during this process to save memory. 
+
+    Args:
+        arrays (Sequence[SharedArr]): Arrays to be concatenated. 
+    
+    Returns:
+        np.ndarray: The concatenated Numpy array. 
+    """
+    if not arrays:
+        log_and_raise(ValueError, 'No array is provided')
+    dtype = arrays[0].dtype
+    trailing_shape = arrays[0].shape[1:]
+
+    # validation
+    for arr in arrays:
+        if arr.dtype != dtype:
+            log_and_raise(TypeError, 'Arrays must have the same dtype')
+        elif arr.shape[1:] != trailing_shape:
+            log_and_raise(ValueError, 'Arrays must match on dimensions 1...N')
+
+    # pre-allocate an numpy array
+    n0 = sum(arr.shape[0] for arr in arrays)
+    out = np.empty(
+        (n0, *trailing_shape), 
+        dtype=dtype
+    )
+
+    # copy each array into its slot in out
+    start = 0 # position in out
+    for arr in arrays:
+        shm = SharedMemory(name=arr.name)
+        try:
+            arr_view = np.ndarray(arr.shape, dtype=dtype, buffer=shm.buf)
+            stop = start + arr_view.shape[0]
+            out[start:stop] = arr_view
+            start = stop
+        finally:
+            shm.close()
+            shm.unlink()
+
+    return out
 
 
 def revcomp(seq: str) -> str:

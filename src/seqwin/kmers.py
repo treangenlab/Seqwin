@@ -34,6 +34,7 @@ from random import Random
 from itertools import repeat, chain
 from time import time
 from heapq import heappush, heappop
+from multiprocessing.shared_memory import SharedMemory
 
 logger = logging.getLogger(__name__)
 
@@ -47,12 +48,10 @@ except ImportError:
     _HAS_SCIPY = False
 
 from .assemblies import Assemblies
-from .minimizer import indexlr_py
-from .graph import WeightedGraph, compose_weighted_graphs, EDGE_W
-from .utils import StartMethod, print_time_delta, log_and_raise, mp_wrapper, get_chunks
-from .config import Config, RunState, WORKINGDIR, NODE_P
-
-_IDX_TYPE = np.uint16 # dtype for assembly_idx
+from .minimizer import indexlr_py, KMER_DTYPE
+from .utils import StartMethod, SharedArr, print_time_delta, log_and_raise, mp_wrapper, \
+    get_chunks, concat_to_shm, concat_from_shm
+from .config import Config, RunState, WORKINGDIR, EDGE_W, NODE_P
 
 
 class KmerGraph(object):
@@ -62,12 +61,7 @@ class KmerGraph(object):
     3. Extract low-penalty subgraphs from the k-mer graph with `self.filter()`. 
     
     Attributes:
-        kmers (pd.DataFrame): Each row represents a k-mer, with columns, 
-            1. 'hash' (uint64): Hash value of the k-mer. 
-            2. 'pos' (uint32): Position of the first base of the k-mer. 
-            3. 'record_idx' (uint16): Sequence record index. 
-            4. 'assembly_idx' (uint16): Assembly index. 
-            5. 'is_target' (bool): True for target assemblies. 
+        kmers (pd.DataFrame): K-mers from all assemblies. See `indexlr_py` in `minimizer.py` for columns and data types. 
         graph (nx.Graph): A weighted, undirected graph of k-mers. 
             Edge weight is the number of assemblies where the two k-mers are adjacent. 
         clusters (pd.DataFrame): Each row represents a graph node, with its k-mer hash value as index, 
@@ -157,30 +151,33 @@ class KmerGraph(object):
         # merge k-mers from all assembies
         if n_cpu <= 1:
             # create the graph with a single thread
-            kmers, graph, isolates, all_record_ids = _get_graph(assemblies, kmerlen, windowsize)
+            kmers, edges, isolates, record_ids = _get_graph(assemblies, kmerlen, windowsize, return_shm=False)
         else:
             # to make mp work, the method/function must be static and should not start with double underscores (single is fine)
             # difference between single & double underscores: https://docs.python.org/3/tutorial/classes.html#private-variables
-            logger.info(f' - Parallelizing across {n_cpu} threads (~{n_assemblies//n_cpu} assemblies per thread)...')
+            logger.info(f' - Parallelizing across {n_cpu} processes (~{n_assemblies//n_cpu} assemblies per process)...')
             graph_args = zip(
                 get_chunks(assemblies, n_cpu), 
                 repeat(kmerlen, n_cpu), 
                 repeat(windowsize, n_cpu)
             )
-            kmers, graph, isolates, all_record_ids = mp_wrapper(
+            kmers, edges, isolates, record_ids = mp_wrapper(
                 _get_graph, graph_args, n_cpu, unpack_output=True, 
-                start_method=StartMethod.spawn # must use spawn for the indexlr python wrapper
+                start_method=StartMethod.forkserver # must use spawn/forkserver for the indexlr python wrapper
             )
             # merge outputs from multiple processes
-            logger.info(' - Merging from all threads...')
-            kmers = pd.concat(kmers, ignore_index=True)
-            graph = compose_weighted_graphs(graph)
+            logger.info(' - Merging from all processes...')
+            kmers = concat_from_shm(kmers)
+            edges = _merge_weighted_edges(concat_from_shm(edges))
             isolates = set.union(*isolates)
-            all_record_ids = list(chain.from_iterable(all_record_ids))
-        assemblies.record_ids = all_record_ids # save record IDs
+            record_ids = list(chain.from_iterable(record_ids))
+        
+        kmers = pd.DataFrame(kmers, copy=False)
+        assemblies.record_ids = record_ids # save record IDs
 
         # convert to a networkx graph
-        graph = graph.to_nxGraph()
+        graph = nx.Graph()
+        graph.add_weighted_edges_from(edges, weight=EDGE_W)
         # add isolated nodes to graph, so that the number of nodes is the same as the number of k-mer clusters
         # we are doing this because when the graphs are merged, only the edges are merged and isolated nodes are not merged
         graph.add_nodes_from(isolates)
@@ -621,56 +618,143 @@ class KmerGraph(object):
         self._filtered_flag = True
 
 
+def _stack_to_shm(edges: np.ndarray, weights: np.ndarray) -> SharedArr:
+    """Merge edges and weights into a single 3-column array. 
+
+    Args:
+        edges (np.ndarray): A 2-column array of edges. 
+        weights (np.ndarray): Edge weights with the same length of `edges`. 
+    
+    Returns:
+        SharedArr: The merged array attached to a SharedMemory instance. 
+    """
+    dtype = edges.dtype
+    weights = weights.astype(dtype, copy=False)
+
+    # create shared memory
+    n_edges = edges.shape[0]
+    shm = SharedMemory(create=True, size=n_edges * 3 * dtype.itemsize)
+    arr_view = np.ndarray((n_edges, 3), dtype=dtype, buffer=shm.buf)
+
+    # copy data into shared memory
+    arr_view[:, :2] = edges
+    arr_view[:, 2] = weights
+
+    edges = SharedArr(shm.name, arr_view.shape, dtype)
+    shm.close()
+    return edges
+
+
 def _get_graph(
-    assemblies: Assemblies, kmerlen: int, windowsize: int
-) -> tuple[pd.DataFrame, WeightedGraph, set, list[tuple[str]]]:
+    assemblies: Assemblies, kmerlen: int, windowsize: int, return_shm: bool=True
+) -> tuple[SharedArr | np.ndarray, SharedArr | np.ndarray, set[int], list[tuple[str]]]:
     """Merge k-mers of multiple assemblies into a single pandas DataFrame, and create a weighted, undirected graph. 
     - For multiprocessing, this function cannot be a method of `KmerGraph`. 
+    - Numpy arrays are returned as shared memory blocks for multiprocessing. 
 
     Args:
         assemblies (Assemblies): See `Assemblies` in `assemblies.py` (could be a slice of the DataFrame). 
+        kmerlen (int): See `Config` in `config.py`. 
+        windowsize (int): See `Config` in `config.py`. 
+        return_shm (bool, optional): If True, return the kmers and edges arrays using shared memory blocks; else return regular Numpy arrays. 
     
     Returns:
         tuple: A tuple containing
-            1. kmers (pd.DataFrame): See `KmerGraph.kmers`. 
-            2. graph (WeightedGraph): See `WeightedGraph` in `graph.py`. 
-            3. isolates (set): Isolated k-mers. Some short sequence records might only have one k-mer, leaving isolated graph nodes. 
-            4. all_record_ids (list[tuple[str]]): Record IDs of each assembly. 
+            1. SharedArr | np.ndarray: Merged k-mers. Return a `SharedArr` instance if `return_shm` is True; else return a Numpy array. 
+            2. SharedArr | np.ndarray: The weighted edges in a 3-column Numpy array: the first two columns are edges and the third column is weights. 
+                Return a `SharedArr` instance if `return_shm` is True; else return a Numpy array. 
+            3. set[int]: Isolated k-mers. Some short sequence records might only have one k-mer, leaving isolated graph nodes. 
+            4. list[tuple[str]]: Record IDs of each assembly. 
     """
-    kmers = list() # to concat
-    graph = list() # edges to be added to graph
-    isolates: set[int] = set() # isolated k-mers found in short sequence records
-    all_record_ids: list[tuple[str]] = list()
+    #---------- generate k-mers ----------#
+    kmers: list[list[np.ndarray]] = list()
+    record_ids: list[tuple[str]] = list() # record ids of each assembly
 
+    n_edges = 0 # total number of edges (not unique)
     for idx, assembly in assemblies.iterrows():
         # get the minimizer sketch of the current assembly
-        kmers_assembly, record_ids = indexlr_py(assembly.path, kmerlen, windowsize)
+        kmers_assembly, ids = indexlr_py(
+            assembly.path, kmerlen, windowsize, idx, assembly.is_target
+        )
+        n_edges += sum(len(kmers_record) - 1 for kmers_record in kmers_assembly)
+        kmers.append(kmers_assembly)
+        record_ids.append(ids)
+    #---------- generate k-mers ----------#
 
-        graph_assembly: set[tuple[int, int]] = set() # unique edges of the current assembly
+    #---------- generate graph edges ----------#
+    # pre-allocate an array for edges from all assemblies (instead of concat later)
+    # this might be larger than needed since only unique edges in each assembly are kept
+    edges = np.empty((n_edges, 2), dtype=KMER_DTYPE['hash'])
+    # isolated k-mers found in short sequence records
+    isolates = list()
+
+    start = 0 # position in edges
+    for kmers_assembly in kmers:
+        # get unique edges of the current assembly
+        edges_assembly = list()
         for kmers_record in kmers_assembly:
-            if len(kmers_record) == 1:
+            hashes = kmers_record['hash']
+
+            if len(hashes) == 1:
                 # isolate nodes cannot be added to graph since they don't have any edge
                 # they might be included in another path of another record, but that doesn't matter
-                isolates.add(kmers_record['hash'].iloc[0])
-            elif len(kmers_record) > 1:
-                # data type of an edge should be hashable
-                # cannot use frozenset() since an edge could be a self loop
-                # so we can only use tuple, but note tuple is ordered and we want a undirected graph
-                graph_assembly.update(
-                    tuple((u, v)) if u < v else tuple((v, u))
-                    for u, v in zip(kmers_record['hash'].iloc[:-1], kmers_record['hash'].iloc[1:])
-                )
-            # add assembly columns to the DataFrame
-            kmers_record['assembly_idx'] = _IDX_TYPE(idx)
-            kmers_record['is_target'] = assembly.is_target
+                isolates.append(hashes[0])
 
-        kmers.extend(kmers_assembly)
-        graph.extend(graph_assembly)
-        all_record_ids.append(record_ids)
+            elif len(hashes) > 1:
+                # get edges of the current sequence record
+                u, v = hashes[:-1], hashes[1:]
+                edges_record = np.empty((hashes.size - 1, 2), dtype=hashes.dtype)
+                # canonical order of edge nodes (undirected graph)
+                np.minimum(u, v, out=edges_record[:, 0])
+                np.maximum(u, v, out=edges_record[:, 1])
+                edges_assembly.append(edges_record)
 
-    kmers = pd.concat(kmers, ignore_index=True)
-    graph = WeightedGraph(graph) # get edge weight; a dict of {edge: weight}
-    return kmers, graph, isolates, all_record_ids
+        edges_assembly = np.concatenate(edges_assembly, axis=0)
+        edges_assembly = np.unique(edges_assembly, axis=0)
+
+        stop = start + edges_assembly.shape[0]
+        edges[start:stop] = edges_assembly
+        start = stop
+    edges.resize((start, 2), refcheck=False) # shrink in-place
+    isolates = set(isolates)
+    #---------- generate graph edges ----------#
+
+    # calculate edge weights
+    # somehow np.unique returns a view
+    edges, weights = np.unique(edges, axis=0, return_counts=True)
+
+    # concat arrays and return
+    kmers = list(chain.from_iterable(kmers)) # flatten kmers before concat
+    if return_shm:
+        kmers = concat_to_shm(kmers)
+        edges = _stack_to_shm(edges, weights)
+    else:
+        kmers = np.concatenate(kmers)
+        # must convert to the same dtype, otherwise both converted to float64
+        edges = np.column_stack((
+            edges, weights.astype(edges.dtype, copy=False)
+        ))
+
+    return kmers, edges, isolates, record_ids
+
+
+def _merge_weighted_edges(edges: np.ndarray):
+    """Add the weights of the same edges. 
+
+    Args:
+        edges (np.ndarray): Concatenated outputs of `_get_graph()` (). 
+    
+    Returns:
+        np.ndarray: Unique edges with total weights. 
+    """
+    # idx maps edges to unique_edges
+    unique_edges, idx = np.unique(edges[:, :2], axis=0, return_inverse=True)
+    # calculate the weight of each unique edge; weights are sorted by idx
+    weights = np.bincount(idx, weights=edges[:, 2])
+    edges = np.column_stack((
+        unique_edges, weights.astype(edges.dtype, copy=False)
+    ))
+    return edges
 
 
 def _penalty_func(frac_tar: pd.Series | float, frac_neg: pd.Series | float) -> pd.Series | float:

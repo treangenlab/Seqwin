@@ -303,6 +303,7 @@ def config_logger(file: Path, level: int) -> None:
 WORKINGDIR = WorkingDir()
 BLASTCONFIG = BlastConfig()
 
+EDGE_W: str = 'w' # Key for edge weight, used in networkx graphs. ['w']
 NODE_P: str = 'p' # Key for node penalty, used in networkx graphs. ['p']
 CONSEC_KMER_TH: int = 2 # Max index difference between consecutive k-mers. [2]
 LEN_TH_MUL: float = 1.5 # Multiplier for candidate sequence length threshold, deprecated. [1.5]

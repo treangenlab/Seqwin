@@ -40,6 +40,14 @@ _INDEXLR_COL = dict( # Header and data types for Indexlr output
 _STRAND_TYPE = CategoricalDtype(('+', '-'), ordered=False) # saves memory
 _IDX_TYPE = np.uint16 # dtype for record_idx
 
+KMER_DTYPE = np.dtype([ # for indexlr_py()
+    ('hash', np.uint64), 
+    ('pos', np.uint32), 
+    ('record_idx', np.uint16), 
+    ('assembly_idx', np.uint16), 
+    ('is_target', np.bool_), 
+])
+
 if shutil.which('indexlr') is None:
     raise ImportError('btllib is not installed (`indexlr` is not found in your PATH).')
 
@@ -130,14 +138,17 @@ def indexlr(
 
 def indexlr_py(
     assembly_path: Path, 
-    kmerlen: int=21, 
-    windowsize: int=200, 
-) -> tuple[list[pd.DataFrame], tuple[str]]:
+    kmerlen: int, 
+    windowsize: int, 
+    assembly_idx: int, 
+    is_target: bool
+) -> tuple[list[np.ndarray], tuple[str]]:
     """Get the minimizers for each record in an assembly with the Python module `Indexlr` from `btllib<https://github.com/bcgsc/btllib>`__. 
+    - This function is specialized for Seqwin. 
     - The number of threads to use is set to 1. 
     - Indexlr seems to skip sequence regions with ambiguous bases. So long runs of 'N's will be ignored and k-mer coordinates will seem discontinuous. 
     (e.g., NZ_QJGJ01000182.1 in assembly GCF_003200995.1). 
-    - To run this function with multiprocessing, set start method to `spawn`:
+    - To run this function with multiprocessing, set start method to `spawn` or `forkserver`:
     ```python
     with multiprocessing.get_context(method='spawn').Pool(processes=n_cpu) as pool:
         func_out = pool.starmap(indexlr_py, all_args)
@@ -147,19 +158,23 @@ def indexlr_py(
 
     Args:
         assembly_path (Path): Path to the assembly file in FASTA format. 
-        kmerlen (int, optional): k-mer length. [21]
-        windowsize (int, optional): Window size for minimizer sketch. [200]
+        kmerlen (int): k-mer length. 
+        windowsize (int): Window size for minimizer sketch. 
+        assembly_idx (int): Assembly index. 
+        is_target (bool): True if this is a target assembly. 
 
     Returns:
         tuple: A tuple containing
-            1. list[pd.DataFrame]: A list of pandas DataFrames for each sequence record in the assembly. 
+            1. list[np.ndarray]: A list of structured numpy arrays for each sequence record in the assembly. 
                 Each row represents a minimizer in the sequence record, with columns, 
                 - 'hash' (uint64): Hash value of the minimizer. 
-                - 'pos' (int64): Position of the first base of the minimizer. 
-                - 'record_idx' (int): 0-based index of the sequence records, in the same order as they appear in the FASTA file. 
+                - 'pos' (uint32): Position of the first base of the minimizer. 
+                - 'record_idx' (uint16): 0-based index of the sequence records, in the same order as they appear in the FASTA file. 
+                - 'assembly_idx' (uint16): Assembly index. 
+                - 'is_target' (bool): True for target assemblies. 
             2. tuple[str]: Record IDs of the assembly. 
     """
-    df_assembly: list[pd.DataFrame] = list()
+    kmers: list[np.ndarray] = list()
     idx_to_id: list[str] = list()
     with Indexlr(
         str(assembly_path), # must convert to string, or TypeError will be raised
@@ -172,12 +187,13 @@ def indexlr_py(
 
             # record.minimizers is a list; empty if current record has no minimizer (shorter than windowsize)
             if record.minimizers:
-                df_record = pd.DataFrame(
-                    # m.forward and m.seq for strand and sequence
-                    ((m.out_hash, m.pos) for m in record.minimizers), 
-                    columns=_INDEXLR_COL
-                ).astype(_INDEXLR_COL, copy=False, errors='raise')
-
-                df_record['record_idx'] = _IDX_TYPE(idx)
-                df_assembly.append(df_record)
-    return df_assembly, tuple(idx_to_id)
+                # kmers_record is a 1-D array with structured dtype (each element is a "tuple")
+                kmers_record = np.array(
+                    list(
+                        (m.out_hash, m.pos, idx, assembly_idx, is_target) 
+                        for m in record.minimizers
+                    ), 
+                    dtype=KMER_DTYPE
+                )
+                kmers.append(kmers_record)
+    return kmers, tuple(idx_to_id)
