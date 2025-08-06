@@ -475,7 +475,8 @@ def _get_create_ck_args(
     # 1. calculate cluster penalty with groupby.agg()
     # 2. filter out high penalty k-mer clusters
     # 3. convert the smaller df to a dict of k-mer clusters
-    kmer_clusters = dict(tuple(kmers.kmers.groupby('hash', sort=False)))
+    kmer_clusters = pd.DataFrame(kmers.kmers, index=kmers.idx, copy=False)
+    kmer_clusters = dict(tuple(kmer_clusters.groupby('hash', sort=False)))
 
     # create a nx instance for each subgraph, and extract underlying k-mers from the df
     graph = kmers.graph
