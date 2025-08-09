@@ -40,8 +40,9 @@ from multiprocessing.shared_memory import SharedMemory
 logger = logging.getLogger(__name__)
 
 import numpy as np
-import numba as nb
 import networkx as nx
+from numba import njit, types, from_dtype
+from numba.typed import List, Dict
 try:
     # try import dependencies for distance calculation
     import pandas as pd
@@ -56,8 +57,17 @@ from .utils import StartMethod, SharedArr, print_time_delta, log_and_raise, mp_w
     get_chunks, concat_to_shm, concat_from_shm
 from .config import Config, RunState, WORKINGDIR, EDGE_W, NODE_P
 
+# numpy dtype of k-mer hash values
+_HASH_NP_DT = KMER_DTYPE['hash']
+
+# dtypes for numba
+_HASH_NB_DT = from_dtype(_HASH_NP_DT)
+_HASH_ARR_NB_DT = types.Array(_HASH_NB_DT, 1, 'A') # 'A': accepts arbitrary/strided arrays
+_EDGE_NB_DT = types.UniTuple(_HASH_NB_DT, 2)
+
+_IDX_DTYPE = np.uint32 # dtype for k-mer indices
 _CLUSTER_DTYPE = np.dtype([ # dtype for each k-mer cluster
-    ('hash', KMER_DTYPE['hash']), 
+    ('hash', _HASH_NP_DT), 
     ('n_tar', KMER_DTYPE['assembly_idx']), 
     ('n_neg', KMER_DTYPE['assembly_idx'])
 ])
@@ -188,7 +198,7 @@ class KmerGraph(object):
             kmers = concat_from_shm(kmers)
             edges = concat_from_shm(edges)
             edges = _merge_weighted_edges(edges)
-            isolates = set.union(*isolates)
+            isolates = np.unique(np.concatenate(isolates))
             record_ids = list(chain.from_iterable(record_ids))
 
         # convert to a networkx graph
@@ -239,8 +249,9 @@ class KmerGraph(object):
         idx: np.ndarray = np.lexsort((
             kmers['assembly_idx'], 
             kmers['hash'] # higher-priority key
-        )).astype(KMER_DTYPE['hash'], copy=False)
-        kmers = kmers[idx]
+        )).astype(_IDX_DTYPE, copy=False)
+        # re-arange k-mers by the sorted index
+        kmers[:] = kmers[idx] # use less memory than kmers = kmers[idx]
 
         if get_dist and (not _HAS_DIST_DEPS):
             logger.error(' - Pandas and SciPy are not installed, skip assembly distance calculation')
@@ -335,7 +346,7 @@ class KmerGraph(object):
         return clusters, cnt_mtx.toarray()
 
     @staticmethod
-    @nb.njit(nogil=True)
+    @njit(nogil=True)
     def __cluster(hashes: np.ndarray, assembly_idx: np.ndarray, is_target: np.ndarray) -> np.ndarray:
         """Count the number of target/non-target assemblies for each unique hash value. 
 
@@ -634,7 +645,7 @@ class KmerGraph(object):
         hashes = kmers['hash']
 
         # convert used to a sorted array (sorting is not necessary, but good practice)
-        used_arr = np.fromiter(used, dtype=KMER_DTYPE['hash'], count=len(used))
+        used_arr = np.fromiter(used, dtype=_HASH_NP_DT, count=len(used))
         used_arr.sort()
 
         # create a mask of k-mers to be kept
@@ -706,6 +717,78 @@ class KmerGraph(object):
         self._filtered_flag = True
 
 
+@njit(nogil=True)
+def _get_edges(hashes) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Called inside `_get_graph()` to get weighted edges and isolated nodes. 
+
+    Args:
+        hashes (List[List[Array]]): K-mer hash values from all assemblies. 
+    
+    Returns:
+        tuple: A tuple containing
+            1. np.ndarray: Unique edges. 
+            2. np.ndarray: Edge weights. 
+            3. np.ndarray: Isolated nodes. 
+    """
+    # a counter for edges and weight
+    edge_w = Dict.empty(
+        # all type variables must be defined outside this function
+        key_type=_EDGE_NB_DT, 
+        value_type=types.intp
+    )
+    # isolated k-mers found in short sequence records
+    # there is no numba typed set, just use set()
+    isolates = set()
+
+    for hashes_assembly in hashes:
+        # get unique edges of the current assembly
+        edges_assembly = set()
+
+        for hashes_record in hashes_assembly:
+            n = len(hashes_record)
+            if n == 1:
+                # isolate nodes cannot be added to graph since they don't have any edge
+                # they might be included in another path of another record, but that doesn't matter
+                isolates.add(hashes_record[0])
+            else:
+                # get edges of the current sequence record
+                for i in range(n - 1):
+                    h1 = hashes_record[i]
+                    h2 = hashes_record[i + 1]
+                    # canonical order of edge nodes (undirected graph)
+                    if h1 < h2:
+                        edges_assembly.add((h1, h2))
+                    else:
+                        edges_assembly.add((h2, h1))
+
+        # add to the counter dict
+        for e in edges_assembly:
+            if e in edge_w:
+                edge_w[e] += 1
+            else:
+                edge_w[e] = 1
+
+    # prepare output edges and weights as np arrays
+    n_edges = len(edge_w)
+    edges = np.empty((n_edges, 2), dtype=_HASH_NP_DT)
+    weights = np.empty(n_edges, dtype=np.intp)
+    i = 0
+    for e, w in edge_w.items():
+        edges[i, 0] = e[0]
+        edges[i, 1] = e[1]
+        weights[i] = w
+        i += 1
+
+    # convert isolates to a np array
+    n_isolates = len(isolates)
+    isolates_arr = np.empty(n_isolates, dtype=_HASH_NP_DT)
+    i = 0
+    for h in isolates:
+        isolates_arr[i] = h
+        i += 1
+    return edges, weights, isolates_arr
+
+
 def _stack_to_shm(edges: np.ndarray, weights: np.ndarray) -> SharedArr:
     """Merge edges and weights into a single 3-column array. 
 
@@ -735,7 +818,7 @@ def _stack_to_shm(edges: np.ndarray, weights: np.ndarray) -> SharedArr:
 
 def _get_graph(
     assemblies: Assemblies, kmerlen: int, windowsize: int, return_shm: bool=True
-) -> tuple[SharedArr | np.ndarray, SharedArr | np.ndarray, set[int], list[tuple[str]]]:
+) -> tuple[SharedArr | np.ndarray, SharedArr | np.ndarray, np.ndarray, list[tuple[str]]]:
     """Merge k-mers of multiple assemblies into a single pandas DataFrame, and create a weighted, undirected graph. 
     - For multiprocessing, this function cannot be a method of `KmerGraph`. 
     - Numpy arrays are returned as shared memory blocks for multiprocessing. 
@@ -751,65 +834,40 @@ def _get_graph(
             1. SharedArr | np.ndarray: Merged k-mers. Return a `SharedArr` instance if `return_shm` is True; else return a Numpy array. 
             2. SharedArr | np.ndarray: The weighted edges in a 3-column Numpy array: the first two columns are edges and the third column is weights. 
                 Return a `SharedArr` instance if `return_shm` is True; else return a Numpy array. 
-            3. set[int]: Isolated k-mers. Some short sequence records might only have one k-mer, leaving isolated graph nodes. 
+            3. np.ndarray: Isolated k-mer nodes. Some short sequence records might only have one k-mer, leaving isolated graph nodes. 
             4. list[tuple[str]]: Record IDs of each assembly. 
     """
     #---------- generate k-mers ----------#
     kmers: list[list[np.ndarray]] = list()
     record_ids: list[tuple[str]] = list() # record ids of each assembly
 
-    n_edges = 0 # total number of edges (not unique)
     for idx, assembly in assemblies.iterrows():
         # get the minimizer sketch of the current assembly
         kmers_assembly, ids = indexlr_py(
             assembly.path, kmerlen, windowsize, idx, assembly.is_target
         )
-        n_edges += sum(len(kmers_record) - 1 for kmers_record in kmers_assembly)
         kmers.append(kmers_assembly)
         record_ids.append(ids)
     #---------- generate k-mers ----------#
 
     #---------- generate graph edges ----------#
-    # pre-allocate an array for edges from all assemblies (instead of concat later)
-    # this might be larger than needed since only unique edges in each assembly are kept
-    edges = np.empty((n_edges, 2), dtype=KMER_DTYPE['hash'])
-    # isolated k-mers found in short sequence records
-    isolates = list()
+    # define input types of the numba function
+    # this is a List[List[Array]]
+    hashes = List.empty_list(types.ListType(_HASH_ARR_NB_DT))
 
-    start = 0 # position in edges
     for kmers_assembly in kmers:
-        # get unique edges of the current assembly
-        edges_assembly = list()
+        # this is a List[Array]
+        hashes_assembly = List.empty_list(_HASH_ARR_NB_DT)
+
         for kmers_record in kmers_assembly:
-            hashes = kmers_record['hash']
+            # this does not create a copy, but kmers_record['hash'] returns a strided view
+            hashes_assembly.append(kmers_record['hash'])
 
-            if len(hashes) == 1:
-                # isolate nodes cannot be added to graph since they don't have any edge
-                # they might be included in another path of another record, but that doesn't matter
-                isolates.append(hashes[0])
+        hashes.append(hashes_assembly)
 
-            elif len(hashes) > 1:
-                # get edges of the current sequence record
-                u, v = hashes[:-1], hashes[1:]
-                edges_record = np.empty((hashes.size - 1, 2), dtype=hashes.dtype)
-                # canonical order of edge nodes (undirected graph)
-                np.minimum(u, v, out=edges_record[:, 0])
-                np.maximum(u, v, out=edges_record[:, 1])
-                edges_assembly.append(edges_record)
-
-        edges_assembly = np.concatenate(edges_assembly, axis=0)
-        edges_assembly = np.unique(edges_assembly, axis=0)
-
-        stop = start + edges_assembly.shape[0]
-        edges[start:stop] = edges_assembly
-        start = stop
-    edges.resize((start, 2), refcheck=False) # shrink in-place
-    isolates = set(isolates)
+    # get weighted edges and isolated nodes
+    edges, weights, isolates = _get_edges(hashes)
     #---------- generate graph edges ----------#
-
-    # calculate edge weights
-    # somehow np.unique returns a view
-    edges, weights = np.unique(edges, axis=0, return_counts=True)
 
     # concat arrays and return
     kmers = list(chain.from_iterable(kmers)) # flatten kmers before concat
@@ -862,7 +920,6 @@ def get_kmers(
         state (RunState): See `RunState` in `config.py`. 
 
     Returns:
-        Returns:
         tuple: A tuple containing
             1. KmerGraph: The KmerGraph instance. 
             2. np.ndarray | None: A matrix of Jaccard indexes of all assembly pairs. 
