@@ -69,7 +69,8 @@ _IDX_DTYPE = np.uint32 # dtype for k-mer indices
 _CLUSTER_DTYPE = np.dtype([ # dtype for each k-mer cluster
     ('hash', _HASH_NP_DT), 
     ('n_tar', KMER_DTYPE['assembly_idx']), 
-    ('n_neg', KMER_DTYPE['assembly_idx'])
+    ('n_neg', KMER_DTYPE['assembly_idx']), 
+    ('penalty', np.float64)
 ])
 
 
@@ -80,18 +81,17 @@ class KmerGraph(object):
     3. Extract low-penalty subgraphs from the k-mer graph with `self.filter()`. 
     
     Attributes:
-        kmers (np.ndarray): A 1-D Numpy array of k-mers from all assemblies, with dtype `KMER_DTYPE` in `minimizer.py`. 
+        kmers (np.ndarray): A 1-D Numpy array of k-mers from all assemblies, with dtype `KMER_DTYPE` defined in `minimizer.py`. 
         idx (np.ndarray | None): The original indices when k-mers are generated (k-mers with consecutive indices are adjacent in the genome). 
         graph (nx.Graph): A weighted, undirected graph of k-mers. 
             Edge weight is the number of assemblies where the two k-mers are adjacent. 
-        clusters (np.ndarray): A 1-D Numpy array of k-mer clusters, with fields ['hash', 'n_tar', 'n_neg']. 
+        clusters (np.ndarray): A 1-D Numpy array of k-mer clusters, with fields ['hash', 'n_tar', 'n_neg', 'penalty']. 
         cnt_mtx (np.ndarray | None): A matrix of the number of shared k-mers between each assembly pair. 
             Calculated when`get_dist=True`. 
         dist_mtx (np.ndarray | None): A matrix of the Mash distance between each assembly pair. 
             Calculated when `get_dist=True`. 
         subgraphs (tuple[tuple[frozenset[int], ...] | None): Low-penalty subgraphs. Each subgraph is a set of k-mer hash values. 
             Generated with `self.filter()`. 
-        _filtered_flag (bool): True if `self.filter()` is called. 
     """
     __slots__ = (
         'kmers', 'idx', 'graph', 'clusters', 'cnt_mtx', 'dist_mtx', 'subgraphs', '_filtered_flag'
@@ -103,7 +103,7 @@ class KmerGraph(object):
     cnt_mtx: np.ndarray | None
     dist_mtx: np.ndarray | None
     subgraphs: tuple[frozenset[int], ...] | None
-    _filtered_flag: bool
+    _filtered_flag: bool # True if `self.filter()` is called. 
 
     def __init__(self, assemblies: Assemblies, kmerlen: int, windowsize: int, get_dist: bool, n_cpu: int) -> None:
         """
@@ -125,7 +125,7 @@ class KmerGraph(object):
 
         # calculate penalty scores by clustering k-mers
         # k-mers are now sorted by hash values, idx is the original indices
-        kmers, idx, clusters, penalty, cnt_mtx = KmerGraph.__get_penalty(kmers, assemblies, get_dist)
+        kmers, idx, clusters, cnt_mtx = KmerGraph.__get_penalty(kmers, assemblies, get_dist)
 
         # sanity check
         if set(graph.nodes) != set(clusters['hash']):
@@ -134,7 +134,7 @@ class KmerGraph(object):
         # add penalties to networkx graph nodes
         nx.set_node_attributes(
             graph, 
-            values=dict(zip(clusters['hash'], penalty)), 
+            values=dict(zip(clusters['hash'], clusters['penalty'])), 
             name=NODE_P
         )
 
@@ -217,12 +217,12 @@ class KmerGraph(object):
     @staticmethod
     def __get_penalty(
         kmers: np.ndarray, assemblies: Assemblies, get_dist: bool
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray | None]:
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray | None]:
         """Calculate node penalty scores by 
         1. sorting k-mers by hash values, 
-        2. clustering k-mers with the same hash value. 
-        - Ideally, this can be done during graph creation. But in python, it is faster to do in bulk after all k-mers are gathered. 
-        - Assembly distance can also be calculated in this step (`get_dist=True`), using a slower clustering function `_cluster_kmers_dist()`. 
+        2. aggregating k-mers with the same hash value to calculate penalty. 
+        - Ideally, this can be done during graph creation. But in python, it is faster to do this in bulk after all k-mers are merged. 
+        - Assembly distance can also be calculated in this step (`get_dist=True`), using a slower clustering function `KmerGraph.__cluster_dist()`. 
 
         Args:
             kmers (np.ndarray): See `KmerGraph.kmers`. 
@@ -234,8 +234,7 @@ class KmerGraph(object):
                 1. np.ndarray: See `KmerGraph.kmers`. 
                 2. np.ndarray: See `KmerGraph.idx`. 
                 3. np.ndarray: See `KmerGraph.clusters`. 
-                4. np.ndarray: Penalty of each k-mer cluster. 
-                5. np.ndarray | None: See `KmerGraph.cnt_mtx`. 
+                4. np.ndarray | None: See `KmerGraph.cnt_mtx`. 
         """
         logger.info(f'Calculating penalty score for each k-mer node...')
         tik = time()
@@ -272,13 +271,13 @@ class KmerGraph(object):
             cnt_mtx = None
 
         # calculate penalty for each cluster
-        penalty = _penalty_func(
+        clusters['penalty'] = _penalty_func(
             clusters['n_tar'] / n_tar, 
             clusters['n_neg'] / n_neg
         )
 
         print_time_delta(time()-tik)
-        return kmers, idx, clusters, penalty, cnt_mtx
+        return kmers, idx, clusters, cnt_mtx
 
     @staticmethod
     def __cluster_dist(kmers: np.ndarray, n_assemblies: int) -> tuple[np.ndarray, np.ndarray]:
@@ -314,6 +313,7 @@ class KmerGraph(object):
 
         # formatting
         clusters['n_neg'] = clusters.pop('total') - clusters['n_tar']
+        clusters['penalty'] = .0 # placeholder for penalty
         # convert to structured array
         clusters = clusters.to_records(
             index=False, 
@@ -359,10 +359,10 @@ class KmerGraph(object):
             np.ndarray: See `KmerGraph.clusters`. 
         """
         n = hashes.size
-        # pre-allocate outputs (never larger than n)
-        out = np.empty(n, dtype=_CLUSTER_DTYPE) # define dtype outside the numba function
+        # pre-allocate output array (never larger than n)
+        clusters = np.empty(n, dtype=_CLUSTER_DTYPE) # define dtype outside the numba function
 
-        out_i = 0
+        cluster_i = 0
         i = 0
         while i < n:
             curr_hash = hashes[i]
@@ -389,13 +389,15 @@ class KmerGraph(object):
                     n_neg += 1
                 i = j # advance by the duplicates
 
-            out[out_i]['hash'] = curr_hash
-            out[out_i]['n_tar']  = n_tar
-            out[out_i]['n_neg']  = n_neg
-            out_i += 1
+            # set individual values in numba, no fancy indexing
+            clusters[cluster_i]['hash'] = curr_hash
+            clusters[cluster_i]['n_tar'] = n_tar
+            clusters[cluster_i]['n_neg'] = n_neg
+            clusters[cluster_i]['penalty'] = .0 # placeholder for penalty
+            cluster_i += 1
 
         # trim the over-allocated buffers
-        return out[:out_i]
+        return clusters[:cluster_i]
 
     @staticmethod
     def __get_dist(cnt_mtx: np.ndarray, kmerlen: int) -> np.ndarray:
@@ -645,7 +647,7 @@ class KmerGraph(object):
         hashes = kmers['hash']
 
         # convert used to a sorted array (sorting is not necessary, but good practice)
-        used_arr = np.fromiter(used, dtype=_HASH_NP_DT, count=len(used))
+        used_arr = np.fromiter(used, dtype=hashes.dtype, count=len(used))
         used_arr.sort()
 
         # create a mask of k-mers to be kept
@@ -819,9 +821,11 @@ def _stack_to_shm(edges: np.ndarray, weights: np.ndarray) -> SharedArr:
 def _get_graph(
     assemblies: Assemblies, kmerlen: int, windowsize: int, return_shm: bool=True
 ) -> tuple[SharedArr | np.ndarray, SharedArr | np.ndarray, np.ndarray, list[tuple[str]]]:
-    """Merge k-mers of multiple assemblies into a single pandas DataFrame, and create a weighted, undirected graph. 
-    - For multiprocessing, this function cannot be a method of `KmerGraph`. 
-    - Numpy arrays are returned as shared memory blocks for multiprocessing. 
+    """
+    1. Merge k-mers from multiple assemblies into a 1-D structured Numpy array. 
+    2. Generate weighted, undirected edges for the k-mer graph. 
+    
+    Numpy arrays are returned as shared memory blocks for multiprocessing. 
 
     Args:
         assemblies (Assemblies): See `Assemblies` in `assemblies.py` (could be a slice of the DataFrame). 
@@ -832,6 +836,7 @@ def _get_graph(
     Returns:
         tuple: A tuple containing
             1. SharedArr | np.ndarray: Merged k-mers. Return a `SharedArr` instance if `return_shm` is True; else return a Numpy array. 
+                dtype is defined in `minimizer.py` (`KMER_DTYPE`). 
             2. SharedArr | np.ndarray: The weighted edges in a 3-column Numpy array: the first two columns are edges and the third column is weights. 
                 Return a `SharedArr` instance if `return_shm` is True; else return a Numpy array. 
             3. np.ndarray: Isolated k-mer nodes. Some short sequence records might only have one k-mer, leaving isolated graph nodes. 
@@ -860,7 +865,8 @@ def _get_graph(
         hashes_assembly = List.empty_list(_HASH_ARR_NB_DT)
 
         for kmers_record in kmers_assembly:
-            # this does not create a copy, but kmers_record['hash'] returns a strided view
+            # this does not create a copy, kmers_record['hash'] returns a strided view
+            # and this must be specified in the numba dtype
             hashes_assembly.append(kmers_record['hash'])
 
         hashes.append(hashes_assembly)
@@ -885,7 +891,7 @@ def _get_graph(
 
 
 def _merge_weighted_edges(edges: np.ndarray):
-    """Add the weights of the same edges. 
+    """Add weights of the same edges. 
 
     Args:
         edges (np.ndarray): Concatenated outputs of `_get_graph()`. 
