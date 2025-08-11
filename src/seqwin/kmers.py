@@ -222,6 +222,7 @@ class KmerGraph(object):
         1. sorting k-mers by hash values, 
         2. aggregating k-mers with the same hash value to calculate penalty. 
         - Ideally, this can be done during graph creation. But in python, it is faster to do this in bulk after all k-mers are merged. 
+        Plus, sorting k-mers here can also make removing unused k-mers faster in `KmerGraph.__filter_kmers()`. 
         - Assembly distance can also be calculated in this step (`get_dist=True`), using a slower clustering function `KmerGraph.__cluster_dist()`. 
 
         Args:
@@ -244,13 +245,8 @@ class KmerGraph(object):
         n_neg = n_assemblies - n_tar
 
         logger.info(' - Sorting k-mers by hash values...')
-        # sort to place k-mers with the same hash together
-        idx: np.ndarray = np.lexsort((
-            kmers['assembly_idx'], 
-            kmers['hash'] # higher-priority key
-        )).astype(_IDX_DTYPE, copy=False)
-        # re-arange k-mers by the sorted index
-        kmers[:] = kmers[idx] # use less memory than kmers = kmers[idx]
+        # sort in-place and return the sorted indices
+        idx = _sort_by_hash(kmers)
 
         if get_dist and (not _HAS_DIST_DEPS):
             logger.error(' - Pandas and SciPy are not installed, skip assembly distance calculation')
@@ -907,6 +903,79 @@ def _merge_weighted_edges(edges: np.ndarray):
         unique_edges, weights.astype(edges.dtype, copy=False)
     ))
     return edges
+
+
+@njit(nogil=True)
+def _sort_by_hash(kmers: np.ndarray) -> np.ndarray:
+    """Sort `kmers` by 'hash' in-place in a stable manner, and return the sorted indices. 
+    Use LSD (Least Significant Digit) radix sort. 
+    - Note that this function is hard coded for hash dtype of uint64. 
+
+    Args:
+        kmers (np.ndarray): See `KmerGraph.kmers`. 
+
+    Returns:
+        np.ndarray: See `KmerGraph.idx`. 
+    """
+    n = kmers.size
+    # create k-mer indices
+    idx = np.arange(n, dtype=_IDX_DTYPE)
+
+    # 1. sort idx by 'hash' using a stable algorithm (LSD radix sort on 64-bit keys)
+    if n > 1:
+        idx_out = np.empty(n, dtype=_IDX_DTYPE)
+        # process 16 bits at a time (4 passes for 64-bit keys: 0-15, 16-31, 32-47, 48-63)
+        for shift in range(0, 64, 16):
+            # counting sort on the current 16-bit segment of the hash (stable)
+            count = np.zeros(65536, dtype=np.int64) # frequency array for 16-bit values (0-65535)
+            # count occurrences of each 16-bit key value
+            for i in range(n):
+                key = (kmers[idx[i]]['hash'] >> shift) & 0xFFFF
+                count[key] += 1
+            # compute prefix sums in count to get starting index for each key value in sorted order
+            total = 0
+            for value in range(65536):
+                c = count[value]
+                count[value] = total
+                total += c
+            # distribute indices into idx_out according to the current 16-bit key (stable order)
+            for i in range(n):
+                key = (kmers[idx[i]]['hash'] >> shift) & 0xFFFF
+                idx_out[count[key]] = idx[i]
+                count[key] += 1
+            # swap idx and idx_out for the next pass (partial sort is now in idx)
+            idx, idx_out = idx_out, idx
+
+    # 2. reorder kmers in-place using the sorted indices.
+    # build inverse mapping: dest[old_index] = new_position of that element.
+    dest = idx_out # reuse buffer
+    for new_pos in range(n):
+        dest[idx[new_pos]] = new_pos
+    # iterate through each element, and swap it into correct position if it's not already there.
+    for i in range(n):
+        while dest[i] != i:
+            j = dest[i]
+            # swap the record at i with the record at j, field by field (no fancy index for numba)
+            tmp_hash = kmers[i]['hash']
+            tmp_pos = kmers[i]['pos']
+            tmp_rec = kmers[i]['record_idx']
+            tmp_asm = kmers[i]['assembly_idx']
+            tmp_tar = kmers[i]['is_target']
+
+            kmers[i]['hash'] = kmers[j]['hash']
+            kmers[i]['pos'] = kmers[j]['pos']
+            kmers[i]['record_idx'] = kmers[j]['record_idx']
+            kmers[i]['assembly_idx'] = kmers[j]['assembly_idx']
+            kmers[i]['is_target'] = kmers[j]['is_target']
+
+            kmers[j]['hash'] = tmp_hash
+            kmers[j]['pos'] = tmp_pos
+            kmers[j]['record_idx'] = tmp_rec
+            kmers[j]['assembly_idx'] = tmp_asm
+            kmers[j]['is_target'] = tmp_tar
+            # update the index mapping after the swap
+            dest[i], dest[j] = dest[j], dest[i]
+    return idx
 
 
 def _penalty_func(frac_tar: np.ndarray | float, frac_neg: np.ndarray | float) -> np.ndarray | float:
