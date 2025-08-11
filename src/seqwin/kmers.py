@@ -245,7 +245,16 @@ class KmerGraph(object):
         n_neg = n_assemblies - n_tar
 
         logger.info(' - Sorting k-mers by hash values...')
-        # sort in-place and return the sorted indices
+        # stable sort in-place (preserve assembly order), and return the sorted indices
+        # here we don't sort with the built-in numpy functions, because argsort (or lexsort) 
+        # creates a C contiguous copy of the strided kmers['hash'], and it uses int64 for indices; 
+        # reordering a struct array with kmers[:] = kmer[idx] also needs a large buffer; 
+        # all these would increase peak RAM by a lot. 
+        # to solve this, we could 
+        # 1) structure kmers as a tuple of contiguous arrays (instead of a structured array), and use numpy sorting; 
+        # 2) write a custom sorting function that works on a strided array. 
+        # option 1) involves rewriting a lot of functions, and numpy still uses in64 for indexing
+        # option 2) is easier to implement and equally fast
         idx = _sort_by_hash(kmers)
 
         if get_dist and (not _HAS_DIST_DEPS):
@@ -862,7 +871,7 @@ def _get_graph(
 
         for kmers_record in kmers_assembly:
             # this does not create a copy, kmers_record['hash'] returns a strided view
-            # and this must be specified in the numba dtype
+            # must be specified in the numba dtype ('A')
             hashes_assembly.append(kmers_record['hash'])
 
         hashes.append(hashes_assembly)
@@ -909,6 +918,7 @@ def _merge_weighted_edges(edges: np.ndarray):
 def _sort_by_hash(kmers: np.ndarray) -> np.ndarray:
     """Sort `kmers` by 'hash' in-place in a stable manner, and return the sorted indices. 
     Use LSD (Least Significant Digit) radix sort. 
+    - A buffer of `4 * len(kmers)` bytes (uint32 indices) is needed during this process, so memory usage should be around `kmers + idx + buffer`. 
     - Note that this function is hard coded for hash dtype of uint64. 
 
     Args:
@@ -922,29 +932,28 @@ def _sort_by_hash(kmers: np.ndarray) -> np.ndarray:
     idx = np.arange(n, dtype=_IDX_DTYPE)
 
     # 1. sort idx by 'hash' using a stable algorithm (LSD radix sort on 64-bit keys)
-    if n > 1:
-        idx_out = np.empty(n, dtype=_IDX_DTYPE)
-        # process 16 bits at a time (4 passes for 64-bit keys: 0-15, 16-31, 32-47, 48-63)
-        for shift in range(0, 64, 16):
-            # counting sort on the current 16-bit segment of the hash (stable)
-            count = np.zeros(65536, dtype=np.int64) # frequency array for 16-bit values (0-65535)
-            # count occurrences of each 16-bit key value
-            for i in range(n):
-                key = (kmers[idx[i]]['hash'] >> shift) & 0xFFFF
-                count[key] += 1
-            # compute prefix sums in count to get starting index for each key value in sorted order
-            total = 0
-            for value in range(65536):
-                c = count[value]
-                count[value] = total
-                total += c
-            # distribute indices into idx_out according to the current 16-bit key (stable order)
-            for i in range(n):
-                key = (kmers[idx[i]]['hash'] >> shift) & 0xFFFF
-                idx_out[count[key]] = idx[i]
-                count[key] += 1
-            # swap idx and idx_out for the next pass (partial sort is now in idx)
-            idx, idx_out = idx_out, idx
+    idx_out = np.empty(n, dtype=_IDX_DTYPE) # buffer for idx
+    # process 16 bits at a time (4 passes for 64-bit keys: 0-15, 16-31, 32-47, 48-63)
+    for shift in range(0, 64, 16):
+        # counting sort on the current 16-bit segment of the hash (stable)
+        count = np.zeros(65536, dtype=np.int64) # frequency array for 16-bit values (0-65535)
+        # count occurrences of each 16-bit key value
+        for i in range(n):
+            key = (kmers[idx[i]]['hash'] >> shift) & 0xFFFF
+            count[key] += 1
+        # compute prefix sums in count to get starting index for each key value in sorted order
+        total = 0
+        for value in range(65536):
+            c = count[value]
+            count[value] = total
+            total += c
+        # distribute indices into idx_out according to the current 16-bit key (stable order)
+        for i in range(n):
+            key = (kmers[idx[i]]['hash'] >> shift) & 0xFFFF
+            idx_out[count[key]] = idx[i]
+            count[key] += 1
+        # swap idx and idx_out for the next pass (partial sort is now in idx)
+        idx, idx_out = idx_out, idx
 
     # 2. reorder kmers in-place using the sorted indices.
     # build inverse mapping: dest[old_index] = new_position of that element.
@@ -956,23 +965,11 @@ def _sort_by_hash(kmers: np.ndarray) -> np.ndarray:
         while dest[i] != i:
             j = dest[i]
             # swap the record at i with the record at j, field by field (no fancy index for numba)
-            tmp_hash = kmers[i]['hash']
-            tmp_pos = kmers[i]['pos']
-            tmp_rec = kmers[i]['record_idx']
-            tmp_asm = kmers[i]['assembly_idx']
-            tmp_tar = kmers[i]['is_target']
-
-            kmers[i]['hash'] = kmers[j]['hash']
-            kmers[i]['pos'] = kmers[j]['pos']
-            kmers[i]['record_idx'] = kmers[j]['record_idx']
-            kmers[i]['assembly_idx'] = kmers[j]['assembly_idx']
-            kmers[i]['is_target'] = kmers[j]['is_target']
-
-            kmers[j]['hash'] = tmp_hash
-            kmers[j]['pos'] = tmp_pos
-            kmers[j]['record_idx'] = tmp_rec
-            kmers[j]['assembly_idx'] = tmp_asm
-            kmers[j]['is_target'] = tmp_tar
+            kmers[i]['hash'],         kmers[j]['hash']         = kmers[j]['hash'],         kmers[i]['hash']
+            kmers[i]['pos'],          kmers[j]['pos']          = kmers[j]['pos'],          kmers[i]['pos']
+            kmers[i]['record_idx'],   kmers[j]['record_idx']   = kmers[j]['record_idx'],   kmers[i]['record_idx']
+            kmers[i]['assembly_idx'], kmers[j]['assembly_idx'] = kmers[j]['assembly_idx'], kmers[i]['assembly_idx']
+            kmers[i]['is_target'],    kmers[j]['is_target']    = kmers[j]['is_target'],    kmers[i]['is_target']
             # update the index mapping after the swap
             dest[i], dest[j] = dest[j], dest[i]
     return idx
