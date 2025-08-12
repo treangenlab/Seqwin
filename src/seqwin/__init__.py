@@ -37,6 +37,7 @@ Modules:
 - assemblies
 - kmers
 - markers
+- helpers
 - minimizer
 - ncbi
 - mash
