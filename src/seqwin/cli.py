@@ -74,7 +74,11 @@ def main(
     ), 
     penalty_th: float | None = typer.Option(
         None, '--penalty-th', show_default=False, 
-        help='Node penalty threshold, ranging between [0, 1]. Computed with Jaccard indexes if not provided.'
+        help='Node penalty threshold (0-1). Automatically computed if not provided.'
+    ), 
+    stringency: int = typer.Option(
+        5, '--stringency', '-s', show_default=True, 
+        help='Stringency level (0-10) for the sensitivity and specificity of output markers. Used only if --penalty-th is not provided (auto mode).'
     ), 
     min_len: int = typer.Option(
         200, '--min-len', help='Min length of output markers.'
@@ -98,11 +102,11 @@ def main(
         1, '--threads', '-p', help='Number of threads to use.'
     ), 
     level: Level = typer.Option(
-        Level.contig, '--level', metavar='[contig|scaffold|\nchromosome|complete]', # show choices in two lines
+        Level.contig, '--level', metavar='TEXT', # hide choices
         help='NCBI download option. Limit to genomes ≥ this assembly level (contig < scaffold < chromosome < complete).'
     ), 
     source: Source = typer.Option(
-        Source.genbank, '--source', 
+        Source.genbank, '--source', metavar='TEXT', # hide choices
         help="NCBI download option. Genome source ('genbank' or 'refseq')."
     ), 
     annotated: bool = typer.Option(
@@ -132,9 +136,11 @@ def main(
             raise typer.BadParameter('You must provide either --tar-paths or --tar-taxa')
         elif (neg_paths is None) and (neg_taxa is None):
             raise typer.BadParameter('You must provide either --neg-paths or --neg-taxa')
-    elif (penalty_th is not None) and (penalty_th < 0 or penalty_th > 1):
+    if (penalty_th is not None) and (penalty_th < 0 or penalty_th > 1):
             raise ValueError('--penalty-th must be between [0, 1]')
-    elif (max_len is not None) and (max_len < min_len):
+    if stringency < 0 or stringency > 10:
+            raise ValueError('--stringency must be between [0, 10]')
+    if (max_len is not None) and (max_len < min_len):
         raise typer.BadParameter('--max-len must be greater than --min-len')
 
     config = Config(
@@ -148,6 +154,7 @@ def main(
         kmerlen=kmerlen, 
         windowsize=windowsize, 
         penalty_th=penalty_th, 
+        stringency=stringency, 
         min_len=min_len, 
         max_len=max_len, 
         run_blast=run_blast, 

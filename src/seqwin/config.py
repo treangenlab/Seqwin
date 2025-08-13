@@ -77,6 +77,7 @@ class Config(BaseModel):
         windowsize (int): Window size for minimizer sketch. [200]
         penalty_th (float | None): Node penalty threshold, ranging between [0, 1]. 
             None to compute with Jaccard indexes (capped by `penalty_th_cap`). [None]
+        stringency (int): If `penalty_th` is None (computed with Jaccard), multiply the computed penalty threshold with `(1 - x/10)`. [5]
         min_len (int): Min length of output markers. [200]
         max_len (int | None): Max length of output markers (estimated). None for no explicit limit (capped by `max_nodes_cap`). [None]
         run_blast (bool): If True, BLAST check representative sequences. [True]
@@ -119,6 +120,7 @@ class Config(BaseModel):
     kmerlen: int = 21
     windowsize: int = 200
     penalty_th: float | None = None
+    stringency: int = 5
     min_len: int = 200
     max_len: int | None = None
     run_blast: bool = True
@@ -165,9 +167,11 @@ class Config(BaseModel):
                 raise ValueError('You must provide either tar_paths or tar_taxa')
             elif (self.neg_paths is None) and (self.neg_taxa is None):
                 raise ValueError('You must provide either neg_paths or neg_taxa')
-        elif (self.penalty_th is not None) and (self.penalty_th < 0 or self.penalty_th > 1):
+        if (self.penalty_th is not None) and (self.penalty_th < 0 or self.penalty_th > 1):
             raise ValueError('penalty_th must be between [0, 1]')
-        elif (self.max_len is not None) and (self.max_len < self.min_len):
+        if self.stringency < 0 or self.stringency > 10:
+            raise ValueError('stringency must be between [0, 10]')
+        if (self.max_len is not None) and (self.max_len < self.min_len):
             raise ValueError('max_len must be greater than min_len')
         return self
 

@@ -259,7 +259,7 @@ class KmerGraph(object):
             cnt_mtx = None
 
         # calculate penalty for each cluster
-        clusters['penalty'] = _penalty_func(
+        clusters['penalty'] = _frac_to_penalty(
             clusters['n_tar'] / n_tar, 
             clusters['n_neg'] / n_neg
         )
@@ -561,8 +561,21 @@ def _get_graph(
     return kmers, edges, isolates, record_ids
 
 
-def _penalty_func(frac_tar: np.ndarray | float, frac_neg: np.ndarray | float) -> np.ndarray | float:
-    """The penalty function. 
+def _expected_frac(jaccard_mtx: np.ndarray):
+    """Calculate the expected fraction from a matrix of pairwise Jaccard indices. 
+    Here fraction means: for a k-mer `h` in a group of genomes (k-mer sets), the fraction of sets in 
+    a second group that also contain `h`. `jaccard_mtx` is the pairwise Jaccard indices between sets 
+    in the two groups. Note that this could be a self comparison (two groups are the same). 
+    - `E(frac) = mean(2J / (1+J))`, where `J` is the Jaccard matrix. 
+    - This expectation ≥ mean of the Jaccard matrix, (`2J / (1+J) ≥ J, 0 ≤ J ≤ 1`). 
+    """
+    return np.mean(2 * jaccard_mtx / (1 + jaccard_mtx))
+
+
+def _frac_to_penalty(frac_tar: np.ndarray | float, frac_neg: np.ndarray | float) -> np.ndarray | float:
+    """The penalty formula (Euclidean / L2 norm of the two fractions). 
+    - When `frac_tar` and `frac_neg` are expectations, this formula doesn't give the expected penalty, since it's non-linear. 
+    - However, since it is convex, the returned value ≤ the true expectation (Jensen’s inequality). 
     """
     return ((1 - frac_tar)**2 + frac_neg**2)**0.5
 
@@ -586,6 +599,7 @@ def get_kmers(
     kmerlen = config.kmerlen
     windowsize = config.windowsize
     penalty_th = config.penalty_th
+    stringency = config.stringency
     min_len = config.min_len
     max_len = config.max_len
     no_filter = config.no_filter
@@ -600,7 +614,6 @@ def get_kmers(
     working_dir = state.working_dir
     rng = state.rng
     n_tar = state.n_tar
-    n_neg = state.n_neg
 
     kmers = KmerGraph(assemblies, kmerlen, windowsize, get_dist, n_cpu)
 
@@ -622,19 +635,20 @@ def get_kmers(
             n_cpu=n_cpu
         )
 
-        # average jaccard index of all target-target pairs
-        j_tar = (np.sum(jaccard[:n_tar, :n_tar]) - n_tar) / (n_tar * (n_tar - 1))
-        logger.info(f' - average Jaccard within targets: {j_tar:.5f}')
-        # average jaccard index of all target-(non-target) pairs
-        j_neg = np.sum(jaccard[n_tar:, :n_tar]) / (n_tar * n_neg)
-        logger.info(f' - average Jaccard between targets and non-targets: {j_neg:.5f}')
-        # choose the more stringent threshold
-        penalty_th = min(1 - j_tar, j_neg)
-        if penalty_th < penalty_th_cap:
-            logger.info(f' - penalty threshold set as {penalty_th:.5f} (calculated with Jaccard)')
-        else:
+        e_absence_tar = 1 - _expected_frac(jaccard[:n_tar, :n_tar])
+        logger.info(f' - expected k-mer absence in targets: {e_absence_tar:.5f}')
+
+        e_presence_neg = _expected_frac(jaccard[n_tar:, :n_tar])
+        logger.info(f' - expected k-mer presence in non-targets: {e_presence_neg:.5f}')
+
+        stringent_e = min(e_absence_tar, e_presence_neg)
+        penalty_th_mul = 1 - stringency / 10
+        penalty_th = penalty_th_mul * stringent_e
+        logger.info(f' - calculated penalty threshold: {penalty_th:.5f} ({penalty_th_mul} * {stringent_e:.5f})')
+
+        if penalty_th > penalty_th_cap:
             penalty_th = penalty_th_cap
-            logger.warning(f' - penalty threshold is capped at {penalty_th} (check Jaccard)')
+            logger.warning(f' - calculated penalty threshold is too large (capped at {penalty_th})')
 
         print_time_delta(time()-tik)
     else:
