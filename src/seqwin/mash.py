@@ -150,7 +150,7 @@ def get_jaccard(ref_path: Path, query_path: Path | None=None, n_cpu: int=1, bufs
     if query_path is None:
         query_path = ref_path
 
-    logger.info(' - Calculating Jaccard indexes of assembly pairs...')
+    logger.info(' - Calculating Jaccard indices of assembly pairs...')
     proc = subprocess.Popen(
         ('mash', 'dist', '-p', str(n_cpu), ref_path, query_path), 
         stdout=subprocess.PIPE, 

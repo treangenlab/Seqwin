@@ -179,7 +179,7 @@ class OrderedKmers(tuple):
                 except KeyError:
                     # the current k-mer is not included in self
                     continue
-            # check if indexes are non-decreasing or non-increasing
+            # check if indices are non-decreasing or non-increasing
             if len(all_idx) == 1:
                 self.warning.add(2)
                 return 'u'

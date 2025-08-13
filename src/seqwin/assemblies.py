@@ -71,7 +71,7 @@ class Assemblies(pd.DataFrame):
         super().__init__(data)
 
     def mash(self, kmerlen: int, sketchsize: int, out_path: Path, overwrite: bool, n_cpu: int) -> np.ndarray:
-        """Calculate the Jaccard indexes of all assembly pairs with Mash. 
+        """Calculate the Jaccard indices of all assembly pairs with Mash. 
 
         Args:
             kmerlen (int): K-mer length for `mash sketch`. 
@@ -81,7 +81,7 @@ class Assemblies(pd.DataFrame):
             n_cpu (int): Number of processes to run in parallel. 
         
         Returns:
-            np.ndarray: A matrix of Jaccard indexes of all assembly pairs. 
+            np.ndarray: A matrix of Jaccard indices of all assembly pairs. 
         """
         mash_sketch = sketch(
             self.path.tolist(), 
@@ -97,20 +97,20 @@ class Assemblies(pd.DataFrame):
 
     def fetch_seq(self, loc: pd.DataFrame, n_cpu: int) -> pd.Series:
         """Fetch the actual sequences for a DataFrame of assembly locations. 
-        - Fetching the sequence of each location one by one is slow, since it needs layers of indexes to 
+        - Fetching the sequence of each location one by one is slow, since it needs layers of indices to 
         access the actual sequence (assembly, record, start and stop). 
         - To solve this, rows from the same assembly are grouped together, 
         and different groups are fetched in parallel. 
 
         Args:
-            loc (pd.DataFrame): Assembly locations. Row indexes are kept in the returned Series, but the 
+            loc (pd.DataFrame): Assembly locations. Row indices are kept in the returned Series, but the 
                 ordering might be different. To make sure the returned Series has the same order as `loc`, 
-                row indexes should be sorted with `ascending=True`. 
+                row indices should be sorted with `ascending=True`. 
                 Required columns: ['assembly_idx', 'record_idx', 'start', 'stop']. 
             n_cpu (int): Number of processes to run in parallel. 
         
         Returns:
-            pd.Series: A sequence is fetched for each row in `loc`. Indexes are sorted with `ascending=True`. 
+            pd.Series: A sequence is fetched for each row in `loc`. indices are sorted with `ascending=True`. 
         """
         # group sequences by assembly_idx
         loc: dict[int, pd.DataFrame] = dict(tuple(
@@ -322,7 +322,7 @@ def _add_fasta_to_queue(path: Path, assembly_idx: int, is_target: bool, queue_id
 
 
 def _stream_to_stdin(queue: mp.Queue, n_items: int, proc_stdin: BufferedWriter) -> None:
-    """Get items from an indexed queue, and write them to the stdin of a process by the order of their indexes. 
+    """Get items from an indexed queue, and write them to the stdin of a process by the order of their indices. 
     
     Args:
         indexed_queue (mp.Queue): Each queue item should be a tuple of (idx, data). 
@@ -538,7 +538,7 @@ def get_assemblies(config: Config, state: RunState) -> Assemblies:
     assemblies_path = working_dir / WORKINGDIR.assemblies_csv
     file_to_write(assemblies_path, overwrite)
     assemblies.to_csv(assemblies_path, columns=('path', 'is_target'), index=True)
-    logger.info(f'Assembly indexes and paths saved as {assemblies_path}')
+    logger.info(f'Assembly indices and paths saved as {assemblies_path}')
 
     # load assembly sequences
     # NOTE: loading sequences in advance will slow everything else (maybe too much RAM)

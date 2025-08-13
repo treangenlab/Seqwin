@@ -308,7 +308,7 @@ def _blast_batch(
     """Run BLAST on a list of sequences and return a DataFrame of the tabular output. 
 
     Args:
-        seq_idx (list[int]): Indexes of the input sequences. 
+        seq_idx (list[int]): indices of the input sequences. 
         seq_list (list[str]): A list of sequences for BLAST. 
         db (Path): Path to the BLAST database. 
         task (str): Preset BLAST tasks ('blastn', 'blastn-short', 'megablast'). 
@@ -385,7 +385,7 @@ def blast(
     tot_seq = len(seq_list)
     if tot_seq == 0:
         log_and_raise(ValueError, 'No input sequence provided for BLAST')
-    seq_idx = list(range(tot_seq)) # indexes have to be set in advance (before batches)
+    seq_idx = list(range(tot_seq)) # indices have to be set in advance (before batches)
 
     if columns is None:
         # use default columns (including sequences)

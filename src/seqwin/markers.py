@@ -61,7 +61,7 @@ class ConnectedKmers(object):
         graph (nx.Graph): A low-penalty subgraph of the k-mer graph `KmerGraph.graph`. 
         kmers (pd.DataFrame): K-mers of each node in the subgraph, from all assemblies. 
             It's a subset of `KmerGraph.kmers`, with index inherited. 
-            K-mers with adjacent indexes are also adjacent in the assembly sequence. 
+            K-mers with adjacent indices are also adjacent in the assembly sequence. 
         loc (pd.DataFrame): Location of the subgraph in each assembly. 
             Columns: ['assembly_idx', 'record_idx', 'start', 'stop', 'n_kmers', 
             'kmers', 'is_target', 'n_repeats', 'len']. 
@@ -104,7 +104,7 @@ class ConnectedKmers(object):
             graph (nx.Graph): A connected low-penalty subgraph of the k-mer graph `KmerGraph.graph`. 
             kmers (pd.DataFrame): K-mers of each node in the subgraph, from all assemblies. 
                 It's a subset of `KmerGraph.kmers`, with index inherited. 
-                K-mers with adjacent indexes are also adjacent in the assembly sequence. 
+                K-mers with adjacent indices are also adjacent in the assembly sequence. 
             kmerlen (int): See `Config` in `config.py`. 
         """
         self.warning = set() # warning messages for debugging
@@ -171,7 +171,7 @@ class ConnectedKmers(object):
         kmers.sort_index(inplace=True)
 
         # since a subgraph might be repetitive in an assembly, we cannot simply groupby ['assembly_idx', 'record_idx']
-        # we need to find runs of consecutive k-mers, by their indexes (index is sorted)
+        # we need to find runs of consecutive k-mers, by their indices (index is sorted)
         # if two k-mers have consecutive index, then they are also adjacent on the assembly (if on the same sequence record)
         # check KmerGraph.kmers for more info
         # consec_gp: consecutive group

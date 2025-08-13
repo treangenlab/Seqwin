@@ -315,12 +315,12 @@ class KmerGraph(object):
         # 1. build a membership matrix (use a sparse matrix to save memory)
         # each row represents a k-mer cluster, each column represents an assembly
         # if the i'th k-mer exists in the j'th assembly, then M[i, j] = 1; else M[i, j] = 0
-        kmer_idx = list(chain.from_iterable( # row indexes
+        kmer_idx = list(chain.from_iterable( # row indices
             repeat(i, len(s)) for i, s in enumerate(assembly_idx)
         ))
-        assembly_idx = list(chain.from_iterable(assembly_idx)) # col indexes
+        assembly_idx = list(chain.from_iterable(assembly_idx)) # col indices
         M = coo_matrix( # the membership matrix
-            ( # construct from three arrays: data entries, row indexes, col indexes
+            ( # construct from three arrays: data entries, row indices, col indices
                 np.ones(len(kmer_idx)), (kmer_idx, assembly_idx)
             ), 
             shape=( # N_kmers, N_assemblies
@@ -593,7 +593,7 @@ def get_kmers(
     Returns:
         tuple: A tuple containing
             1. KmerGraph: The KmerGraph instance. 
-            2. np.ndarray | None: A matrix of Jaccard indexes of all assembly pairs. 
+            2. np.ndarray | None: A matrix of Jaccard indices of all assembly pairs. 
     """
     overwrite = config.overwrite
     kmerlen = config.kmerlen

@@ -76,7 +76,7 @@ class Config(BaseModel):
         kmerlen (int): K-mer length. [21]
         windowsize (int): Window size for minimizer sketch. [200]
         penalty_th (float | None): Node penalty threshold, ranging between [0, 1]. 
-            None to compute with Jaccard indexes (capped by `penalty_th_cap`). [None]
+            None to compute with Jaccard indices (capped by `penalty_th_cap`). [None]
         stringency (int): If `penalty_th` is None (computed with Jaccard), multiply the computed penalty threshold with `(1 - x/10)`. [5]
         min_len (int): Min length of output markers. [200]
         max_len (int | None): Max length of output markers (estimated). None for no explicit limit (capped by `max_nodes_cap`). [None]
