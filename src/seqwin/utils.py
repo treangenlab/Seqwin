@@ -93,11 +93,11 @@ def print_time_delta(seconds: float) -> None:
 def log_and_raise(exception: Exception=Exception, msg: str | None=None, from_none: bool=False) -> None:
     """Log and raise an error. 
     """
-    logger.error(msg)
+    logger.critical(msg)
     if from_none:
-        raise exception(msg)
-    else:
         raise exception(msg) from None
+    else:
+        raise exception(msg)
 
 
 def overwrite_warning(path: Path) -> None:

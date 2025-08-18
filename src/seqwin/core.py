@@ -95,7 +95,7 @@ class Seqwin(object):
 
         logger.info(f'Running Seqwin v{version}')
         if n_cpu == 1:
-            logger.warning('Only one CPU thread is used, longer running time is expected')
+            logger.warning('Using only one CPU thread, longer running time is expected')
 
         # save configs
         config_path = working_dir / WORKINGDIR.config

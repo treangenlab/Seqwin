@@ -33,7 +33,7 @@ import networkx as nx
 from numba import types, typed, njit, from_dtype
 
 from .minimizer import KMER_DTYPE
-from .utils import SharedArr
+from .utils import SharedArr, log_and_raise
 from .config import NODE_P
 
 # dtypes for numpy
@@ -400,7 +400,11 @@ def get_subgraphs(
         if len(sg) >= min_nodes:
             subgraphs.append(sg)
             used |= sg
-    logger.info(f' - Found {len(subgraphs)} low-penalty subgraphs')
+
+    if len(subgraphs) > 0:
+        logger.info(f' - Found {len(subgraphs)} low-penalty subgraphs')
+    else:
+        log_and_raise(RuntimeError, 'No low-penalty subgraph was found. Try increase penalty threshold')
 
     # due to the greedy nature of node expansion, subgraphs created first are usually larger
     # by shuffling the subgraphs, we can get a more balanced distribution of sizes in downstream multiprocessing

@@ -476,10 +476,13 @@ class KmerGraph(object):
         logger.info(f' - Finding connected components...')
         subgraphs = tuple(frozenset(sg) for sg in nx.connected_components(graph))
         used = frozenset.union(*subgraphs)
-        logger.info(f' - Found {len(subgraphs)} components (low-penalty subgraphs)')
+        if len(subgraphs) > 0:
+            logger.info(f' - Found {len(subgraphs)} components (low-penalty subgraphs)')
+        else:
+            log_and_raise(RuntimeError, 'No connected component was found. Try increase penalty threshold')
 
         # remove unused k-mers
-        kmers, idx = KmerGraph.__filter_kmers(kmers, idx, used)
+        kmers, idx = filter_kmers(kmers, idx, used)
 
         print_time_delta(time()-tik)
         self.kmers = kmers
