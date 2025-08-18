@@ -644,10 +644,9 @@ def get_kmers(
         e_presence_neg = _expected_frac(jaccard[n_tar:, :n_tar])
         logger.info(f' - expected k-mer presence in non-targets: {e_presence_neg:.5f}')
 
-        stringent_e = min(e_absence_tar, e_presence_neg)
         penalty_th_mul = 1 - stringency / 10
-        penalty_th = penalty_th_mul * stringent_e
-        logger.info(f' - calculated penalty threshold: {penalty_th:.5f} ({penalty_th_mul} * {stringent_e:.5f})')
+        penalty_th = penalty_th_mul * (e_absence_tar * e_presence_neg)**0.5 # geometric mean
+        logger.info(f' - calculated penalty threshold: {penalty_th:.5f}')
 
         if penalty_th > penalty_th_cap:
             penalty_th = penalty_th_cap
