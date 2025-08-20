@@ -88,7 +88,7 @@ Run `seqwin --help` to see the full command line interface.
 
 ### Node penalty threshold (`--penalty-th`)
 Automatically calculated with [Mash](https://doi.org/10.1186/s13059-016-0997-x) by default. 
-Controls the sensitivity and specificity of output markers (default 0.2). Higher values allow longer / more markers, but might reduce sensitivity and/or specificity. Note that there's no direct mathematical relationship between sensitivity / specificity and the penalty threshold. Recommended range: 0 - 0.2. 
+Controls the sensitivity and specificity of output markers. Higher values allow longer / more markers, but might reduce sensitivity and/or specificity. Note that there's no direct mathematical relationship between sensitivity / specificity and the penalty threshold. Recommended range: 0 - 0.2. 
 
 ### Minimizer sketch
 `--kmerlen` (default 21): shorter k‑mers may help highly variable genomes (e.g. viruses). 
@@ -96,7 +96,7 @@ Controls the sensitivity and specificity of output markers (default 0.2). Higher
 `--windowsize` (default 200): smaller windows generate more minimizers and increase resolution at the cost of runtime & memory. 
 
 ### Performance tuning
-Use `--threads / -p` to leverage multiple CPU cores. You can also disable BLAST entirely (`--no-blast`) or limit it to non‑targets (`--fast-blast`) for quicker marker evaluation. 
+Use `--threads / -p` to leverage multiple CPU cores. You may also disable BLAST entirely (`--no-blast`) for quicker marker evaluation. 
 
 ## Outputs
 Seqwin creates the following files/directories inside the directory specified by `--title` (default `seqwin-out/`):
@@ -112,6 +112,8 @@ Seqwin creates the following files/directories inside the directory specified by
 | `seqwin.log`| Execution log |
 
 ## Python APIs
+
+Pending. 
 
 ## License
 
