@@ -1,9 +1,6 @@
 # Seqwin
 
-**Seqwin** is a lightning‑fast, memory‑efficient toolkit for discovering *clade‑specific genomic markers* that balance **high sensitivity** with **high specificity**. It builds a minimizer‑based pan‑assembly graph across target and neighboring non‑target genomes and extracts marker sequences using a novel graph algorithm. 
-
-> [!NOTE]
-> **Citation:** If you use Seqwin in your research, please cite: *Author et al.* “Seqwin: xxx.” *Journal* **(2025)**. DOI:10.1093/xxxx. 
+**Seqwin** is a lightning‑fast, memory‑efficient toolkit for discovering **signature sequences** (genomic markers) that balance **high sensitivity** with **high specificity**. It builds a minimizer‑based pan‑genome graph across target and neighboring non‑target genomes and extracts signature sequences using a novel graph algorithm. 
 
 ---
 
@@ -18,7 +15,7 @@
 
 ## Installation
 
-### Bioconda
+### Bioconda (pending)
 
 #### Prerequisites
 - Linux, MacOS or [WSL](https://learn.microsoft.com/en-us/windows/wsl/install)
@@ -47,6 +44,7 @@ seqwin --help
 ```
 python >=3.10
 numpy
+numba
 pandas
 networkx
 pydantic
@@ -89,8 +87,8 @@ Run `seqwin --help` to see the full command line interface.
 ## Parameters
 
 ### Node penalty threshold (`--penalty-th`)
-Calculated with [Mash](https://doi.org/10.1186/s13059-016-0997-x) by default. 
-Controls the sensitivity and specificity of output markers (default 0.2). Higher values allow longer / more markers, but might reduce sensitivity and/or specificity. Note that there's no direct mathematical relationship between sensitivity / specificity and the penalty threshold. Recommended range: 0.1 - 0.3. 
+Automatically calculated with [Mash](https://doi.org/10.1186/s13059-016-0997-x) by default. 
+Controls the sensitivity and specificity of output markers (default 0.2). Higher values allow longer / more markers, but might reduce sensitivity and/or specificity. Note that there's no direct mathematical relationship between sensitivity / specificity and the penalty threshold. Recommended range: 0 - 0.2. 
 
 ### Minimizer sketch
 `--kmerlen` (default 21): shorter k‑mers may help highly variable genomes (e.g. viruses). 
