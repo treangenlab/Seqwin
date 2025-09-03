@@ -602,6 +602,7 @@ def get_kmers(
     kmerlen = config.kmerlen
     windowsize = config.windowsize
     penalty_th = config.penalty_th
+    run_mash = config.run_mash
     stringency = config.stringency
     min_len = config.min_len
     max_len = config.max_len
@@ -617,6 +618,7 @@ def get_kmers(
     working_dir = state.working_dir
     rng = state.rng
     n_tar = state.n_tar
+    n_neg = state.n_neg
 
     kmers = KmerGraph(assemblies, kmerlen, windowsize, get_dist, n_cpu)
 
@@ -630,18 +632,28 @@ def get_kmers(
         logger.info(f'Calculating penalty threshold...')
         tik = time()
 
-        jaccard = assemblies.mash(
-            kmerlen=kmerlen, 
-            sketchsize=sketchsize, 
-            out_path=working_dir / WORKINGDIR.mash, 
-            overwrite=overwrite, 
-            n_cpu=n_cpu
-        )
+        # we only care about the presence & absence of k-mers in target assemblies
+        if run_mash:
+            jaccard = assemblies.mash(
+                kmerlen=kmerlen, 
+                sketchsize=sketchsize, 
+                out_path=working_dir / WORKINGDIR.mash, 
+                overwrite=overwrite, 
+                n_cpu=n_cpu
+            )
+            e_absence_tar = 1 - _expected_frac(jaccard[:n_tar, :n_tar])
+            e_presence_neg = _expected_frac(jaccard[n_tar:, :n_tar])
+        else:
+            # calculate expected fractions directly from minimizer sketches
+            # for tar absence or neg presence, k-mer weights should always be clusters['n_tar'] (how many target assemblies have this k-mer)
+            clusters = kmers.clusters
+            frac_tar = clusters['n_tar'] / n_tar
+            e_absence_tar = 1 - np.sum(frac_tar * clusters['n_tar']) / np.sum(clusters['n_tar'])
+            frac_neg = clusters['n_neg'] / n_neg
+            e_presence_neg = np.sum(frac_neg * clusters['n_tar']) / np.sum(clusters['n_tar'])
+            jaccard = None
 
-        e_absence_tar = 1 - _expected_frac(jaccard[:n_tar, :n_tar])
         logger.info(f' - expected k-mer absence in targets: {e_absence_tar:.5f}')
-
-        e_presence_neg = _expected_frac(jaccard[n_tar:, :n_tar])
         logger.info(f' - expected k-mer presence in non-targets: {e_presence_neg:.5f}')
 
         penalty_th_mul = 1 - stringency / 10
@@ -654,7 +666,7 @@ def get_kmers(
 
         print_time_delta(time()-tik)
     else:
-        logger.warning(f'Penalty threshold is provided (--penalty-th), skip running Mash')
+        logger.warning(f'Penalty threshold is provided (--penalty-th), skip auto estimation')
         jaccard = None
 
     # 2. calculate edge weight threshold

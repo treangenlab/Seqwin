@@ -50,11 +50,11 @@ def main(
     ), 
     tar_paths: Path | None = typer.Option(
         None, '--tar-paths', show_default=False, 
-        help='A text file of paths to target assemblies in FASTA format (gzip supported), with one path per line.'
+        help='A text file of paths to target genomes in FASTA format (gzip supported), with one path per line.'
     ), 
     neg_paths: Path | None = typer.Option(
         None, '--neg-paths', show_default=False, 
-        help='A text file of paths to non-target assemblies in FASTA format (gzip supported), with one path per line.'
+        help='A text file of paths to non-target genomes in FASTA format (gzip supported), with one path per line.'
     ), 
     prefix: Path = typer.Option(
         Path.cwd(), '--prefix', help='Path prefix for the output directory. Use the current directory by default.'
@@ -75,6 +75,11 @@ def main(
     penalty_th: float | None = typer.Option(
         None, '--penalty-th', show_default=False, 
         help='Node penalty threshold (0-1). Automatically computed if not provided.'
+    ), 
+    run_mash: bool = typer.Option(
+        True, '--no-mash', is_flag=True, flag_value=False, show_default=False, 
+        help='Do NOT run Mash to estimate node penalty threshold. Instead, use minimizer sketches (faster but might be biased). ' \
+        'Used only if --penalty-th is not provided (auto mode).'
     ), 
     stringency: int = typer.Option(
         5, '--stringency', '-s', show_default=True, 
@@ -99,7 +104,7 @@ def main(
         42, '--seed', help='Random seed for reproducibility.'
     ), 
     n_cpu: int = typer.Option(
-        1, '--threads', '-p', help='Number of threads to use.'
+        1, '--threads', '-p', help='Number of parallel processes (CPU cores) to use.'
     ), 
     level: Level = typer.Option(
         Level.contig, '--level', metavar='TEXT', # hide choices
@@ -154,6 +159,7 @@ def main(
         kmerlen=kmerlen, 
         windowsize=windowsize, 
         penalty_th=penalty_th, 
+        run_mash=run_mash, 
         stringency=stringency, 
         min_len=min_len, 
         max_len=max_len, 

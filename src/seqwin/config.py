@@ -77,6 +77,7 @@ class Config(BaseModel):
         windowsize (int): Window size for minimizer sketch. [200]
         penalty_th (float | None): Node penalty threshold, ranging between [0, 1]. 
             None to compute with Jaccard indices (capped by `penalty_th_cap`). [None]
+        run_mash (bool): If True, use MinHash sketches (Mash) to estimate penalty_th; else use minimizer sketches (faster but might be biased). [True]
         stringency (int): If `penalty_th` is None (computed with Jaccard), multiply the computed penalty threshold with `(1 - x/10)`. [5]
         min_len (int): Min length of output markers. [200]
         max_len (int | None): Max length of output markers (estimated). None for no explicit limit (capped by `max_nodes_cap`). [None]
@@ -120,6 +121,7 @@ class Config(BaseModel):
     kmerlen: int = 21
     windowsize: int = 200
     penalty_th: float | None = None
+    run_mash: bool = True
     stringency: int = 5
     min_len: int = 200
     max_len: int | None = None
