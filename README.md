@@ -8,21 +8,20 @@
 
 1. [Installation](#installation)
 2. [Quick start](#quick-start)
-3. [Parameters](#parameters)
+3. [Key parameters](#key-parameters)
 4. [Outputs](#outputs)
-5. [Python APIs](#python-apis)
 5. [License](#license)
 
 ## Installation
 
-### Bioconda (pending)
+### Bioconda (recommended)
 
 #### Prerequisites
-- Linux, MacOS or [WSL](https://learn.microsoft.com/en-us/windows/wsl/install)
+- Linux, macOS, or Windows via [WSL](https://learn.microsoft.com/en-us/windows/wsl/install)
 - x64 or ARM64
 - conda (install with [miniforge](https://github.com/conda-forge/miniforge#install) or [miniconda](https://www.anaconda.com/docs/getting-started/miniconda/install#quickstart-install-instructions))
 
-#### 1. Create a new Conda environment called "seqwin" and install Seqwin via Bioconda
+#### 1. Create a new Conda environment "seqwin" and install Seqwin via Bioconda
 ```bash
 conda create -n seqwin seqwin \
   --channel conda-forge \
@@ -38,22 +37,21 @@ conda activate seqwin
 seqwin --help
 ```
 
-### PypI
+### Manual installation
 
-#### 1. Install dependencies
-```
-python >=3.10
-numpy
-numba
-pandas
-networkx
-pydantic
-typer
-btllib
-mash
-blast
-ncbi-datasets-cli
-```
+#### 1. Install dependencies (e.g., via conda)
+
+> [python](https://www.python.org/) >=3.10  
+> [numpy](https://numpy.org/) >=2  
+> [numba](https://numba.pydata.org/)  
+> [pandas](https://pandas.pydata.org/) >=2  
+> [networkx](https://networkx.org/)  
+> [pydantic](https://docs.pydantic.dev/latest/)  
+> [typer](https://typer.tiangolo.com/)  
+> [btllib](https://github.com/bcgsc/btllib)  
+> [mash](https://github.com/marbl/Mash)  
+> [blast](https://www.ncbi.nlm.nih.gov/books/NBK279690/)  
+> [ncbi-datasets-cli](https://www.ncbi.nlm.nih.gov/datasets/docs/v2/reference-docs/command-line/datasets/)
 
 #### 2. Clone this repository and install with `pip`
 ```bash
@@ -73,47 +71,48 @@ seqwin \
   -n "Salmonella bongori" \
   -p 8
 ```
-Outputs are written to `seqwin-out/` in your working directory. Names must be exact matches (search via [NCBI Taxonomy](https://www.ncbi.nlm.nih.gov/datasets/taxonomy/tree/)). 
+Outputs are written to `seqwin-out/` in your working directory (see [Outputs](#outputs)). Names must be exact matches (search via [NCBI Taxonomy](https://www.ncbi.nlm.nih.gov/datasets/taxonomy/tree/)). 
 
 Alternatively, a list of target or non-target genomes can be provided as a text file of file paths. Each line of the text file should be a path to a genome file in FASTA format (plain text or compressed in gzip). 
 ```bash
-seqwin --tar-paths targets.txt --neg-paths neighbors.txt
+seqwin --tar-paths targets.txt --neg-paths non-targets.txt
 ```
 
-Expected runtime: ~10min for 550+ bacterial genomes using 20 threads. 
+Expected runtime (with `--threads 20`): ~10min for 500+ bacterial genomes with default settings, or 10k+ bacterial genomes with `--no-blast` and `--no-mash`. 
 
 Run `seqwin --help` to see the full command line interface. 
 
-## Parameters
+## Key parameters
 
 ### Node penalty threshold (`--penalty-th`)
-Automatically calculated with [Mash](https://doi.org/10.1186/s13059-016-0997-x) by default. 
-Controls the sensitivity and specificity of output markers. Higher values allow longer / more markers, but might reduce sensitivity and/or specificity. Note that there's no direct mathematical relationship between sensitivity / specificity and the penalty threshold. Recommended range: 0 - 0.2. 
+Controls the sensitivity and specificity of output markers. Higher values allow longer / more markers, but might reduce sensitivity and/or specificity. 
+
+When `--penalty-th` is not specified, it is automatically estimated with k-mer sketches. MinHash sketches ([Mash](https://doi.org/10.1186/s13059-016-0997-x)) are used by default. If `--no-mash` is provided, minimizer sketches are used instead (faster but might be biased). Use `--stringency` or `-s` to tune this estimated threshold (higher stringency lowers the threshold). 
+
+### Marker evaluation
+
+By default, output markers are BLAST checked against target genomes for sensitivity (conservation), and non-target genomes for specificity (divergence). Markers are sorted by conservation and divergence, which can be found in `markers.csv`. Evaluation can be turned off with `--no-blast` for shorter running time. In that case, output markers are still very likely to be sensitive and specific, but without second validation of BLAST. 
 
 ### Minimizer sketch
-`--kmerlen` (default 21): shorter k‑mers may help highly variable genomes (e.g. viruses). 
+`--kmerlen` (default 21): shorter k‑mers may be helpful for highly variable genomes (e.g. viruses). 
 
 `--windowsize` (default 200): smaller windows generate more minimizers and increase resolution at the cost of runtime & memory. 
 
 ### Performance tuning
-Use `--threads / -p` to leverage multiple CPU cores. You may also disable BLAST entirely (`--no-blast`) for quicker marker evaluation. 
+Use `--threads / -p` to leverage multiple CPU cores. Add `--no-mash` and `--no-blast` for fastest running time. 
 
 ## Outputs
 Seqwin creates the following files/directories inside the directory specified by `--title` (default `seqwin-out/`):
-| Name &nbsp; &nbsp; &nbsp; | Description|
-| :-------  | :-------- | 
-| `markers.fasta`| Candidate marker sequences sorted by `purity + divergence` |
+| Name | Description|
+| :-------  | :-------- |
+| `markers.fasta`| Candidate marker sequences (best candidates are listed first) |
 | `markers.csv`| Tabulated metrics for each marker |
 | `assemblies.csv`| Mapping of internal genome IDs to file paths (used in `markers.fasta`) |
 | `blastdb/`| Generated BLAST database. |
 | `assemblies/`| Genomes downloaded from NCBI |
-| `results.seqwin`| Serialized run snapshot (pickle) |
+| `results.seqwin`| Serialized run snapshot (Python pickle) |
 | `config.json`| Full run configuration |
 | `seqwin.log`| Execution log |
-
-## Python APIs
-
-Pending. 
 
 ## License
 

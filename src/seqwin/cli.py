@@ -83,7 +83,8 @@ def main(
     ), 
     stringency: int = typer.Option(
         5, '--stringency', '-s', show_default=True, 
-        help='Stringency level (0-10) for the sensitivity and specificity of output markers. Used only if --penalty-th is not provided (auto mode).'
+        help='Stringency level (0-10) for the sensitivity and specificity of output markers. ' \
+        'Higher levels result in lower estimated node penalty thresholds. Used only if --penalty-th is not provided (auto mode).'
     ), 
     min_len: int = typer.Option(
         200, '--min-len', help='Min length of output markers.'
