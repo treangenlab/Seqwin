@@ -70,15 +70,15 @@ class ConnectedKmers(object):
         len (int): Length of the representative sequence. 
         n_rep (int): Number of assemblies having the same k-mer order as the representative. 
         blast (pd.DataFrame | None): The best BLAST hit of the representative sequence in each assembly. 
-        purity (float | None): 
-        divergence (float | None): 
-        rep_ratio (float | None): 
+        conservation (float | None): Average fraction of identical bases between the representative and target assemblies. 
+        divergence (float | None): Average fraction of mismatches and gaps between the representative and non-target assemblies. 
+        rep_ratio (float | None): Fraction of target assemblies that have the same k-mer ordering as the representative. 
         warning (set): Warning messages for debugging. 
         is_bad (bool): If True, this instance is not considered in downstream processing. 
     """
     __slots__ = (
         'graph', 'kmers', 'loc', 'path', 'rep', 'len', 'n_rep', 'blast', 
-        'purity', 'divergence', 'rep_ratio', 'warning', 'is_bad'
+        'conservation', 'divergence', 'rep_ratio', 'warning', 'is_bad'
     )
     graph: nx.Graph
     kmers: pd.DataFrame
@@ -88,7 +88,7 @@ class ConnectedKmers(object):
     len: int
     n_rep: int
     blast: pd.DataFrame | None
-    purity: float | None
+    conservation: float | None
     divergence: float | None
     rep_ratio: float | None
     warning: set
@@ -148,7 +148,7 @@ class ConnectedKmers(object):
         self.len = rep['len']
         self.n_rep = n_rep
         self.blast = None
-        self.purity = None
+        self.conservation = None
         self.divergence = None
         self.rep_ratio = None
 
@@ -627,8 +627,8 @@ def _get_avg_dist(blast_out: pd.DataFrame, query_len: int, n: int) -> float:
 def _get_scores(
     blast_out: pd.DataFrame, marker_len: int, n_tar: int | None=None, n_neg: int | None=None
 ) -> tuple[float | None, float | None]:
-    """Calculate the purity and divergence of a marker based on its BLAST hits in all assemblies. 
-    - Purity is calculated with `_get_avg_ident()` on target assemblies. 
+    """Calculate the conservation and divergence of a marker based on its BLAST hits in all assemblies. 
+    - Conservation is calculated with `_get_avg_ident()` on target assemblies. 
     - Divergence is calculated with `_get_avg_dist()` on non-target assemblies. 
         For assemblies with no hit, divergence is assumed to be `NO_BLAST_DIST` in `config.py`. 
     
@@ -636,16 +636,16 @@ def _get_scores(
         blast_out (pd.DataFrame): Each row is the best BLAST hit of the marker in a assembly. 
             Required columns: ['is_target', 'nident', 'mismatch', 'gaps']
         marker_len (int): Marker length. 
-        n_tar (int | None): Number of target assemblies. If None, purity is not calculated. 
+        n_tar (int | None): Number of target assemblies. If None, conservation is not calculated. 
         n_neg (int | None): Number of non-target assemblies. If None, divergence is not calculated. 
     
     Returns:
-        tuple: (purity, divergence)
+        tuple: (conservation, divergence)
     """
-    if n_tar is None: # do not calculate purity
-        purity = None
+    if n_tar is None: # do not calculate conservation
+        conservation = None
     else:
-        purity = .0 # purity value when no blast hit in target assemblies
+        conservation = .0 # conservation value when no blast hit in target assemblies
 
     if n_neg is None: # do not calculate divergence
         divergence = None
@@ -653,12 +653,12 @@ def _get_scores(
         divergence = NO_BLAST_DIV # divergence value when no blast hit in non-target assemblies
 
     if blast_out is None: # no blast hit in any assembly
-        return purity, divergence
+        return conservation, divergence
 
-    # calculate purity
+    # calculate conservation
     if n_tar is not None:
         df_tar = blast_out[blast_out['is_target'] == True]
-        purity = _get_avg_ident(df_tar, marker_len, n_tar)
+        conservation = _get_avg_ident(df_tar, marker_len, n_tar)
 
     # calculate divergence
     if n_neg is not None:
@@ -666,13 +666,13 @@ def _get_scores(
         divergence = _get_avg_dist(df_neg, marker_len, n_neg)
         divergence += NO_BLAST_DIV * (n_neg - len(df_neg)) / n_neg
 
-    return purity, divergence
+    return conservation, divergence
 
 
 def eval_markers(
     all_seqs: list[str], blastdb: Path, n_tar: int, n_neg: int, n_cpu: int=1
 ) -> tuple[list[pd.DataFrame], list[float], list[float]]:
-    """BLAST check each marker sequence against all / non-target assemblies, and calcuate the purity and divergence of each marker. 
+    """BLAST check each marker sequence against all / non-target assemblies, and calcuate the conservation and divergence of each marker. 
     
     Args:
         all_seqs (list[str]): A list of marker sequences. 
@@ -684,7 +684,7 @@ def eval_markers(
     Returns:
         tuple: A tuple containing
             1. all_blast (list[pd.DataFrame]): BLAST hits of each marker. 
-            2. all_purity (list[float]): Purity of each marker. 
+            2. all_conservation (list[float]): Conservation of each marker. 
             2. all_divergence (list[float]): Divergence of each marker. 
     """
     if blastdb.name == BLASTCONFIG.title_neg_only:
@@ -743,10 +743,10 @@ def eval_markers(
             if b is None:
                 logger.warning(f'Marker at index {i} (0-based) has no BLAST hit in any assembly ({all_seqs[i][:10]}...)')
 
-    # calculate purity and divergence for each marker based on its blast output
+    # calculate conservation and divergence for each marker based on its blast output
     logger.info(' - Evaluating each marker...')
     if neg_only:
-        # do not calculate purity since target assemblies are not included in the BLAST database
+        # do not calculate conservation since target assemblies are not included in the BLAST database
         n_tar = None
     scores_args = zip(
         all_blast, 
@@ -754,12 +754,12 @@ def eval_markers(
         repeat(n_tar, n_seqs), 
         repeat(n_neg, n_seqs)
     )
-    all_purity, all_divergence = mp_wrapper(
+    all_conservation, all_divergence = mp_wrapper(
         _get_scores, scores_args, n_cpu, unpack_output=True, n_jobs=n_seqs
     )
 
     print_time_delta(time()-tik)
-    return all_blast, all_purity, all_divergence
+    return all_blast, all_conservation, all_divergence
 
 
 def _eval_cks(
@@ -767,9 +767,9 @@ def _eval_cks(
 ) -> None:
     """
     1. BLAST check the representative sequence of each ConnectedKmers instance (ck), against all / non-target assemblies. 
-    2. Calculate the purity and divergence for each ck. 
+    2. Calculate the conservation and divergence for each ck. 
     3. Update the attributes of each ck. 
-    4. Sort all_cks by purity + divergence. 
+    4. Sort all_cks by conservation + divergence. 
     
     Args:
         all_cks (list[ConnectedKmers]): ConnectedKmers instances. 
@@ -783,11 +783,11 @@ def _eval_cks(
     results = eval_markers(all_reps, blastdb, n_tar, n_neg, n_cpu)
 
     # update attributes of each ck
-    for ck, blast, purity, divergence in zip(all_cks, *results):
-        ck.blast, ck.purity, ck.divergence = blast, purity, divergence
+    for ck, blast, conservation, divergence in zip(all_cks, *results):
+        ck.blast, ck.conservation, ck.divergence = blast, conservation, divergence
 
     # sort in-place
-    all_cks.sort(key=lambda ck: ck.purity+ck.divergence, reverse=True)
+    all_cks.sort(key=lambda ck: ck.conservation+ck.divergence, reverse=True)
 
 
 def get_markers(
@@ -846,7 +846,7 @@ def get_markers(
         header = f'{assembly_idx}-{record_id}-{rep.start}:{rep.stop}'
         fasta += f'>{header}\n{rep.seq}\n'
         csv.append(
-            (header, ck.len, ck.purity, ck.divergence, ck.rep_ratio, rep.n_kmers)
+            (header, ck.len, ck.conservation, ck.divergence, ck.rep_ratio, rep.n_kmers)
         )
     markers_fasta.write_text(fasta)
     logger.info(f'Candidate markers saved as {markers_fasta}')
@@ -856,7 +856,7 @@ def get_markers(
     file_to_write(markers_csv, overwrite)
     pd.DataFrame(
         csv, 
-        columns=('fasta_header', 'length', 'purity', 'divergence', 'rep_ratio', 'n_nodes')
+        columns=('fasta_header', 'length', 'conservation', 'divergence', 'rep_ratio', 'n_nodes')
     ).to_csv(markers_csv, index=False)
     logger.info(f'Metrics of candidate markers saved as {markers_csv}')
 
