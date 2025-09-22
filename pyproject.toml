@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "seqwin"
 dynamic = ["version"]
-description = "Seqwin: rapid and sensitive search of clade-specific microbial marker sequences via minimizer graphs"
+description = "Seqwin: Ultrafast identification of signature sequences in microbial genomes via minimizer graphs"
 readme = "README.md"
 authors = [
     { name = "Michael X. Wang", email = "xw66@rice.edu" }
