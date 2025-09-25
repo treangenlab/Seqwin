@@ -63,7 +63,7 @@ def main(
         'seqwin-out', '--title', '-o', help='Name of the output directory.'
     ), 
     overwrite: bool = typer.Option(
-        False, '--overwrite', is_flag=True, flag_value=True, 
+        False, '--overwrite', show_default=False, 
         help='Overwrite existing output files.'
     ), 
     kmerlen: int = typer.Option(
@@ -76,8 +76,9 @@ def main(
         None, '--penalty-th', show_default=False, 
         help='Node penalty threshold (0-1). Automatically computed if not provided.'
     ), 
-    run_mash: bool = typer.Option(
-        True, '--no-mash', is_flag=True, flag_value=False, show_default=False, 
+    # always default flags to False (can be reversed later in the function body)
+    no_mash: bool = typer.Option(
+        False, '--no-mash', show_default=False, 
         help='Do NOT run Mash to estimate node penalty threshold. Instead, use minimizer sketches (faster but might be biased). ' \
         'Used only if --penalty-th is not provided (auto mode).'
     ), 
@@ -93,8 +94,8 @@ def main(
         None, '--max-len', show_default=False, 
         help='Max length of output markers (estimated). No explicit limit if not provided.'
     ), 
-    run_blast: bool = typer.Option(
-        True, '--no-blast', is_flag=True, flag_value=False, show_default=False, 
+    no_blast: bool = typer.Option(
+        False, '--no-blast', show_default=False, 
         help='Do NOT evaluate (BLAST) marker sequences.'
     ), 
     # blast_neg_only: bool = typer.Option(
@@ -116,24 +117,24 @@ def main(
         help="NCBI download option. Genome source ('genbank' or 'refseq')."
     ), 
     annotated: bool = typer.Option(
-        False, '--annotated', is_flag=True, flag_value=True, show_default=False, 
+        False, '--annotated', show_default=False, 
         help='NCBI download option. Only include annotated genomes.'
     ), 
     exclude_mag: bool = typer.Option(
-        False, '--exclude-mag', is_flag=True, flag_value=True, show_default=False, 
+        False, '--exclude-mag', show_default=False, 
         help='NCBI download option. Exclude metagenome-assembled genomes (MAGs).'
     ), 
-    gzip: bool = typer.Option(
-        True, '--no-gzip', is_flag=True, flag_value=False, show_default=False, 
+    no_gzip: bool = typer.Option(
+        False, '--no-gzip', show_default=False, 
         help='NCBI download option. Do NOT download genomes as gzipped FASTA.'
     ), 
     download_only: bool = typer.Option(
-        False, '--download-only', is_flag=True, flag_value=True, show_default=False, 
+        False, '--download-only', show_default=False, 
         help='Only download genome sequences without running Seqwin.'
     ), 
     version: bool = typer.Option(
-        False, '--version', callback=print_version, is_eager=True, # run this before any other options
-        is_flag=True, flag_value=True, show_default=False, 
+        False, '--version', callback=print_version, show_default=False, 
+        is_eager=True, # run this before any other options
         help='Show Seqwin version and exit.'
     )
 ):
@@ -160,11 +161,11 @@ def main(
         kmerlen=kmerlen, 
         windowsize=windowsize, 
         penalty_th=penalty_th, 
-        run_mash=run_mash, 
+        run_mash=not no_mash, 
         stringency=stringency, 
         min_len=min_len, 
         max_len=max_len, 
-        run_blast=run_blast, 
+        run_blast=not no_blast, 
         #blast_neg_only=blast_neg_only, 
         seed=seed, 
         n_cpu=n_cpu, 
@@ -172,7 +173,7 @@ def main(
         source=source, 
         annotated=annotated, 
         exclude_mag=exclude_mag, 
-        gzip=gzip, 
+        gzip=not no_gzip, 
         download_only=download_only
     )
     _ = run(config)
