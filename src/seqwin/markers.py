@@ -35,7 +35,7 @@ from pathlib import Path
 from time import time
 from itertools import repeat
 from collections import Counter
-from collections.abc import Generator
+from collections.abc import Mapping, Generator
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +51,7 @@ from .utils import print_time_delta, log_and_raise, file_to_write, mp_wrapper, m
 from .config import Config, RunState, WORKINGDIR, BLASTCONFIG, CONSEC_KMER_TH, LEN_TH_MUL, NO_BLAST_DIV
 
 # Translation table for complement k-mer strands, deprecated. ['+' -> '-', '-' -> '+']
-_KMER_STRAND_COMP: dict[str, str] = str.maketrans('+-', '-+')
+_KMER_STRAND_COMP: Mapping[str, str] = str.maketrans('+-', '-+')
 
 
 class ConnectedKmers(object):
@@ -231,10 +231,10 @@ class ConnectedKmers(object):
         """
         # count the number of each unique k-mer ordering in target assemblies
         tar_kmers = loc[loc['is_target'] == True]['kmers']
-        c: dict[tuple, int] = Counter(tar_kmers)
+        c: Mapping[tuple, int] = Counter(tar_kmers)
 
         # count the number of each unique canonical k-mer ordering (regardless of orientation)
-        c_canonical: dict[tuple, int] = Counter()
+        c_canonical: Mapping[tuple, int] = Counter()
         for kmers, n in c.items():
             c_canonical[
                 sorted((kmers, kmers[::-1]))[0]
