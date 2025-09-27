@@ -49,8 +49,9 @@ logging.basicConfig(
 
 from pathlib import Path
 from random import Random
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import MappingProxyType
+from collections.abc import Mapping
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -247,8 +248,8 @@ class BlastConfig:
         title_neg_only (str): DB title when created from non-target assemblies only. ['neg-only']
         title_all (str): DB title when created from all assemblies. ['all']
         queue_size (int): Max queue size when streaming FASTA files to stdin of `makeblastdb`, to limit memory usage. [50]
-        bool2str (dict[bool, str]): Mapping of bool to string. [True -> 'y', False -> 'n']
-        str2bool (dict[str, bool]): Reversed mapping of bool2str for parsing BLAST outputs. ['y' -> True, 'n' -> False]
+        bool2str (Mapping[bool, str]): Mapping of bool to string. [True -> 'y', False -> 'n']
+        str2bool (Mapping[str, bool]): Reversed mapping of bool2str for parsing BLAST outputs. ['y' -> True, 'n' -> False]
         header_sep (str): Separator used in FASTA headers. Should pick a rare char (cannot be '$', BLAST treats it as a special char). ['@']
         task (str): Presets for BLAST parameters ('blastn', 'blastn-short', 'megablast'). ['blastn']
         columns (tuple[str]): Columns to be included in the BLAST TSV output. See `ncbi.py` for more information. 
@@ -257,14 +258,13 @@ class BlastConfig:
     title_neg_only: str = 'neg-only'
     title_all: str = 'all'
     queue_size: int = 50
-    bool2str: dict[bool, str] = MappingProxyType({ # a dict cannot be used as the default value in a dataclass
-        True: 'y', 
-        False: 'n'
-    })
-    str2bool: dict[str, bool] = MappingProxyType({
-        'y': True, 
-        'n': False
-    })
+    bool2str: Mapping[bool, str] = field( # a dict cannot be used as the default value in a dataclass
+        # MappingProxyType is not hashable until python 3.12, so have to use default_factory for compatibility
+        default_factory=lambda: MappingProxyType({True: 'y', False: 'n'})
+    )
+    str2bool: Mapping[str, bool] = field(
+        default_factory=lambda: MappingProxyType({'y': True, 'n': False})
+    )
     header_sep: str = '@'
     task: Task = Task.blastn
     columns: tuple[str] = (
