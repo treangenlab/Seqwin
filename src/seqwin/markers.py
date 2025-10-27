@@ -78,7 +78,7 @@ class ConnectedKmers(object):
     """
     __slots__ = (
         'graph', 'kmers', 'loc', 'path', 'rep', 'len', 'n_rep', 'blast', 
-        'conservation', 'divergence', 'rep_ratio', 'warning', 'is_bad'
+        'conservation', 'divergence', 'f_neg_hits', 'rep_ratio', 'warning', 'is_bad'
     )
     graph: nx.Graph
     kmers: pd.DataFrame
@@ -90,6 +90,7 @@ class ConnectedKmers(object):
     blast: pd.DataFrame | None
     conservation: float | None
     divergence: float | None
+    f_neg_hits: float | None
     rep_ratio: float | None
     warning: set
     is_bad: bool
@@ -150,6 +151,7 @@ class ConnectedKmers(object):
         self.blast = None
         self.conservation = None
         self.divergence = None
+        self.f_neg_hits = None
         self.rep_ratio = None
 
     @staticmethod
@@ -626,11 +628,12 @@ def _get_avg_dist(blast_out: pd.DataFrame, query_len: int, n: int) -> float:
 
 def _get_scores(
     blast_out: pd.DataFrame, marker_len: int, n_tar: int | None=None, n_neg: int | None=None
-) -> tuple[float | None, float | None]:
+) -> tuple[float | None, float | None, float | None]:
     """Calculate the conservation and divergence of a marker based on its BLAST hits in all assemblies. 
     - Conservation is calculated with `_get_avg_ident()` on target assemblies. 
     - Divergence is calculated with `_get_avg_dist()` on non-target assemblies. 
         For assemblies with no hit, divergence is assumed to be `NO_BLAST_DIST` in `config.py`. 
+    - Count the fraction of non-target assemblies with a BLAST hit. 
     
     Args:
         blast_out (pd.DataFrame): Each row is the best BLAST hit of the marker in a assembly. 
@@ -640,7 +643,7 @@ def _get_scores(
         n_neg (int | None): Number of non-target assemblies. If None, divergence is not calculated. 
     
     Returns:
-        tuple: (conservation, divergence)
+        tuple: (conservation, divergence, f_neg_hits)
     """
     if n_tar is None: # do not calculate conservation
         conservation = None
@@ -649,11 +652,13 @@ def _get_scores(
 
     if n_neg is None: # do not calculate divergence
         divergence = None
+        f_neg_hits = None
     else:
         divergence = NO_BLAST_DIV # divergence value when no blast hit in non-target assemblies
+        f_neg_hits = .0
 
     if blast_out is None: # no blast hit in any assembly
-        return conservation, divergence
+        return conservation, divergence, f_neg_hits
 
     # calculate conservation
     if n_tar is not None:
@@ -665,13 +670,14 @@ def _get_scores(
         df_neg = blast_out[blast_out['is_target'] == False]
         divergence = _get_avg_dist(df_neg, marker_len, n_neg)
         divergence += NO_BLAST_DIV * (n_neg - len(df_neg)) / n_neg
+        f_neg_hits = len(df_neg) / n_neg
 
-    return conservation, divergence
+    return conservation, divergence, f_neg_hits
 
 
 def eval_markers(
     all_seqs: list[str], blastdb: Path, n_tar: int, n_neg: int, n_cpu: int=1
-) -> tuple[list[pd.DataFrame], list[float], list[float]]:
+) -> tuple[list[pd.DataFrame], list[float], list[float], list[float]]:
     """BLAST check each marker sequence against all / non-target assemblies, and calcuate the conservation and divergence of each marker. 
     
     Args:
@@ -754,12 +760,12 @@ def eval_markers(
         repeat(n_tar, n_seqs), 
         repeat(n_neg, n_seqs)
     )
-    all_conservation, all_divergence = mp_wrapper(
+    all_conservation, all_divergence, all_f_neg_hits = mp_wrapper(
         _get_scores, scores_args, n_cpu, unpack_output=True, n_jobs=n_seqs
     )
 
     print_time_delta(time()-tik)
-    return all_blast, all_conservation, all_divergence
+    return all_blast, all_conservation, all_divergence, all_f_neg_hits
 
 
 def _eval_cks(
@@ -783,8 +789,8 @@ def _eval_cks(
     results = eval_markers(all_reps, blastdb, n_tar, n_neg, n_cpu)
 
     # update attributes of each ck
-    for ck, blast, conservation, divergence in zip(all_cks, *results):
-        ck.blast, ck.conservation, ck.divergence = blast, conservation, divergence
+    for ck, blast, conservation, divergence, f_neg_hits in zip(all_cks, *results):
+        ck.blast, ck.conservation, ck.divergence, ck.f_neg_hits = blast, conservation, divergence, f_neg_hits
 
     # sort in-place
     all_cks.sort(key=lambda ck: ck.conservation+ck.divergence, reverse=True)
@@ -846,7 +852,7 @@ def get_markers(
         header = f'{assembly_idx}-{record_id}-{rep.start}:{rep.stop}'
         fasta += f'>{header}\n{rep.seq}\n'
         csv.append(
-            (header, ck.len, ck.conservation, ck.divergence, ck.rep_ratio, rep.n_kmers)
+            (header, ck.len, ck.conservation, ck.divergence, ck.f_neg_hits, ck.rep_ratio, rep.n_kmers)
         )
     markers_fasta.write_text(fasta)
     logger.info(f'Candidate markers saved as {markers_fasta}')
@@ -856,7 +862,7 @@ def get_markers(
     file_to_write(markers_csv, overwrite)
     pd.DataFrame(
         csv, 
-        columns=('fasta_header', 'length', 'conservation', 'divergence', 'rep_ratio', 'n_nodes')
+        columns=('fasta_header', 'length', 'conservation', 'divergence', 'f_neg_hits', 'rep_ratio', 'n_nodes')
     ).to_csv(markers_csv, index=False)
     logger.info(f'Metrics of candidate markers saved as {markers_csv}')
 
