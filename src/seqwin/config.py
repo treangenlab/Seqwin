@@ -235,8 +235,8 @@ class WorkingDir:
     mash: str = 'sketches'
     blast_dir: str = 'blastdb'
     blast_log: str = 'makeblastdb.log'
-    markers_fasta: str = 'markers.fasta'
-    markers_csv: str = 'markers.csv'
+    markers_fasta: str = 'signatures.fasta'
+    markers_csv: str = 'signatures.csv'
     results: str = 'results.seqwin'
 
 
