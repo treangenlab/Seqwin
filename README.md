@@ -66,7 +66,7 @@ seqwin --help
 
 ## Quick start
 
-Identify signatures by providing a target taxonomy name and one or more non-target neighbors. 
+Identify signatures by providing one or more target taxa and non-target neighboring taxa. 
 ```bash
 seqwin \
   -t "Salmonella enterica subsp. enterica" \
@@ -74,11 +74,17 @@ seqwin \
   -n "Salmonella bongori" \
   -p 8
 ```
-Outputs are written to `seqwin-out/` in your working directory (see [Outputs](#outputs)). Names must be exact matches to [NCBI Taxonomy](https://www.ncbi.nlm.nih.gov/datasets/taxonomy/tree/). 
+Outputs are written to `seqwin-out/` in your working directory (see [Outputs](#outputs)). Taxa names must be exact matches to [NCBI Taxonomy](https://www.ncbi.nlm.nih.gov/datasets/taxonomy/tree/). 
 
-Alternatively, a list of target or non-target genomes can be provided as a text file of file paths. Each line of the text file should be a path to a genome file in FASTA format (plain text or compressed in gzip). 
+Alternatively, a list of target or non-target genomes can be provided as a text file of file paths. Each line of the text file should be the path to a genome file in FASTA format (plain text or compressed in gzip). 
 ```bash
 seqwin --tar-paths targets.txt --neg-paths non-targets.txt
+```
+Below is an example of `targets.txt` or `non-targets.txt`
+```bash
+./genomes/GCA_003718275.1_ASM371827v1_genomic.fna
+/data/genomes/GCA_000389055.1_46.E.09_genomic.fna
+/data/genomes/GCA_008363955.1_ASM836395v1_genomic.fna.gz
 ```
 
 Expected runtime (with `-p 20`): ~10min for ~500 bacterial genomes with default settings, or ~15k bacterial genomes with `--no-blast` and `--no-mash`. 
