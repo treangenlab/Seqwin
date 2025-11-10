@@ -13,7 +13,7 @@
 2. [Quick start](#quick-start)
 3. [Key parameters](#key-parameters)
 4. [Outputs](#outputs)
-5. [License](#license)
+5. [Publication](#publication)
 
 ## Installation
 
@@ -123,6 +123,6 @@ Seqwin creates the following files/directories inside the directory specified by
 | `config.json`| Full run configuration |
 | `seqwin.log`| Execution log |
 
-## License
+## Publication
 
-Seqwin is released under the **GPL 3.0**. See [LICENSE](LICENSE) for details. 
+**Michael X. Wang, Bryce Kille, Michael G. Nute, Siyi Zhou, Lauren B. Stadler, and Todd J. Treangen** ["Seqwin: Ultrafast identification of signature sequences in microbial genomes"](https://doi.org/10.1101/2025.11.07.687294). *bioRxiv* (2025).
