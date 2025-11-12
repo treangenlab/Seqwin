@@ -26,6 +26,7 @@ __author__ = 'Michael X. Wang'
 __license__ = 'GPL 3.0'
 
 import logging, pickle
+from pathlib import Path
 from random import Random
 
 logger = logging.getLogger(__name__)
@@ -158,3 +159,17 @@ def run(config: Config) -> Seqwin:
     if not config.download_only:
         seqwin.run()
     return seqwin
+
+
+def load(path: str | Path) -> Seqwin:
+    """Run Seqwin. 
+    
+    Args:
+        path (Path): Path to the Seqwin run snapshot (`results.seqwin`). 
+
+    Returns:
+        Seqwin: The Seqwin run instance. 
+    """
+    if isinstance(path, str):
+        path = Path(path)
+    return pickle.loads(path.read_bytes())

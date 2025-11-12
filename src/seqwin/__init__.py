@@ -51,4 +51,4 @@ from ._version import __version__
 __license__ = 'GPL 3.0'
 
 from .config import Config # import first to init logger
-from .core import Seqwin, run
+from .core import Seqwin, run, load
