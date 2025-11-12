@@ -96,22 +96,22 @@ Run `seqwin --help` to see the full command line interface.
 ### Node penalty threshold
 The node penalty threshold (`--penalty-th`) controls the sensitivity and specificity of output signatures. Higher values allow longer / more signatures, but might reduce sensitivity and/or specificity. 
 
-When `--penalty-th` is not specified, it is automatically estimated with k-mer sketches. MinHash sketches (calculated with [Mash](https://doi.org/10.1186/s13059-016-0997-x)) are used by default. If `--no-mash` is provided, minimizer sketches are used instead (faster but might be biased). Use `--stringency` or `-s` to tune this auto-estimated threshold (higher stringency lowers the threshold). 
+When `--penalty-th` is not specified, it is automatically estimated with k-mer sketches. MinHash sketches (calculated with [Mash](https://doi.org/10.1186/s13059-016-0997-x)) are used by default. If `--no-mash` is provided, minimizer sketches are used instead (faster but might be biased). Use `--stringency` or `-s` to tune this auto-estimated threshold (0-10, default 5, higher stringency lowers the threshold). 
 
 ### Signature evaluation
 
 By default, output signatures are BLAST checked against target genomes for sensitivity (`conservation`), and non-target genomes for specificity (`divergence`). Signatures are sorted by `conservation` and `divergence`, which can be found in `signatures.csv`. Evaluation can be turned off with `--no-blast` for shorter running time. In that case, output signatures are still very likely to be sensitive and specific, but without second validation of BLAST. 
 
 ### Minimizer sketch
-`--kmerlen` (default 21): shorter k‑mers might be helpful for genomes with more sequence variations (e.g. viruses). 
+`--kmerlen` or `-k` (default 21): shorter k‑mers might be helpful for genomes with more sequence variations (e.g. set to 17 for viruses). 
 
-`--windowsize` (default 200): smaller windows generate more minimizers and increase resolution at the cost of runtime & memory. 
+`--windowsize` or `-w` (default 200): smaller windows generate more minimizers and increase resolution at the cost of runtime & memory (e.g. set to 50 for viruses). 
 
 ### Performance tuning
-Use `--threads` / `-p` to leverage multiple CPU cores. Add `--no-mash` and `--no-blast` for fastest running time. 
+Use `--threads` or `-p` to leverage multiple CPU cores. Add `--no-mash` and `--no-blast` for fastest running time. 
 
 ## Outputs
-Seqwin creates the following files/directories inside the directory specified by `--title` (default `seqwin-out/`):
+Seqwin creates the following files/directories inside the directory specified by `--title` or `-o` (default `seqwin-out/`):
 | Name | Description|
 | :-------  | :-------- |
 | `signatures.fasta`| Signature sequences (top candidates are listed first) |
