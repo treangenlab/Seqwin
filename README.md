@@ -3,7 +3,12 @@
 
 # Seqwin
 
-**Seqwin** is a lightning‑fast, memory‑efficient toolkit for discovering **signature sequences** (genomic markers) that balance **high sensitivity** with **high specificity**. It builds a minimizer‑based pan‑genome graph across target and neighboring non‑target genomes and extracts signature sequences using a novel graph algorithm. 
+**Seqwin** is a lightning‑fast, memory‑efficient toolkit for discovering **signature sequences** (genomic markers) that balance **high sensitivity** with **high specificity**. It builds a minimizer‑based pan‑genome graph across target and neighboring non‑target genomes and extracts signature sequences using a novel graph algorithm. Signatures can be used for downstream assay design such as qPCR, ddPCR, amplicon sequencing and hybrid capture probes. 
+
+> [!NOTE]
+> **Citation:** If you use Seqwin in your research, please cite: 
+> 
+> **Michael X. Wang, Bryce Kille, Michael G. Nute, Siyi Zhou, Lauren B. Stadler, and Todd J. Treangen** ["Seqwin: Ultrafast identification of signature sequences in microbial genomes"](https://doi.org/10.1101/2025.11.07.687294). *bioRxiv* (2025).
 
 ---
 
@@ -13,7 +18,6 @@
 2. [Quick start](#quick-start)
 3. [Key parameters](#key-parameters)
 4. [Outputs](#outputs)
-5. [Publication](#publication)
 
 ## Installation
 
@@ -122,7 +126,3 @@ Seqwin creates the following files/directories inside the directory specified by
 | `results.seqwin`| Serialized run snapshot (Python pickle) |
 | `config.json`| Full run configuration |
 | `seqwin.log`| Execution log |
-
-## Publication
-
-**Michael X. Wang, Bryce Kille, Michael G. Nute, Siyi Zhou, Lauren B. Stadler, and Todd J. Treangen** ["Seqwin: Ultrafast identification of signature sequences in microbial genomes"](https://doi.org/10.1101/2025.11.07.687294). *bioRxiv* (2025).
