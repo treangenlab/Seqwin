@@ -677,7 +677,7 @@ def get_kmers(
     edge_weight_th = edge_w_th_mul * (1 - penalty_th) * n_tar
 
     # 3. calculate size range of subgraphs
-    gap_len = windowsize // 2 # average length of gap between minimizers
+    gap_len = (windowsize + 1) // 2 # average length of gap between minimizers
     min_nodes = max(min_nodes_floor, min_len // gap_len + 1)
     if max_len is None:
         max_nodes = max_nodes_cap
