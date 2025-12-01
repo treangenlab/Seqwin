@@ -35,6 +35,7 @@ from pathlib import Path
 from time import time
 from enum import Enum
 from io import StringIO
+from collections.abc import Sequence
 
 logger = logging.getLogger(__name__)
 
@@ -206,7 +207,9 @@ def download_taxon(
 
     # arguments for the download command
     args = [
-        'datasets', 'download', 'genome', 'taxon', tax_id, '--filename', tax_zip, 
+        'datasets', 'download', 'genome', 
+        'taxon', tax_id, 
+        '--filename', tax_zip, 
         '--exclude-atypical', '--exclude-multi-isolate', 
         '--no-progressbar', '--dehydrated', 
     ]
@@ -286,7 +289,7 @@ def download_taxon(
     return assembly_paths
 
 
-def _get_blast_outfmt(columns: tuple[str]) -> str:
+def _get_blast_outfmt(columns: Sequence[str]) -> str:
     """Given a tuple of columns to be included in the BLAST TSV output, get the value to be provided to 
     the -outfmt argument of the blastn command. See `blastn -help` for more info. 
     """
@@ -297,22 +300,24 @@ def _get_blast_outfmt(columns: tuple[str]) -> str:
 
 
 def _blast_batch(
-    seq_idx: list[int], 
-    seq_list: list[str], 
+    seq_idx: Sequence[int], 
+    seq_list: Sequence[str], 
     db: Path, 
     task: str, 
-    columns: tuple[str], 
+    columns: Sequence[str], 
     outfmt: str, 
+    taxids: str | None, 
+    neg_taxids: str | None, 
     n_cpu: int
 ) -> pd.DataFrame:
     """Run BLAST on a list of sequences and return a DataFrame of the tabular output. 
 
     Args:
-        seq_idx (list[int]): indices of the input sequences. 
-        seq_list (list[str]): A list of sequences for BLAST. 
+        seq_idx (Sequence[int]): indices of the input sequences. 
+        seq_list (Sequence[str]): A list of sequences for BLAST. 
         db (Path): Path to the BLAST database. 
         task (str): Preset BLAST tasks ('blastn', 'blastn-short', 'megablast'). 
-        columns (tuple[str]): Columns to be included in the DataFrame output. 
+        columns (Sequence[str]): Columns to be included in the DataFrame output. 
         outfmt (str): Output of `_get_blast_outfmt()`. 
         n_cpu (int): Number of processes to run in parallel. 
 
@@ -320,20 +325,28 @@ def _blast_batch(
         pd.DataFrame: A DataFrame of the tabular output. 
     """
     # create input fasta for blast
-    blast_in = ''
-    for i, seq in zip(seq_idx, seq_list):
-        blast_in += f'>{i}\n{seq}\n'
-    
-    # run BLAST (output to stdout)
-    blast_out = run_cmd(
+    blast_in = ''.join(
+        f'>{i}\n{seq}\n' for i, seq in zip(seq_idx, seq_list)
+    )
+
+    # prepare blastn args
+    args = [
         'blastn', 
         '-db', db, 
         '-task', task, 
         '-outfmt', outfmt, # output in tsv format with specified columns
         '-max_hsps', _MAX_HSPS, # maximum number of HSPs per subject sequence to save for each query
         '-max_target_seqs', _MAX_TARGET_SEQS, # maximum number of aligned sequences to keep
-        '-num_threads', str(n_cpu), 
-        stdin=blast_in # input fasta as stdin
+        '-num_threads', n_cpu
+    ]
+    if taxids is not None:
+        args += ['-taxids', taxids]
+    if neg_taxids is not None:
+        args += ['-negative_taxids', neg_taxids]
+
+    # run BLAST (output to stdout)
+    blast_out = run_cmd(
+        *args, stdin=blast_in # input fasta as stdin
     ).stdout
 
     # convert BLAST output into a df. pd.read_csv() does auto type conversion (e.g., 'qseqid' as int)
@@ -341,10 +354,12 @@ def _blast_batch(
 
 
 def blast(
-    seq_list: list[str], 
+    seq_list: Sequence[str], 
     db: Path, 
     task: Task=Task.blastn, 
-    columns: tuple[str] | None=None, 
+    columns: Sequence[str] | None=None, 
+    taxids: Sequence[int] | None=None, 
+    neg_taxids: Sequence[int] | None=None, 
     n_cpu: int=1, 
     batch_size: int=1000
 ) -> pd.DataFrame:
@@ -355,10 +370,10 @@ def blast(
     of sequences with batch size determined by batch_size. 
 
     Args:
-        seq_list (list[str]): A list of sequences for BLAST. 
+        seq_list (Sequence[str]): A list of sequences for BLAST. 
         db (Path): Path to the BLAST database. 
         task (str): Preset BLAST tasks ('blastn', 'blastn-short', 'megablast'). ['blastn']
-        columns (tuple[str] | None): Columns to be included in the DataFrame output. None to use default columns. [None]
+        columns (Sequence[str] | None): Columns to be included in the DataFrame output. None to use default columns. [None]
         n_cpu (int, optional): Number of processes to run in parallel. [1]
         batch_size (int, optional): Number of query sequences in a single BLAST run. [1000]
 
@@ -387,23 +402,30 @@ def blast(
         log_and_raise(ValueError, 'No input sequence provided for BLAST')
     seq_idx = list(range(tot_seq)) # indices have to be set in advance (before batches)
 
+    # convert inputs to blastn CLI compatible formats
     if columns is None:
         # use default columns (including sequences)
         columns = _BLAST_COL
     outfmt = _get_blast_outfmt(columns) # value for blastn -outfmt
+    if taxids is not None:
+        taxids = ','.join(map(str, taxids))
+    if neg_taxids is not None:
+        neg_taxids = ','.join(map(str, neg_taxids))
+    n_cpu = str(n_cpu)
 
     # run blast on batches of sequences
     logger.info(f' - Running blastn on {len(seq_list)} sequences, with batch size of {batch_size} (threads={n_cpu})...')
     batch_start = 0
     blast_out: list[pd.DataFrame] = list()
-    
+
     while batch_start < tot_seq:
         logger.info(f' - {batch_start}/{tot_seq}')
         batch_stop = batch_start + batch_size
         blast_out.append(_blast_batch(
             seq_idx[batch_start: batch_stop], 
             seq_list[batch_start: batch_stop], 
-            db, task, columns, outfmt, n_cpu
+            db, task, columns, outfmt, 
+            taxids, neg_taxids, n_cpu
         ))
         batch_start = batch_stop
 
