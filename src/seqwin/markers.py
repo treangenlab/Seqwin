@@ -47,7 +47,7 @@ from .assemblies import Assemblies
 from .kmers import KmerGraph
 from .ncbi import blast
 from .graph import OrderedKmers
-from .utils import print_time_delta, log_and_raise, file_to_write, mp_wrapper, most_common, most_common_weighted
+from .utils import StartMethod, print_time_delta, log_and_raise, file_to_write, mp_wrapper, most_common, most_common_weighted
 from .config import Config, RunState, WORKINGDIR, BLASTCONFIG, CONSEC_KMER_TH, LEN_TH_MUL, NO_BLAST_DIV
 
 # Translation table for complement k-mer strands, deprecated. ['+' -> '-', '-' -> '+']
@@ -570,7 +570,8 @@ def _get_cks(
     all_cks: list[ConnectedKmers] = mp_wrapper(
         _create_ck, 
         _get_create_ck_args(kmers, kmerlen), 
-        n_cpu=n_cpu, n_jobs=len(kmers.subgraphs)
+        n_cpu=n_cpu, n_jobs=len(kmers.subgraphs), 
+        start_method=StartMethod.fork
     )
 
     # get candidate ConnectedKmers instances
@@ -761,7 +762,8 @@ def eval_markers(
         repeat(n_neg, n_seqs)
     )
     all_conservation, all_divergence, all_f_neg_hits = mp_wrapper(
-        _get_scores, scores_args, n_cpu, unpack_output=True, n_jobs=n_seqs
+        _get_scores, scores_args, n_cpu, unpack_output=True, 
+        n_jobs=n_seqs, start_method=StartMethod.fork
     )
 
     print_time_delta(time()-tik)
@@ -842,7 +844,7 @@ def get_markers(
     # save to fasta
     markers_fasta = working_dir / WORKINGDIR.markers_fasta
     file_to_write(markers_fasta, overwrite)
-    fasta = ''
+    fasta = list()
     csv = list()
     all_record_ids = assemblies.record_ids
     for ck in all_cks:
@@ -850,11 +852,11 @@ def get_markers(
         assembly_idx = rep.assembly_idx
         record_id = all_record_ids[assembly_idx][rep.record_idx]
         header = f'{assembly_idx}-{record_id}-{rep.start}:{rep.stop}'
-        fasta += f'>{header}\n{rep.seq}\n'
+        fasta.append(f'>{header}\n{rep.seq}\n')
         csv.append(
             (header, ck.len, ck.conservation, ck.divergence, ck.f_neg_hits, ck.rep_ratio, rep.n_kmers)
         )
-    markers_fasta.write_text(fasta)
+    markers_fasta.write_text(''.join(fasta))
     logger.info(f'Candidate markers saved as {markers_fasta}')
 
     # save to csv
