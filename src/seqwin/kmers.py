@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 
 import numpy as np
 import networkx as nx
-from numba import types, typed
+from numba import types, typed, set_num_threads
 try:
     # try import dependencies for distance calculation
     import pandas as pd
@@ -185,6 +185,7 @@ class KmerGraph(object):
             record_ids = list(chain.from_iterable(record_ids))
 
         # convert to a networkx graph
+        logger.info(' - Building graph...')
         graph = nx.Graph()
         graph.add_weighted_edges_from(edges, weight=EDGE_W)
         # add isolated nodes to graph, so that the number of nodes is the same as the number of k-mer clusters
@@ -619,6 +620,8 @@ def get_kmers(
     rng = state.rng
     n_tar = state.n_tar
     n_neg = state.n_neg
+
+    set_num_threads(n_cpu) # limit the number of threads to use for numba
 
     kmers = KmerGraph(assemblies, kmerlen, windowsize, get_dist, n_cpu)
 
