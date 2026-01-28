@@ -49,7 +49,7 @@ except ImportError:
     _HAS_DIST_DEPS = False
 
 from .assemblies import Assemblies
-from .helpers import get_edges, stack_to_shm, merge_weighted_edges, sort_by_hash, agg_by_hash, \
+from .helpers import get_edges, merge_weighted_edges, sort_by_hash, agg_by_hash, \
     get_subgraphs, filter_kmers, HASH_ARR_NB_DT, CLUSTER_DTYPE
 from .minimizer import indexlr_py
 from .utils import StartMethod, SharedArr, print_time_delta, log_and_raise, mp_wrapper, \
@@ -547,20 +547,16 @@ def _get_graph(
         hashes.append(hashes_assembly)
 
     # get weighted edges and isolated nodes
-    edges, weights, isolates = get_edges(hashes)
+    edges, isolates = get_edges(hashes)
     #---------- generate graph edges ----------#
 
     # concat arrays and return
     kmers = list(chain.from_iterable(kmers)) # flatten kmers before concat
     if return_shm:
         kmers = concat_to_shm(kmers)
-        edges = stack_to_shm(edges, weights)
+        edges = concat_to_shm((edges,)) # just send to shared mem
     else:
         kmers = np.concatenate(kmers)
-        # must convert to the same dtype, otherwise both converted to float64
-        edges = np.column_stack((
-            edges, weights.astype(edges.dtype, copy=False)
-        ))
 
     return kmers, edges, isolates, record_ids
 

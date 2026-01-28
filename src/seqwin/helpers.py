@@ -24,7 +24,6 @@ __license__ = 'GPL 3.0'
 import logging
 from random import Random
 from heapq import heappush, heappop
-from multiprocessing.shared_memory import SharedMemory
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +32,7 @@ import networkx as nx
 from numba import types, typed, prange, njit, from_dtype, get_num_threads
 
 from .minimizer import KMER_DTYPE
-from .utils import SharedArr, log_and_raise
+from .utils import log_and_raise
 from .config import NODE_P
 
 # dtypes for numpy
@@ -48,11 +47,12 @@ CLUSTER_DTYPE = np.dtype([ # k-mer clusters
 # dtypes for numba
 _HASH_NB_DT = from_dtype(_HASH_NP_DT) # k-mer hash values
 _EDGE_NB_DT = types.UniTuple(_HASH_NB_DT, 2) # graph edges
+_WEIGHT_NB_DT = types.Tuple((_HASH_NB_DT, types.intp)) # graph weight: (w, last_seen_assembly_idx)
 HASH_ARR_NB_DT = types.Array(_HASH_NB_DT, 1, 'A') # array of hashes; 'A': accepts arbitrary/strided arrays
 
 
 @njit(nogil=True)
-def get_edges(hashes) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def get_edges(hashes) -> tuple[np.ndarray, np.ndarray]:
     """Get weighted edges and isolated nodes. 
 
     Args:
@@ -60,23 +60,20 @@ def get_edges(hashes) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     
     Returns:
         tuple: A tuple containing
-            1. np.ndarray: Unique edges. 
-            2. np.ndarray: Edge weights. 
-            3. np.ndarray: Isolated nodes. 
+            1. np.ndarray: A 3-column array of unique edges and their weights. 
+            2. np.ndarray: Isolated nodes. 
     """
     # a counter for edges and weight
     edge_w = typed.Dict.empty(
         # all type variables must be defined outside this function
         key_type=_EDGE_NB_DT, 
-        value_type=types.intp
+        value_type=_WEIGHT_NB_DT # a tuple of (w, last_seen_assembly_idx)
     )
     # isolated k-mers found in short sequence records
     # there is no numba typed set, just use set()
     isolates = set()
 
-    for hashes_assembly in hashes:
-        # get unique edges of the current assembly
-        edges_assembly = set()
+    for assembly_idx, hashes_assembly in enumerate(hashes):
 
         for hashes_record in hashes_assembly:
             n = len(hashes_record)
@@ -90,27 +87,28 @@ def get_edges(hashes) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
                     h1 = hashes_record[i]
                     h2 = hashes_record[i + 1]
                     # canonical order of edge nodes (undirected graph)
-                    if h1 < h2:
-                        edges_assembly.add((h1, h2))
+                    if h1 > h2:
+                        h1, h2 = h2, h1
+                    e = (h1, h2)
+
+                    # check if edge exists in previous assemblies
+                    if e in edge_w:
+                        w, last_seen = edge_w[e]
+                        # only increment if we haven't seen this edge in the current assembly yet
+                        if last_seen != assembly_idx:
+                            edge_w[e] = (w + _HASH_NB_DT(1), assembly_idx)
                     else:
-                        edges_assembly.add((h2, h1))
+                        # first time seeing this edge
+                        edge_w[e] = (_HASH_NB_DT(1), assembly_idx)
 
-        # add to the counter dict
-        for e in edges_assembly:
-            if e in edge_w:
-                edge_w[e] += 1
-            else:
-                edge_w[e] = 1
-
-    # prepare output edges and weights as np arrays
+    # prepare output edges and weights as a 3-column np array
     n_edges = len(edge_w)
-    edges = np.empty((n_edges, 2), dtype=_HASH_NP_DT)
-    weights = np.empty(n_edges, dtype=np.intp)
+    edges = np.empty((n_edges, 3), dtype=_HASH_NP_DT)
     i = 0
     for e, w in edge_w.items():
         edges[i, 0] = e[0]
         edges[i, 1] = e[1]
-        weights[i] = w
+        edges[i, 2] = w[0]
         i += 1
 
     # convert isolates to a np array
@@ -120,34 +118,8 @@ def get_edges(hashes) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     for h in isolates:
         isolates_arr[i] = h
         i += 1
-    return edges, weights, isolates_arr
 
-
-def stack_to_shm(edges: np.ndarray, weights: np.ndarray) -> SharedArr:
-    """Merge edges and weights into a single 3-column array in shared memory. 
-
-    Args:
-        edges (np.ndarray): A 2-column array of edges. 
-        weights (np.ndarray): Edge weights with the same length of `edges`. 
-    
-    Returns:
-        SharedArr: The merged array attached to a SharedMemory instance. 
-    """
-    dtype = edges.dtype
-    weights = weights.astype(dtype, copy=False)
-
-    # create shared memory
-    n_edges = edges.shape[0]
-    shm = SharedMemory(create=True, size=n_edges * 3 * dtype.itemsize)
-    arr_view = np.ndarray((n_edges, 3), dtype=dtype, buffer=shm.buf)
-
-    # copy data into shared memory
-    arr_view[:, :2] = edges
-    arr_view[:, 2] = weights
-
-    edges = SharedArr(shm.name, arr_view.shape, dtype)
-    shm.close()
-    return edges
+    return edges, isolates_arr
 
 
 def merge_weighted_edges(edges: np.ndarray):
@@ -159,14 +131,25 @@ def merge_weighted_edges(edges: np.ndarray):
     Returns:
         np.ndarray: Unique edges with sum of weights. 
     """
-    # idx maps edges to unique_edges
-    unique_edges, idx = np.unique(edges[:, :2], axis=0, return_inverse=True)
-    # calculate the weight of each unique edge; weights are sorted by idx
-    weights = np.bincount(idx, weights=edges[:, 2])
-    edges = np.column_stack((
-        unique_edges, weights.astype(edges.dtype, copy=False)
-    ))
-    return edges
+    # sort edges; np.lexsort takes keys in reverse order (secondary, primary)
+    edges = edges[
+        np.lexsort((edges[:, 1], edges[:, 0]))
+    ]
+    # identify indices where the edge changes
+    diff = (edges[:-1, 0] != edges[1:, 0]) | \
+           (edges[:-1, 1] != edges[1:, 1])
+    # get the start indices of each group
+    # np.flatnonzero returns indices where diff is True
+    # we add 1 because the change happens at the next index
+    group_starts = np.flatnonzero(diff) + 1
+    # prepend 0 to indicate the start of the first group
+    reduce_indices = np.concatenate(([0], group_starts))
+    # sum weights
+    weights = np.add.reduceat(edges[:, 2], reduce_indices)
+    # extract unique edges
+    edges = edges[reduce_indices, :2]
+    # stack back into a 3-column array
+    return np.column_stack((edges, weights))
 
 
 @njit(nogil=True, parallel=True) # add compiler flags to skip safety checks
