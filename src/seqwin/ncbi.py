@@ -61,6 +61,7 @@ _BLAST_COL = ( # Default columns to be included in the BLAST tsv output
     'qseq', # 15. aligned part of query sequence
     'sseq', # 16. aligned part of subject sequence
 )
+_MAX_REHYDRATE_WORKERS = 30 # Maximum number of CPUs for `datasets rehydrate`
 _MAX_HSPS = '1000' # Maximum number of HSPs per subject sequence to save for each query. ['1000']
 _MAX_TARGET_SEQS = '50000' # Maximum number of aligned sequences to keep. ['50000']
 
@@ -183,7 +184,8 @@ def download_taxon(
     # sanity check
     if not prefix.is_dir():
         log_and_raise(NotADirectoryError, f'Cannot download genomes to this location, since it is not a directory: {prefix}')
-    
+    n_cpu = min(n_cpu, _MAX_REHYDRATE_WORKERS) # --max-workers for rehydrate is 30
+
     # reuse existing genome package
     tax_dir = prefix / taxon.replace(' ', '-')
     if tax_dir.exists():
