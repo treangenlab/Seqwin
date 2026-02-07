@@ -44,6 +44,7 @@ from enum import Enum
 from io import StringIO
 from typing import Literal
 from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor
 from multiprocessing.shared_memory import SharedMemory
 from collections import Counter
 from collections.abc import Callable, Iterable, Generator, Sequence, Hashable
@@ -51,7 +52,6 @@ from collections.abc import Callable, Iterable, Generator, Sequence, Hashable
 logger = logging.getLogger(__name__)
 
 import numpy as np
-from numpy.typing import DTypeLike
 try:
     from Bio import SeqIO
     _HAS_BIO = True
@@ -80,8 +80,8 @@ class SharedArr:
         dtype (DTypeLike): dtype of the Numpy array. 
     """
     name: str
-    shape: tuple[int]
-    dtype: DTypeLike
+    shape: tuple[int, ...]
+    dtype: np.dtype
 
 
 def print_time_delta(seconds: float) -> None:
@@ -214,7 +214,7 @@ def mp_wrapper(
     Args:
         func (Callable): Function for multiprocessing. 
         all_args (Iterable): Iterable of function arguments/parameters. 
-        n_cpu (int, optional): Number of processes to run in parallel [1]
+        n_cpu (int, optional): Number of processes to run in parallel. [1]
         text (str | None, optional): Message to be printed when multiprocessing starts. [None]
         starmap (bool, optional): Use pool.starmap if True (func takes multiple arguments); 
             use pool.map if False (func takes only one argument). [True]
@@ -230,7 +230,7 @@ def mp_wrapper(
     tik = time()
     if text:
         logger.info(f'{text} (threads={n_cpu})')
-    
+
     if n_cpu == 1:
         if starmap:
             # func_out = [func(*args) for args in tqdm(all_args, ascii=' >')]
@@ -301,7 +301,8 @@ def get_dups(iterable: Iterable[Hashable]) -> set:
 
 def concat_to_shm(arrays: Sequence[np.ndarray]) -> SharedArr:
     """Concat Numpy arrays along the first dimension into a shared memory block. 
-    Each individual array is deleted during this process to save memory. 
+    - Each individual array is deleted during this process to save memory. 
+    - Arrays are copied as raw bytes to bypass overhead of Numpy assignment. 
 
     Args:
         arrays (Sequence[np.ndarray]): Arrays to be concatenated. 
@@ -320,6 +321,8 @@ def concat_to_shm(arrays: Sequence[np.ndarray]) -> SharedArr:
             log_and_raise(TypeError, 'Arrays must have the same dtype')
         elif arr.shape[1:] != trailing_shape:
             log_and_raise(ValueError, 'Arrays must match on dimensions 1...N')
+        elif not arr.flags['C_CONTIGUOUS']:
+            log_and_raise(ValueError, 'Arrays must be C-contiguous')
 
     # create shared memory
     n0 = sum(arr.shape[0] for arr in arrays)
@@ -329,29 +332,35 @@ def concat_to_shm(arrays: Sequence[np.ndarray]) -> SharedArr:
         size=int(np.prod(out_shape, dtype=np.int64) * dtype.itemsize)
     )
     try:
-        out_view = np.ndarray(out_shape, dtype=dtype, buffer=out_shm.buf)
-
-        # copy each array into its slot in out_shm
-        start = 0 # position in out_view
+        # copy each array into its slot in out_shm as raw bytes
+        offset = 0
         for arr in arrays:
-            stop = start + arr.shape[0]
-            out_view[start:stop] = arr
-            start = stop
+            arr_buf = memoryview(arr).cast('B')
+            offset_next = offset + arr_buf.nbytes
+            out_shm.buf[offset : offset_next] = arr_buf
+            offset = offset_next
             try:
                 arr.resize((0,), refcheck=False) # release memory
             except:
                 pass
+    except Exception:
+        # destroy the shm block if anything fails to prevent memory leakage
+        out_shm.close()
+        out_shm.unlink()
+        raise
     finally:
         out_shm.close()
     return SharedArr(out_shm.name, out_shape, dtype)
 
 
-def concat_from_shm(arrays: Sequence[SharedArr]) -> np.ndarray:
+def concat_from_shm(arrays: Sequence[SharedArr], n_cpu: int=1) -> np.ndarray:
     """Concat SharedArr instances along the first dimension into a Numpy array. 
-    Each SharedArr is unlinked during this process to save memory. 
+    - Each SharedArr is unlinked during this process to save memory. 
+    - Arrays are copied as raw bytes, in parallel. 
 
     Args:
         arrays (Sequence[SharedArr]): Arrays to be concatenated. 
+        n_cpu (int, optional): Number of threads to run in parallel. [1]
     
     Returns:
         np.ndarray: The concatenated Numpy array. 
@@ -359,6 +368,7 @@ def concat_from_shm(arrays: Sequence[SharedArr]) -> np.ndarray:
     if not arrays:
         log_and_raise(ValueError, 'No array is provided')
     dtype = arrays[0].dtype
+    itemsize = dtype.itemsize
     trailing_shape = arrays[0].shape[1:]
 
     # validation
@@ -368,25 +378,44 @@ def concat_from_shm(arrays: Sequence[SharedArr]) -> np.ndarray:
         elif arr.shape[1:] != trailing_shape:
             log_and_raise(ValueError, 'Arrays must match on dimensions 1...N')
 
-    # pre-allocate an numpy array
+    # pre-allocate the output array
     n0 = sum(arr.shape[0] for arr in arrays)
-    out = np.empty(
-        (n0, *trailing_shape), 
-        dtype=dtype
-    )
+    out_shape = (n0, *trailing_shape)
+    out = np.empty(out_shape, dtype=dtype)
+    # to bypasses GIL, copying must be handled by numpy
+    # this flat uint8 view of the output array is a mimic of its memory block
+    out_buf = out.view(np.uint8).ravel()
 
-    # copy each array into its slot in out
-    start = 0 # position in out
-    for arr in arrays:
-        shm = SharedMemory(name=arr.name)
+    # copy each array into its slot in out_buf as raw bytes, in parallel
+    # we have to use thread-based parallelism to write to the same private memory block
+    def copy_array(arr_name: str, offset: int, arr_size: int):
+        """The worker function for each thread. 
+        """
+        arr_shm = SharedMemory(arr_name)
         try:
-            arr_view = np.ndarray(arr.shape, dtype=dtype, buffer=shm.buf)
-            stop = start + arr_view.shape[0]
-            out[start:stop] = arr_view
-            start = stop
+            # GIL is released for numpy commands
+            arr_buf = np.frombuffer(arr_shm.buf, dtype=np.uint8, count=arr_size)
+            out_buf[offset : offset + arr_size] = arr_buf
+            del arr_buf # delete the view, otherwise arr_shm cannot be closed
         finally:
-            shm.close()
-            shm.unlink()
+            arr_shm.close()
+            arr_shm.unlink()
+
+    # calculate offsets and array sizes
+    copy_arr_args = list()
+    offset = 0
+    for arr in arrays:
+        arr_size = int(np.prod(arr.shape, dtype=np.int64) * itemsize)
+        copy_arr_args.append((arr.name, offset, arr_size))
+        offset += arr_size
+
+    # copy in arrays parallel
+    with ThreadPoolExecutor(max_workers=n_cpu) as executor:
+        futures = list(
+            executor.submit(copy_array, *args) for args in copy_arr_args
+        )
+        for f in futures:
+            f.result()
 
     return out
 

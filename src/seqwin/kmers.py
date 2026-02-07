@@ -178,8 +178,8 @@ class KmerGraph(object):
             )
             # merge outputs from multiple processes
             logger.info(' - Merging from all processes...')
-            kmers = concat_from_shm(kmers)
-            edges = concat_from_shm(edges)
+            kmers = concat_from_shm(kmers, n_cpu)
+            edges = concat_from_shm(edges, n_cpu)
             edges = merge_weighted_edges(edges)
             isolates = np.unique(np.concatenate(isolates))
             record_ids = list(chain.from_iterable(record_ids))
