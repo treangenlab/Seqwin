@@ -14,6 +14,7 @@ Functions:
 ----------
 - sketch
 - dist
+- get_jaccard
 """
 
 __author__ = 'Michael X. Wang'
@@ -27,14 +28,14 @@ from collections.abc import Iterable, Generator
 logger = logging.getLogger(__name__)
 
 import pandas as pd
+if shutil.which('mash') is None:
+    raise ImportError('Mash is not installed (`mash` is not found in your PATH).')
+
 from .utils import log_and_raise, file_to_write, run_cmd
 
 _MASH_SKETCH_EXT = '.msh' # File extension of Mash output. [.msh]
 _STDIN = Path('/dev/stdin')
 _DIST_COL = ('ref', 'query', 'dist', 'pval', 'jaccard') # output columns of `mash dist`
-
-if shutil.which('mash') is None:
-    raise ImportError('Mash is not installed (`mash` is not found in your PATH).')
 
 
 def sketch(
@@ -104,7 +105,11 @@ def sketch(
     return real_out_path
 
 
-def dist(ref_path: Path, query_path: Path | None=None, n_cpu: int=1) -> pd.DataFrame:
+def dist(
+    ref_path: Path, 
+    query_path: Path | None=None, 
+    n_cpu: int=1
+) -> pd.DataFrame:
     """Run `mash dist {ref_path} {query_path}` and parse the TSV output as a pandas DataFrame. 
     Note: high memory usage when the number of assemblies in the sketch file is large. 
     
@@ -134,8 +139,13 @@ def dist(ref_path: Path, query_path: Path | None=None, n_cpu: int=1) -> pd.DataF
     return df
 
 
-def get_jaccard(ref_path: Path, query_path: Path | None=None, n_cpu: int=1, bufsize: int=1_000_000) -> Generator[float, None, None]:
-    """Estimate the pairwise Jaccard index between (each assembly sketch in the the query) 
+def get_jaccard(
+    ref_path: Path, 
+    query_path: Path | None=None, 
+    n_cpu: int=1, 
+    bufsize: int=1_000_000
+) -> Generator[float, None, None]:
+    """Estimate the pairwise Jaccard index between (each assembly sketch in the query) 
     and (each assembly sketch in the reference), with `mash dist`. Use a stream pipe to save memory. 
     
     Args:

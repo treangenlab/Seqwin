@@ -15,6 +15,10 @@ Functions:
 ----------
 - indexlr
 - indexlr_py
+
+Attributes:
+-----------
+- KMER_DTYPE (np.dtype)
 """
 
 __author__ = 'Michael X. Wang'
@@ -28,8 +32,11 @@ logger = logging.getLogger(__name__)
 
 import numpy as np
 import pandas as pd
+from numpy.typing import NDArray
 from pandas.api.types import CategoricalDtype
 from btllib import Indexlr, IndexlrFlag
+if shutil.which('indexlr') is None:
+    raise ImportError('btllib is not installed (`indexlr` is not found in your PATH).')
 
 from .utils import run_cmd
 
@@ -48,9 +55,6 @@ KMER_DTYPE = np.dtype([ # for indexlr_py()
     ('is_target', np.bool_), 
 ])
 
-if shutil.which('indexlr') is None:
-    raise ImportError('btllib is not installed (`indexlr` is not found in your PATH).')
-
 
 def indexlr(
     assembly_path: Path, 
@@ -58,7 +62,10 @@ def indexlr(
     windowsize: int=200, 
     get_strand: bool=False, 
     get_seq: bool=False
-) -> tuple[list[pd.DataFrame], tuple[str]]:
+) -> tuple[
+    list[pd.DataFrame], 
+    tuple[str, ...]
+]:
     """Get the minimizers for each record in an assembly with the `indexlr` command from `btllib<https://github.com/bcgsc/btllib>`__. 
     - The number of threads to use is set to 1. 
     - Indexlr seems to skip sequence regions with ambiguous bases. So long runs of 'N's will be ignored and k-mer coordinates will seem discontinuous. 
@@ -83,7 +90,7 @@ def indexlr(
                 - 'record_idx' (int): 0-based index of the sequence records, in the same order as they appear in the FASTA file. 
                 - 'strand' (category, optional): Which strand (+/-) has the smaller hash value. Use category type to save memory. 
                 - 'seq' (str, optional): sequence of the minimizer (forward strand), available if `get_seq=True`. 
-            2. tuple[str]: Record IDs of the assembly. 
+            2. tuple[str, ...]: Record IDs of the assembly. 
     """
     # run indexlr
     args = [
@@ -142,7 +149,10 @@ def indexlr_py(
     windowsize: int, 
     assembly_idx: int, 
     is_target: bool
-) -> tuple[list[np.ndarray], tuple[str]]:
+) -> tuple[
+    list[NDArray], 
+    tuple[str, ...]
+]:
     """Get the minimizers for each record in an assembly with the Python module `Indexlr` from `btllib<https://github.com/bcgsc/btllib>`__. 
     - This function is specialized for Seqwin. 
     - The number of threads to use is set to 1. 
@@ -165,17 +175,17 @@ def indexlr_py(
 
     Returns:
         tuple: A tuple containing
-            1. list[np.ndarray]: A list of structured numpy arrays for each sequence record in the assembly. 
+            1. list[NDArray]: A list of structured numpy arrays for each sequence record in the assembly. 
                 Each row represents a minimizer in the sequence record, with columns, 
                 - 'hash' (uint64): Hash value of the minimizer. 
                 - 'pos' (uint32): Position of the first base of the minimizer. 
                 - 'record_idx' (uint16): 0-based index of the sequence records, in the same order as they appear in the FASTA file. 
                 - 'assembly_idx' (uint16): Assembly index. 
                 - 'is_target' (bool): True for target assemblies. 
-            2. tuple[str]: Record IDs of the assembly. 
+            2. tuple[str, ...]: Record IDs of the assembly. 
     """
-    kmers: list[np.ndarray] = list()
-    idx_to_id: list[str] = list()
+    kmers = list()
+    idx_to_id = list()
     with Indexlr(
         str(assembly_path), # must convert to string, or TypeError will be raised
         kmerlen, windowsize, 

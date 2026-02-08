@@ -184,7 +184,7 @@ class ConnectedKmers(object):
         # find the start and stop of each consecutive group
         # df.groupby preserves the order of rows within each group
         # since position / index is sorted, start is the first row, and stop is the last row
-        # strand can be dertermined by the order of k-mers, using k-mer strand as supplement
+        # strand can be determined by the order of k-mers, using k-mer strand as supplement
         loc = kmers.groupby(
             # group by record_idx is also needed, otherwise consec_gp might span across more than one records
             # as_index=False to keep 'assembly_idx' and 'record_idx' as columns in loc
@@ -228,8 +228,8 @@ class ConnectedKmers(object):
         
         Returns:
             tuple: A tuple containing
-                1. rep_order (OrderedKmers): The representative k-mer order. 
-                2. n_rep (int): See `ConnectedKmers.n_rep`. 
+                1. OrderedKmers: The representative k-mer order. 
+                2. int: See `ConnectedKmers.n_rep`. 
         """
         # count the number of each unique k-mer ordering in target assemblies
         tar_kmers = loc[loc['is_target'] == True]['kmers']
@@ -329,7 +329,7 @@ class ConnectedKmers(object):
 
         Args:
             loc (pd.DataFrame): See `ConnectedKmers.loc`. 
-            rep_order (OrderedKmers): See `ConnectedKmers.__get_rep_order()`. 
+            ref_order (OrderedKmers): The reference k-mer ordering (representative or graph). 
         
         Returns:
             pd.DataFrame: See `ConnectedKmers.loc` (with updated 'strand' column). 
@@ -359,7 +359,7 @@ class ConnectedKmers(object):
 
         Args:
             loc (pd.DataFrame): See `ConnectedKmers.loc`. 
-            rep_order (OrderedKmers): See `ConnectedKmers.__get_rep_order()`. 
+            ref_order (OrderedKmers): The reference k-mer ordering (representative or graph). 
         
         Returns:
             pd.DataFrame: See `ConnectedKmers.loc` (with updated 'strand' column). 
@@ -400,7 +400,7 @@ class ConnectedKmers(object):
         return loc
     
     def __get_strand_ks(self, loc: pd.DataFrame) -> pd.DataFrame:
-        """Determine sequence strand based on 'kmer_strand'. Only used when strand cannot be dertermined by k-mer ordering
+        """Determine sequence strand based on 'kmer_strand'. Only used when strand cannot be determined by k-mer ordering
         (e.g., forward and reverse ordering are the same (ABA), or mc_order has only one k-mer). 
         NOTE: forward / reverse strand might have the same k-mer strand ordering (e.g., '++--'). 
 
@@ -559,8 +559,8 @@ def _get_cks(
 
     Returns:
         tuple: A tuple containing
-            1. all_cks (list[ConnectedKmers]): Candidate markers as ConnectedKmers instances. 
-            2. all_reps (list[str]): Sequence of each marker. 
+            1. list[ConnectedKmers]: Candidate markers as ConnectedKmers instances. 
+            2. list[str]: Sequences of each marker. 
     """
     logger.info('Finding a representative for each low-penalty subgraph...')
     tik = time()
@@ -633,11 +633,11 @@ def _get_scores(
     """Calculate the conservation and divergence of a marker based on its BLAST hits in all assemblies. 
     - Conservation is calculated with `_get_avg_ident()` on target assemblies. 
     - Divergence is calculated with `_get_avg_dist()` on non-target assemblies. 
-        For assemblies with no hit, divergence is assumed to be `NO_BLAST_DIST` in `config.py`. 
+        For assemblies with no hit, divergence is assumed to be `NO_BLAST_DIV` in `config.py`. 
     - Count the fraction of non-target assemblies with a BLAST hit. 
     
     Args:
-        blast_out (pd.DataFrame): Each row is the best BLAST hit of the marker in a assembly. 
+        blast_out (pd.DataFrame): Each row is the best BLAST hit of the marker in an assembly. 
             Required columns: ['is_target', 'nident', 'mismatch', 'gaps']
         marker_len (int): Marker length. 
         n_tar (int | None): Number of target assemblies. If None, conservation is not calculated. 
@@ -679,7 +679,7 @@ def _get_scores(
 def eval_markers(
     all_seqs: list[str], blastdb: Path, n_tar: int, n_neg: int, n_cpu: int=1
 ) -> tuple[list[pd.DataFrame], list[float], list[float], list[float]]:
-    """BLAST check each marker sequence against all / non-target assemblies, and calcuate the conservation and divergence of each marker. 
+    """BLAST check each marker sequence against all / non-target assemblies, and calculate the metrics of each marker. 
     
     Args:
         all_seqs (list[str]): A list of marker sequences. 
@@ -690,9 +690,10 @@ def eval_markers(
     
     Returns:
         tuple: A tuple containing
-            1. all_blast (list[pd.DataFrame]): BLAST hits of each marker. 
-            2. all_conservation (list[float]): Conservation of each marker. 
-            2. all_divergence (list[float]): Divergence of each marker. 
+            1. list[pd.DataFrame]: BLAST hits of each marker. 
+            2. list[float]: Conservation. 
+            3. list[float]: Divergence. 
+            4. list[float]: Fraction of non-target assemblies with a BLAST hit. 
     """
     if blastdb.name == BLASTCONFIG.title_neg_only:
         neg_only = True

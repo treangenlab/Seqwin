@@ -25,6 +25,7 @@ Attributes:
 -----------
 - WORKINGDIR (WorkingDir)
 - BLASTCONFIG (BlastConfig)
+- EDGE_W (str)
 - NODE_P (str)
 - CONSEC_KMER_TH (int)
 - LEN_TH_MUL (float)
@@ -252,7 +253,7 @@ class BlastConfig:
         str2bool (Mapping[str, bool]): Reversed mapping of bool2str for parsing BLAST outputs. ['y' -> True, 'n' -> False]
         header_sep (str): Separator used in FASTA headers. Should pick a rare char (cannot be '$', BLAST treats it as a special char). ['@']
         task (str): Presets for BLAST parameters ('blastn', 'blastn-short', 'megablast'). ['blastn']
-        columns (tuple[str]): Columns to be included in the BLAST TSV output. See `ncbi.py` for more information. 
+        columns (tuple[str, ...]): Columns to be included in the BLAST TSV output. See `ncbi.py` for more information. 
         batch_size (int): # Number of query sequences in a single BLAST run. [1000]
     """
     title_neg_only: str = 'neg-only'
@@ -267,7 +268,7 @@ class BlastConfig:
     )
     header_sep: str = '@'
     task: Task = Task.blastn
-    columns: tuple[str] = (
+    columns = (
         'qseqid', 
         'sseqid', 
         'nident', 

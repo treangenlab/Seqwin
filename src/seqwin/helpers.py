@@ -2,7 +2,7 @@
 Helpers
 =======
 
-Helper functions and dtypes for `kmer.py`. 
+Helper functions and dtypes for `kmers.py`. 
 
 Dependencies:
 -------------
@@ -15,7 +15,12 @@ Dependencies:
 
 Functions:
 ----------
-- get_kmers
+- get_edges
+- merge_weighted_edges
+- sort_by_hash
+- agg_by_hash
+- get_subgraphs
+- filter_kmers
 """
 
 __author__ = 'Michael X. Wang'
@@ -29,6 +34,7 @@ logger = logging.getLogger(__name__)
 
 import numpy as np
 import networkx as nx
+from numpy.typing import NDArray
 from numba import types, typed, prange, njit, from_dtype, get_num_threads
 
 from .minimizer import KMER_DTYPE
@@ -52,7 +58,7 @@ HASH_ARR_NB_DT = types.Array(_HASH_NB_DT, 1, 'A') # array of hashes; 'A': accept
 
 
 @njit(nogil=True)
-def get_edges(hashes) -> tuple[np.ndarray, np.ndarray]:
+def get_edges(hashes) -> tuple[NDArray, NDArray]:
     """Get weighted edges and isolated nodes. 
 
     Args:
@@ -60,8 +66,8 @@ def get_edges(hashes) -> tuple[np.ndarray, np.ndarray]:
     
     Returns:
         tuple: A tuple containing
-            1. np.ndarray: A 3-column array of unique edges and their weights. 
-            2. np.ndarray: Isolated nodes. 
+            1. NDArray: A 3-column array of unique edges and their weights. 
+            2. NDArray: Isolated nodes. 
     """
     # a counter for edges and weight
     edge_w = typed.Dict.empty(
@@ -122,14 +128,14 @@ def get_edges(hashes) -> tuple[np.ndarray, np.ndarray]:
     return edges, isolates_arr
 
 
-def merge_weighted_edges(edges: np.ndarray):
+def merge_weighted_edges(edges: NDArray) -> NDArray:
     """Add weights of the same edges. 
 
     Args:
-        edges (np.ndarray): A 3-column array of weighted edges (u, v, w). 
+        edges (NDArray): A 3-column array of weighted edges (u, v, w). 
     
     Returns:
-        np.ndarray: Unique edges with sum of weights. 
+        NDArray: Unique edges with sum of weights. 
     """
     # sort edges; np.lexsort takes keys in reverse order (secondary, primary)
     edges = edges[
@@ -152,8 +158,8 @@ def merge_weighted_edges(edges: np.ndarray):
     return np.column_stack((edges, weights))
 
 
-@njit(nogil=True, parallel=True) # add compiler flags to skip safety checks
-def sort_by_hash(kmers: np.ndarray) -> np.ndarray:
+@njit(nogil=True, parallel=True)
+def sort_by_hash(kmers: NDArray) -> NDArray:
     """Sort `kmers` by 'hash' in-place in a stable manner, and return the sorted indices. 
     Use LSD (Least Significant Digit) radix sort. 
     - Indices have the same dtype as `hash`. 
@@ -170,10 +176,10 @@ def sort_by_hash(kmers: np.ndarray) -> np.ndarray:
     ```
 
     Args:
-        kmers (np.ndarray): See `KmerGraph.kmers`. 
+        kmers (NDArray): See `KmerGraph.kmers`. 
 
     Returns:
-        np.ndarray: See `KmerGraph.idx`. 
+        NDArray: See `KmerGraph.idx`. 
     """
     n = kmers.size
     n_cpu = get_num_threads()
@@ -265,16 +271,16 @@ def sort_by_hash(kmers: np.ndarray) -> np.ndarray:
 
 
 @njit(nogil=True)
-def agg_by_hash(hashes: np.ndarray, assembly_idx: np.ndarray, is_target: np.ndarray) -> np.ndarray:
+def agg_by_hash(hashes: NDArray, assembly_idx: NDArray, is_target: NDArray) -> NDArray:
     """Count the number of target/non-target assemblies for each unique hash value. 
 
     Args:
-        hashes (np.ndarray): Field of `KmerGraph.kmers`. 
-        assembly_idx (np.ndarray): Field of `KmerGraph.kmers`. 
-        is_target (np.ndarray): Field of `KmerGraph.kmers`. 
+        hashes (NDArray): Field of `KmerGraph.kmers`. 
+        assembly_idx (NDArray): Field of `KmerGraph.kmers`. 
+        is_target (NDArray): Field of `KmerGraph.kmers`. 
 
     Returns:
-        np.ndarray: See `KmerGraph.clusters`. 
+        NDArray: See `KmerGraph.clusters`. 
     """
     n = hashes.size
     # pre-allocate output array (never larger than n)
@@ -343,7 +349,7 @@ def get_subgraphs(
 
     Returns:
         tuple: A tuple containing
-            1. tuple[tuple[frozenset[int], ...]: See `KmerGraph.subgraphs`. 
+            1. tuple[frozenset[int], ...]: See `KmerGraph.subgraphs`. 
             2. frozenset[int]: Union of k-mer hash values in all subgraphs. 
     """
     # a dict mapping node to penalty for faster lookup
@@ -446,18 +452,18 @@ def get_subgraphs(
     return tuple(frozenset(sg) for sg in subgraphs), frozenset(used)
 
 
-def filter_kmers(kmers: np.ndarray, idx: np.ndarray, used: frozenset[int]) -> tuple[np.ndarray, np.ndarray]:
+def filter_kmers(kmers: NDArray, idx: NDArray, used: frozenset[int]) -> tuple[NDArray, NDArray]:
     """Remove k-mers not included in `used`. `kmers` is already sorted by 'hash' (see `__get_penalty()`). 
 
     Args:
-        kmers (np.ndarray): See `KmerGraph.kmers`. 
-        idx (np.ndarray): See `KmerGraph.idx`. 
+        kmers (NDArray): See `KmerGraph.kmers`. 
+        idx (NDArray): See `KmerGraph.idx`. 
         used (frozenset[int]): Output of `get_subgraphs()`. 
     
     Returns:
         tuple: A tuple containing
-            1. np.ndarray: See `KmerGraph.kmers`. 
-            2. np.ndarray: See `KmerGraph.idx`. 
+            1. NDArray: See `KmerGraph.kmers`. 
+            2. NDArray: See `KmerGraph.idx`. 
     """
     logger.info(' - Removing k-mers not included in any of the subgraphs...')
     hashes = kmers['hash']

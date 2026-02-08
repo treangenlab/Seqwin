@@ -10,6 +10,7 @@ Dependencies:
 - pandas
 - blast
 - .ncbi
+- .mash
 - .utils
 - .config
 
@@ -37,6 +38,7 @@ logger = logging.getLogger(__name__)
 
 import numpy as np
 import pandas as pd
+from numpy.typing import NDArray
 
 from .ncbi import download_taxon
 from .mash import sketch, get_jaccard
@@ -54,7 +56,7 @@ class Assemblies(pd.DataFrame):
     Attributes:
         path (pd.Series[Path]): Assembly paths. 
         is_target (pd.Series[bool]): True for target assemblies. 
-        record_ids (pd.Series[tuple[str] | None]): Record IDs of each assembly. 
+        record_ids (pd.Series[tuple[str, ...] | None]): Record IDs of each assembly. 
     """
     def __init__(self, tar_paths: list[Path], neg_paths: list[Path]) -> None:
         """Package all input genome assemblies as a pandas DataFrame. 
@@ -70,7 +72,7 @@ class Assemblies(pd.DataFrame):
         )
         super().__init__(data)
 
-    def mash(self, kmerlen: int, sketchsize: int, out_path: Path, overwrite: bool, n_cpu: int) -> np.ndarray:
+    def mash(self, kmerlen: int, sketchsize: int, out_path: Path, overwrite: bool, n_cpu: int) -> NDArray[np.floating]:
         """Calculate the Jaccard indices of all assembly pairs with Mash. 
 
         Args:
@@ -81,7 +83,7 @@ class Assemblies(pd.DataFrame):
             n_cpu (int): Number of processes to run in parallel. 
         
         Returns:
-            np.ndarray: A matrix of Jaccard indices of all assembly pairs. 
+            NDArray[np.floating]: A matrix of Jaccard indices of all assembly pairs. 
         """
         mash_sketch = sketch(
             self.path.tolist(), 
@@ -138,7 +140,7 @@ class Assemblies(pd.DataFrame):
         return all_seq
 
     def makeblastdb(self, prefix: Path, neg_only: bool, overwrite: bool, n_cpu: int) -> Path:
-        """Create a BLAST database for all or non-target assemblies. Use native Python streaming and multiprocessing. 
+        """Create a BLAST database for all (or non-target) assemblies. Use native Python streaming and multiprocessing. 
         - Note: macOS (x64 or ARM) has a hard-wired pipe buffer size of 64kB (vs. 1MB on Linux), so `makeblastdb` will 
         be a lot slower on a Mac when the input is streamed to `stdin`. While on Linux the difference is negligible
         due to the larger buffer size. 
@@ -454,8 +456,8 @@ def _download(config: Config, working_dir: Path) -> tuple[list[Path], list[Path]
     
     Returns:
         tuple: A tuple containing
-            1. tar_paths (list[Path]): Paths to downloaded target assemblies. 
-            1. neg_paths (list[Path]): Paths to downloaded non-target assemblies. 
+            1. list[Path]: Paths to downloaded target assemblies. 
+            1. list[Path]: Paths to downloaded non-target assemblies. 
     """
     tar_taxa = config.tar_taxa
     neg_taxa = config.neg_taxa

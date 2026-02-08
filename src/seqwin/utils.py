@@ -7,6 +7,10 @@ Dependencies:
 - numpy
 - biopython (optional)
 
+Classes:
+--------
+- SharedArr
+
 Functions:
 ----------
 - print_time_delta
@@ -20,6 +24,8 @@ Functions:
 - mp_wrapper
 - get_chunks
 - get_dups
+- concat_to_shm
+- concat_from_shm
 - revcomp
 - most_common
 - most_common_weighted
@@ -52,6 +58,7 @@ from collections.abc import Callable, Iterable, Generator, Sequence, Hashable
 logger = logging.getLogger(__name__)
 
 import numpy as np
+from numpy.typing import NDArray
 try:
     from Bio import SeqIO
     _HAS_BIO = True
@@ -299,13 +306,13 @@ def get_dups(iterable: Iterable[Hashable]) -> set:
     return set(duplicates)
 
 
-def concat_to_shm(arrays: Sequence[np.ndarray]) -> SharedArr:
+def concat_to_shm(arrays: Sequence[NDArray]) -> SharedArr:
     """Concat Numpy arrays along the first dimension into a shared memory block. 
     - Each individual array is deleted during this process to save memory. 
     - Arrays are copied as raw bytes to bypass overhead of Numpy assignment. 
 
     Args:
-        arrays (Sequence[np.ndarray]): Arrays to be concatenated. 
+        arrays (Sequence[NDArray]): Arrays to be concatenated. 
     
     Returns:
         SharedArr: The concatenated array attached to a SharedMemory instance. 
@@ -353,7 +360,7 @@ def concat_to_shm(arrays: Sequence[np.ndarray]) -> SharedArr:
     return SharedArr(out_shm.name, out_shape, dtype)
 
 
-def concat_from_shm(arrays: Sequence[SharedArr], n_cpu: int=1) -> np.ndarray:
+def concat_from_shm(arrays: Sequence[SharedArr], n_cpu: int=1) -> NDArray:
     """Concat SharedArr instances along the first dimension into a Numpy array. 
     - Each SharedArr is unlinked during this process to save memory. 
     - Arrays are copied as raw bytes, in parallel. 
@@ -363,7 +370,7 @@ def concat_from_shm(arrays: Sequence[SharedArr], n_cpu: int=1) -> np.ndarray:
         n_cpu (int, optional): Number of threads to run in parallel. [1]
     
     Returns:
-        np.ndarray: The concatenated Numpy array. 
+        NDArray: The concatenated Numpy array. 
     """
     if not arrays:
         log_and_raise(ValueError, 'No array is provided')
@@ -427,7 +434,7 @@ def revcomp(seq: str) -> str:
 
 
 def most_common(iterable: Iterable[Hashable]):
-    """Returns the most common element in an Iterable, weighted by element length. 
+    """Returns the most common element in an Iterable. 
     All elements should be Hashable. 
     """
     return Counter(iterable).most_common(1)[0][0]
@@ -448,7 +455,7 @@ def load_paths_txt(paths_txt: Path) -> list[Path]:
         paths_txt (Path): A text file with one path per line. 
 
     Returns:
-        list[str]: A list of valid and resolved file paths. 
+        list[Path]: A list of valid and resolved file paths. 
     """
     paths_list = list()
     for path in paths_txt.read_text().splitlines():
@@ -462,15 +469,15 @@ def load_paths_txt(paths_txt: Path) -> list[Path]:
     return paths_list
 
 
-def load_fasta(path: Path) -> tuple[str]:
-    """Parse an assembly file in FASTA format, and get the sequences and IDs of all records. 
+def load_fasta(path: Path) -> tuple[str, ...]:
+    """Parse an assembly file in FASTA format and return its sequences. 
     Gzip files are supported (file name should end with .gz). 
 
     Args:
         path (Path): Path to the FASTA file. If the file is gzipped, the extension should be .gz. 
 
     Returns:
-        tuple[str]: Sequences of FASTA records, in the same order as they appear in the file. 
+        tuple[str, ...]: Sequences of FASTA records (upper case), in the same order as they appear in the file. 
     """
     # read file content
     if path.suffix == GZIP_EXT:

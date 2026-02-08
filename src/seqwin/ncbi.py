@@ -40,6 +40,11 @@ from collections.abc import Sequence
 logger = logging.getLogger(__name__)
 
 import pandas as pd
+if shutil.which('datasets') is None:
+    raise ImportError('ncbi-datasets-cli is not installed (`datasets` is not found in your PATH).')
+if shutil.which('blastn') is None:
+    raise ImportError('BLAST+ is not installed (`blastn` is not found in your PATH).')
+
 from .utils import print_time_delta, log_and_raise, file_to_write, list_dir, run_cmd
 
 _ZIP_EXT = '.zip' # File extension of NCBI genome package. ['.zip']
@@ -88,24 +93,17 @@ class Task(str, Enum):
     blastn_short = 'blastn-short'
     megablast = 'megablast'
 
-if shutil.which('datasets') is None:
-    raise ImportError('ncbi-datasets-cli is not installed (`datasets` is not found in your PATH).')
-if shutil.which('blastn') is None:
-    raise ImportError('BLAST+ is not installed (`blastn` is not found in your PATH).')
 
-
-def search_taxon(taxon: str) -> tuple[str, str] | None:
+def search_taxon(taxon: str) -> tuple[str | None, str | None]:
     """Search a taxon on NCBI Taxonomy. Internet connection is needed. 
 
     Args:
         taxon (str): Name or ID of the taxon (exact match). 
 
     Returns:
-        tuple | None: A tuple containing
-            1. tax_id (str): NCBI Taxonomy ID of the taxon. 
-            2. tax_name (str): Current scientific name of the taxon. 
-        
-        Return None if the taxon is not found. 
+        tuple: A tuple containing
+            1. str | None: NCBI Taxonomy ID of the taxon. 
+            2. str | None: Current scientific name of the taxon. 
     """
     logger.info(f'Searching NCBI Taxonomy for "{taxon}"...')
     tik = time()
@@ -118,7 +116,7 @@ def search_taxon(taxon: str) -> tuple[str, str] | None:
     if summary.stdout == '':
         logger.debug(summary.stderr)
         logger.error(f' - Unable to find taxon "{taxon}"')
-        return None
+        return None, None
     
     summary = json.loads(summary.stdout)
     tax_id = summary['taxonomy']['tax_id']
@@ -195,9 +193,8 @@ def download_taxon(
         return assembly_paths
 
     # search taxon id and name
-    try:
-        tax_id, tax_name = search_taxon(taxon)
-    except TypeError:
+    tax_id, tax_name = search_taxon(taxon)
+    if tax_id is None:
         return None
 
     # path to the output genome package
@@ -292,7 +289,7 @@ def download_taxon(
 
 
 def _get_blast_outfmt(columns: Sequence[str]) -> str:
-    """Given a tuple of columns to be included in the BLAST TSV output, get the value to be provided to 
+    """Given the columns to be included in the BLAST TSV output, get the value to be provided to 
     the -outfmt argument of the blastn command. See `blastn -help` for more info. 
     """
     # we need a custom output format since some info (e.g., sequences) are not included in the tsv by default

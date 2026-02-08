@@ -20,6 +20,7 @@ Classes:
 Functions:
 ----------
 - run
+- load
 """
 
 __author__ = 'Michael X. Wang'
@@ -162,7 +163,7 @@ def run(config: Config) -> Seqwin:
 
 
 def load(path: str | Path) -> Seqwin:
-    """Run Seqwin. 
+    """Load a Seqwin run instance from file. 
     
     Args:
         path (Path): Path to the Seqwin run snapshot (`results.seqwin`). 
