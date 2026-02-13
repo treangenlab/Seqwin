@@ -43,7 +43,7 @@ from .config import NODE_P
 
 # dtypes for numpy
 _HASH_NP_DT = KMER_DTYPE['hash'] # k-mer hash values
-CLUSTER_DTYPE = np.dtype([ # k-mer clusters
+NODE_DTYPE = np.dtype([ # k-mer nodes
     ('hash', _HASH_NP_DT), 
     ('n_tar', KMER_DTYPE['assembly_idx']), 
     ('n_neg', KMER_DTYPE['assembly_idx']), 
@@ -280,13 +280,13 @@ def agg_by_hash(hashes: NDArray, assembly_idx: NDArray, is_target: NDArray) -> N
         is_target (NDArray): Field of `KmerGraph.kmers`. 
 
     Returns:
-        NDArray: See `KmerGraph.clusters`. 
+        NDArray: See `KmerGraph.nodes`. 
     """
     n = hashes.size
     # pre-allocate output array (never larger than n)
-    clusters = np.empty(n, dtype=CLUSTER_DTYPE) # define dtype outside the numba function
+    nodes = np.empty(n, dtype=NODE_DTYPE) # define dtype outside the numba function
 
-    cluster_i = 0
+    node_i = 0
     i = 0
     while i < n:
         curr_hash = hashes[i]
@@ -314,14 +314,14 @@ def agg_by_hash(hashes: NDArray, assembly_idx: NDArray, is_target: NDArray) -> N
             i = j # advance by the duplicates
 
         # set individual values in numba, no fancy indexing
-        clusters[cluster_i]['hash'] = curr_hash
-        clusters[cluster_i]['n_tar'] = n_tar
-        clusters[cluster_i]['n_neg'] = n_neg
-        clusters[cluster_i]['penalty'] = .0 # placeholder for penalty
-        cluster_i += 1
+        nodes[node_i]['hash'] = curr_hash
+        nodes[node_i]['n_tar'] = n_tar
+        nodes[node_i]['n_neg'] = n_neg
+        nodes[node_i]['penalty'] = .0 # placeholder for penalty
+        node_i += 1
 
     # trim the over-allocated buffers
-    return clusters[:cluster_i]
+    return nodes[:node_i]
 
 
 def get_subgraphs(
