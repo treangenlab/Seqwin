@@ -73,10 +73,10 @@ seqwin --help
 Identify signatures by providing one or more target taxa and non-target neighboring taxa. 
 ```bash
 seqwin \
-  -t "Salmonella enterica subsp. enterica" \
+  -t "Salmonella enterica subsp. diarizonae" \
   -n "Salmonella enterica subsp. salamae" \
   -n "Salmonella bongori" \
-  -p 8
+  --threads 8
 ```
 Outputs are written to `seqwin-out/` in your working directory (see [Outputs](#outputs)). Taxa names must be exact matches to [NCBI Taxonomy](https://www.ncbi.nlm.nih.gov/datasets/taxonomy/tree/). 
 
@@ -91,9 +91,11 @@ Below is an example of `targets.txt` or `non-targets.txt`
 /data/genomes/GCA_008363955.1_ASM836395v1_genomic.fna.gz
 ```
 
-Expected runtime (with `-p 20`): ~10min for ~500 bacterial genomes with default settings, or ~15k bacterial genomes with `--no-blast` and `--no-mash`. 
+Expected runtime (with `--threads 8` or `-p 8`): 
+- ~5min and 2.5GB peak RAM for ~500 bacterial genomes with default settings. 
+- ~12min and 23GB peak RAM for ~15k bacterial genomes with `--no-blast` and `--no-mash`. 
 
-Run `seqwin --help` to see the full command line interface. 
+Run `seqwin --help` or `seqwin -h` to see the full command line interface. 
 
 ## Key parameters
 
@@ -109,10 +111,12 @@ By default, output signatures are BLAST checked against target genomes for sensi
 ### Minimizer sketch
 `--kmerlen` or `-k` (default 21): shorter k‑mers might be helpful for genomes with more sequence variations (e.g. set to 17 for viruses). 
 
-`--windowsize` or `-w` (default 200): smaller windows generate more minimizers and increase resolution at the cost of runtime & memory (e.g. set to 50 for viruses). 
+`--windowsize` or `-w` (default 200): smaller windows generate more minimizers and increase resolution (e.g., to find shorter signatures), at the cost of runtime & memory. 
 
 ### Performance tuning
-Use `--threads` or `-p` to leverage multiple CPU cores. Add `--no-mash` and `--no-blast` for fastest running time. 
+Use `--threads` or `-p` to leverage multiple CPU cores (4 by default). When the number of input genomes is large, add `--no-mash` and `--no-blast` for fastest running time. 
+- [Mash](https://doi.org/10.1186/s13059-016-0997-x) takes quadratic time as the number of genomes grows. With `--no-mash`, minimizer sketches are used to calculate node penalty threshold. 
+- Signatures are evaluated by building a BLAST database of all input genomes. With `--no-blast`, evaluation is skipped and `conservation` and `divergence` won't be calculated in `signatures.csv`. 
 
 ## Outputs
 Seqwin creates the following files/directories inside the directory specified by `--title` or `-o` (default `seqwin-out/`):
