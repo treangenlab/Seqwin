@@ -2,7 +2,7 @@
 Markers
 =======
 
-A core module of Seqwin. Extract candidate markers from subgraphs of a k-mer graph 
+A core module of Seqwin. Extract candidate markers (signatures) from subgraphs of a k-mer graph 
 (`kmers.KmerGraph.subgraphs`). 
 
 Dependencies
@@ -579,7 +579,7 @@ def _get_cks(
         ck for ck in all_cks 
         if (ck.len >= min_len) and (not ck.is_bad)
     )
-    logger.info(f' - Found {len(all_cks)} candidate markers')
+    logger.info(f' - Found {len(all_cks)} candidate signatures')
 
     logger.info(' - Fetching the representative sequence for each candidate...')
     all_reps = _fetch_cks_seq(all_cks, assemblies, rep_only=True, n_cpu=n_cpu)
@@ -697,10 +697,10 @@ def eval_markers(
     """
     if blastdb.name == BLASTCONFIG.title_neg_only:
         neg_only = True
-        logger.info('BLAST checking markers against non-target assemblies (less sensitive but faster)...')
+        logger.info('BLAST checking signatures against non-target assemblies (less sensitive but faster)...')
     elif blastdb.name == BLASTCONFIG.title_all:
         neg_only = False
-        logger.info('BLAST checking markers against all assemblies (more sensitive but slower)...')
+        logger.info('BLAST checking signatures against all assemblies (more sensitive but slower)...')
     else:
         log_and_raise(ValueError, f'Invalid BLAST database title. Must be "{BLASTCONFIG.title_all}" or "{BLASTCONFIG.title_neg_only}"')
     tik = time()
@@ -749,10 +749,10 @@ def eval_markers(
     if not neg_only: # check for markers with no BLAST hit
         for i, b in enumerate(all_blast):
             if b is None:
-                logger.warning(f'Marker at index {i} (0-based) has no BLAST hit in any assembly ({all_seqs[i][:10]}...)')
+                logger.warning(f'Signature at index {i} (0-based) has no BLAST hit in any assembly ({all_seqs[i][:10]}...)')
 
     # calculate conservation and divergence for each marker based on its blast output
-    logger.info(' - Evaluating each marker...')
+    logger.info(' - Evaluating each signature...')
     if neg_only:
         # do not calculate conservation since target assemblies are not included in the BLAST database
         n_tar = None
@@ -830,7 +830,7 @@ def get_markers(
 
     # evaluate each marker with BLAST
     if run_blast:
-        logger.info('Evaluating candidate markers with BLAST...')
+        logger.info('Evaluating candidate signatures with BLAST...')
         blastdb = assemblies.makeblastdb(
             prefix=working_dir / WORKINGDIR.blast_dir, 
             neg_only=blast_neg_only, 
@@ -839,7 +839,7 @@ def get_markers(
         )
         _eval_cks(all_cks, all_reps, blastdb, n_tar, n_neg, n_cpu)
     else:
-        logger.warning(f'Marker evaluation is turned off (--no-blast), skip running BLAST')
+        logger.warning(f'Signature evaluation is turned off (--no-blast), skip running BLAST')
         blastdb = None
 
     # save to fasta
@@ -858,7 +858,7 @@ def get_markers(
             (header, ck.len, ck.conservation, ck.divergence, ck.f_neg_hits, ck.rep_ratio, rep.n_kmers)
         )
     markers_fasta.write_text(''.join(fasta))
-    logger.info(f'Candidate markers saved as {markers_fasta}')
+    logger.info(f'Candidate signatures saved as {markers_fasta}')
 
     # save to csv
     markers_csv = working_dir / WORKINGDIR.markers_csv
@@ -867,7 +867,7 @@ def get_markers(
         csv, 
         columns=('fasta_header', 'length', 'conservation', 'divergence', 'f_neg_hits', 'rep_ratio', 'n_nodes')
     ).to_csv(markers_csv, index=False)
-    logger.info(f'Metrics of candidate markers saved as {markers_csv}')
+    logger.info(f'Metrics of candidate signatures saved as {markers_csv}')
 
     state.blastdb = blastdb
     return all_cks
