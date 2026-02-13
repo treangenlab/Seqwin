@@ -25,9 +25,10 @@ from ._version import __version__
 
 
 app = typer.Typer(
-    help=f'Seqwin: rapid and sensitive search of clade-specific markers', 
+    help=f'Seqwin: Ultrafast identification of signature sequences', 
     add_completion=False, # do not show command completion options in help
-    pretty_exceptions_show_locals=False # do not show huge blocks of local variables
+    pretty_exceptions_show_locals=False, # do not show huge blocks of local variables
+    context_settings={'help_option_names': ['-h', '--help']},
 )
 
 
@@ -84,19 +85,19 @@ def main(
     ), 
     stringency: int = typer.Option(
         5, '--stringency', '-s', show_default=True, 
-        help='Stringency level (0-10) for the sensitivity and specificity of output markers. ' \
+        help='Stringency level (0-10) for the sensitivity and specificity of output signatures. ' \
         'Higher levels result in lower estimated node penalty thresholds. Used only if --penalty-th is not provided (auto mode).'
     ), 
     min_len: int = typer.Option(
-        200, '--min-len', help='Min length of output markers.'
+        200, '--min-len', help='Min length of output signatures.'
     ), 
     max_len: int | None = typer.Option(
         None, '--max-len', show_default=False, 
-        help='Max length of output markers (estimated). No explicit limit if not provided.'
+        help='Max length of output signatures (estimated). No explicit limit if not provided.'
     ), 
     no_blast: bool = typer.Option(
         False, '--no-blast', show_default=False, 
-        help='Do NOT evaluate (BLAST) marker sequences.'
+        help='Do NOT evaluate (BLAST) signature sequences.'
     ), 
     # blast_neg_only: bool = typer.Option(
     #     False, '--fast-blast', is_flag=True, flag_value=True, show_default=False, 
@@ -106,7 +107,7 @@ def main(
         42, '--seed', help='Random seed for reproducibility.'
     ), 
     n_cpu: int = typer.Option(
-        1, '--threads', '-p', help='Number of parallel processes (CPU cores) to use.'
+        4, '--threads', '-p', help='Number of parallel processes (CPU cores) to use.'
     ), 
     level: Level = typer.Option(
         Level.contig, '--level', metavar='TEXT', # hide choices

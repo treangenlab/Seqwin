@@ -81,8 +81,8 @@ class Config(BaseModel):
             None to compute with Jaccard indices (capped by `penalty_th_cap`). [None]
         run_mash (bool): If True, use MinHash sketches (Mash) to estimate penalty_th; else use minimizer sketches (faster but might be biased). [True]
         stringency (int): If `penalty_th` is None (computed with Jaccard), multiply the computed penalty threshold with `(1 - x/10)`. [5]
-        min_len (int): Min length of output markers. [200]
-        max_len (int | None): Max length of output markers (estimated). None for no explicit limit (capped by `max_nodes_cap`). [None]
+        min_len (int): Min length of output signatures. [200]
+        max_len (int | None): Max length of output signatures (estimated). None for no explicit limit (capped by `max_nodes_cap`). [None]
         run_blast (bool): If True, BLAST check representative sequences. [True]
         blast_neg_only (bool): If True, only include non-target assemblies in the BLAST database (less sensitive but faster). [False]
         seed (int): Random seed for reproducibility. [42]
@@ -96,7 +96,7 @@ class Config(BaseModel):
         sketchsize (int): Sketch size for Mash (MinHash) sketch. [1000]
         get_dist (bool): If True, calculate assembly distance with minimizer sketches (slow). [False]
         
-        n_cpu (int): Number of threads to use. [1]
+        n_cpu (int): Number of threads to use. [4]
         
         level (Level): NCBI download option. Limit to genomes ≥ this assembly level ('contig' < 'scaffold' < 'chromosome' < 'complete'). ['contig']
         source (Source): NCBI download option. Genome source ('genbank' or 'refseq'). ['genbank']
@@ -119,7 +119,7 @@ class Config(BaseModel):
     title: str = 'seqwin-out'
     overwrite: bool = False
 
-    # Marker options
+    # Signature options
     kmerlen: int = 21
     windowsize: int = 200
     penalty_th: float | None = None
@@ -143,7 +143,7 @@ class Config(BaseModel):
     get_dist: bool = False
 
     # Performance
-    n_cpu: int = 1
+    n_cpu: int = 4
 
     # NCBI download options
     level: Level = Level.contig
@@ -225,8 +225,8 @@ class WorkingDir:
         mash (str): Mash sketch of all assemblies (.msh will be added by Mash). ['sketches']
         blast_dir (str): Directory for the BLAST database. ['blastdb']
         blast_log (str): Console output of the makeblastdb command, inside `blast_dir`. ['makeblastdb.log']
-        markers_fasta (str): Sequences and coordinates of candidate markers. ['markers.fasta']
-        markers_csv (str): Metrics of candidate markers. ['markers.csv']
+        markers_fasta (str): Sequences and coordinates of candidate signatures. ['signatures.fasta']
+        markers_csv (str): Metrics of candidate signatures. ['signatures.csv']
         results (str): The `Seqwin` instance (`core.py`) saved as pickle. ['results.seqwin']
     """
     log: str = 'seqwin.log'
