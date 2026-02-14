@@ -60,7 +60,7 @@ _WEIGHT_NB_DT = types.Tuple((_HASH_NB_DT, types.intp)) # graph weight: (w, last_
 HASH_ARR_NB_DT = types.Array(_HASH_NB_DT, 1, 'A') # array of hashes; 'A': accepts arbitrary/strided arrays
 
 
-@njit(nogil=True)
+@njit(nogil=True, cache=True)
 def get_edges(hashes) -> tuple[NDArray, NDArray]:
     """Get weighted edges and isolated nodes. 
 
@@ -161,7 +161,7 @@ def merge_weighted_edges(edges: NDArray) -> NDArray:
     return np.column_stack((edges, weights))
 
 
-@njit(nogil=True, parallel=True)
+@njit(nogil=True, parallel=True) # cannot be cached
 def sort_by_hash(kmers: NDArray) -> NDArray:
     """Sort `kmers` by 'hash' in-place in a stable manner, and return the sorted indices. 
     Use LSD (Least Significant Digit) radix sort. 
@@ -273,7 +273,7 @@ def sort_by_hash(kmers: NDArray) -> NDArray:
     return idx
 
 
-@njit(nogil=True)
+@njit(nogil=True, cache=True)
 def agg_by_hash(hashes: NDArray, assembly_idx: NDArray, is_target: NDArray) -> NDArray:
     """Count the number of target/non-target assemblies for each unique hash value. 
 
@@ -458,6 +458,25 @@ def get_subgraphs(
     return tuple(frozenset(sg) for sg in subgraphs), frozenset(used)
 
 
+@njit(nogil=True, cache=True)
+def _copy_blocks(arr_old: NDArray, arr_new: NDArray, starts: NDArray, sizes: NDArray) -> None:
+    """Copy contiguous blocks from an old array to a new array. 
+
+    Args:
+        arr_old (NDArray): The old array. 
+        arr_new (NDArray): The new array. 
+        starts (NDArray): Start position of each block in the old array. 
+        sizes (NDArray): Size of each block. 
+    """
+    ptr_new = 0
+    for i in range(len(starts)):
+        # iterate through each block
+        ptr_old = starts[i]
+        s = sizes[i]
+        arr_new[ptr_new : ptr_new + s] = arr_old[ptr_old : ptr_old + s]
+        ptr_new += s
+
+
 def filter_kmers(
     kmers: NDArray, idx: NDArray, nodes: NDArray, used: frozenset[int]
 ) -> tuple[NDArray, NDArray, NDArray]:
@@ -487,12 +506,7 @@ def filter_kmers(
         # used_arr is sorted to preserve node order
         np.searchsorted(hashes, used_arr)
     ]
-
-    # create a mask for kmers and idx
-    mask = np.zeros(len(kmers) + 1, dtype=np.int8)
-    np.add.at(mask, nodes['start'], 1)
-    np.add.at(mask, nodes['stop'], -1)
-    mask = np.cumsum(mask)[:-1].astype(np.bool_)
+    starts_old = nodes['start'].copy()
 
     # update start and stop in nodes
     sizes = nodes['stop'] - nodes['start'] # group size
@@ -503,8 +517,12 @@ def filter_kmers(
     nodes['start'] = starts
     nodes['stop'] = starts + sizes
 
-    # apply mask
-    kmers = kmers[mask]
-    idx = idx[mask]
-    logger.info(f' - {len(kmers)} k-mers left')
-    return kmers, idx, nodes
+    # copy used k-mers
+    total = nodes['stop'][-1]
+    kmers_new = np.empty(total, dtype=kmers.dtype)
+    _copy_blocks(kmers, kmers_new, starts_old, sizes)
+    idx_new = np.empty(total, dtype=idx.dtype)
+    _copy_blocks(idx, idx_new, starts_old, sizes)
+
+    logger.info(f' - {len(kmers_new)} k-mers left')
+    return kmers_new, idx_new, nodes
