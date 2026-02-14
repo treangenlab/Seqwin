@@ -389,7 +389,7 @@ class KmerGraph(object):
         subgraphs, used = get_subgraphs(graph, penalty_th, min_nodes, max_nodes, rng)
 
         # remove unused k-mers
-        kmers, idx = filter_kmers(kmers, idx, used)
+        kmers, idx, nodes = filter_kmers(kmers, idx, nodes, used)
 
         print_time_delta(time()-tik)
         self.kmers = kmers
@@ -498,7 +498,7 @@ class KmerGraph(object):
             log_and_raise(RuntimeError, 'No connected component was found. Try increase penalty threshold')
 
         # remove unused k-mers
-        kmers, idx = filter_kmers(kmers, idx, used)
+        kmers, idx, nodes = filter_kmers(kmers, idx, nodes, used)
 
         print_time_delta(time()-tik)
         self.kmers = kmers

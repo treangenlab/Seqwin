@@ -47,7 +47,10 @@ NODE_DTYPE = np.dtype([ # k-mer nodes
     ('hash', _HASH_NP_DT), 
     ('n_tar', KMER_DTYPE['assembly_idx']), 
     ('n_neg', KMER_DTYPE['assembly_idx']), 
-    ('penalty', np.float64)
+    ('penalty', np.float64), 
+    # store start/stop indices in the sorted KmerGraph.kmers, for faster access of each k-mer group
+    ('start', _HASH_NP_DT), 
+    ('stop', _HASH_NP_DT), 
 ])
 
 # dtypes for numba
@@ -290,6 +293,7 @@ def agg_by_hash(hashes: NDArray, assembly_idx: NDArray, is_target: NDArray) -> N
     i = 0
     while i < n:
         curr_hash = hashes[i]
+        start = i # start index of the current hash group
 
         n_tar = n_neg = 0
         # walk all rows having the same hash
@@ -318,6 +322,8 @@ def agg_by_hash(hashes: NDArray, assembly_idx: NDArray, is_target: NDArray) -> N
         nodes[node_i]['n_tar'] = n_tar
         nodes[node_i]['n_neg'] = n_neg
         nodes[node_i]['penalty'] = .0 # placeholder for penalty
+        nodes[node_i]['start'] = start
+        nodes[node_i]['stop'] = i # stop index of the current hash group
         node_i += 1
 
     # trim the over-allocated buffers
@@ -452,41 +458,53 @@ def get_subgraphs(
     return tuple(frozenset(sg) for sg in subgraphs), frozenset(used)
 
 
-def filter_kmers(kmers: NDArray, idx: NDArray, used: frozenset[int]) -> tuple[NDArray, NDArray]:
-    """Remove k-mers not included in `used`. `kmers` is already sorted by 'hash' (see `__get_penalty()`). 
+def filter_kmers(
+    kmers: NDArray, idx: NDArray, nodes: NDArray, used: frozenset[int]
+) -> tuple[NDArray, NDArray, NDArray]:
+    """
+    1. Remove k-mers (`kmers`, `idx` and `nodes`) not included in `used`. 
+    2. Update 'start' and 'stop' in nodes. 
 
     Args:
-        kmers (NDArray): See `KmerGraph.kmers`. 
+        kmers (NDArray): See `KmerGraph.kmers` (already sorted by 'hash'). 
         idx (NDArray): See `KmerGraph.idx`. 
+        nodes (NDArray): See `KmerGraph.nodes` (sorted by 'hash'). 
         used (frozenset[int]): Output of `get_subgraphs()`. 
     
     Returns:
         tuple: A tuple containing
             1. NDArray: See `KmerGraph.kmers`. 
             2. NDArray: See `KmerGraph.idx`. 
+            3. NDArray: See `KmerGraph.nodes`. 
     """
     logger.info(' - Removing k-mers not included in any of the subgraphs...')
-    hashes = kmers['hash']
+    hashes = nodes['hash']
 
-    # convert used to a sorted array (sorting is not necessary, but good practice)
+    # select used nodes
     used_arr = np.fromiter(used, dtype=hashes.dtype, count=len(used))
     used_arr.sort()
+    nodes = nodes[
+        # used_arr is sorted to preserve node order
+        np.searchsorted(hashes, used_arr)
+    ]
 
-    # create a mask of k-mers to be kept
-    # np.isin is memory-hungry, plus kmers is already sorted
-    # 1. find the index of used k-mers in hashes
-    left  = np.searchsorted(hashes, used_arr, side='left')
-    right = np.searchsorted(hashes, used_arr, side='right')
-    # 2. mark start/stop with 1/-1
-    flag = np.zeros(hashes.size + 1, dtype=np.int8)
-    np.add.at(flag, left, 1)
-    np.add.at(flag, right, -1)
-    # 3. create a boolean mask (specify int8, otherwise intp will be used)
-    np.cumsum(flag[:-1], dtype=np.int8, out=flag[:-1]) # in-place cumsum
-    mask = flag[:-1] > 0
+    # create a mask for kmers and idx
+    mask = np.zeros(len(kmers) + 1, dtype=np.int8)
+    np.add.at(mask, nodes['start'], 1)
+    np.add.at(mask, nodes['stop'], -1)
+    mask = np.cumsum(mask)[:-1].astype(np.bool_)
+
+    # update start and stop in nodes
+    sizes = nodes['stop'] - nodes['start'] # group size
+    starts = np.empty(len(nodes), dtype=hashes.dtype)
+    starts[0] = 0
+    if len(nodes) > 1:
+        starts[1:] = np.cumsum(sizes)[:-1]
+    nodes['start'] = starts
+    nodes['stop'] = starts + sizes
 
     # apply mask
     kmers = kmers[mask]
     idx = idx[mask]
     logger.info(f' - {len(kmers)} k-mers left')
-    return kmers, idx
+    return kmers, idx, nodes
