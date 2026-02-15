@@ -131,8 +131,11 @@ def get_edges(hashes) -> tuple[NDArray, NDArray]:
     return edges, isolates_arr
 
 
+@njit(nogil=True, parallel=True)
 def merge_weighted_edges(edges: NDArray) -> NDArray:
     """Add weights of the same edges. 
+    1. Parallel LSD radix sort (similar to `sort_by_hash()`). 
+    2. Aggregation. 
 
     Args:
         edges (NDArray): A 3-column array of weighted edges (u, v, w). 
@@ -140,25 +143,78 @@ def merge_weighted_edges(edges: NDArray) -> NDArray:
     Returns:
         NDArray: Unique edges with sum of weights. 
     """
-    # sort edges; np.lexsort takes keys in reverse order (secondary, primary)
-    edges = edges[
-        np.lexsort((edges[:, 1], edges[:, 0]))
-    ]
-    # identify indices where the edge changes
-    diff = (edges[:-1, 0] != edges[1:, 0]) | \
-           (edges[:-1, 1] != edges[1:, 1])
-    # get the start indices of each group
-    # np.flatnonzero returns indices where diff is True
-    # we add 1 because the change happens at the next index
-    group_starts = np.flatnonzero(diff) + 1
-    # prepend 0 to indicate the start of the first group
-    reduce_indices = np.concatenate(([0], group_starts))
-    # sum weights
-    weights = np.add.reduceat(edges[:, 2], reduce_indices)
-    # extract unique edges
-    edges = edges[reduce_indices, :2]
-    # stack back into a 3-column array
-    return np.column_stack((edges, weights))
+    n = edges.shape[0]
+    n_cpu = get_num_threads()
+
+    buf = np.empty_like(edges)
+    counts = np.empty((n_cpu, 65536), dtype=np.int64)
+    chunk_size = (n + n_cpu - 1) // n_cpu
+
+    # LSD radix sort: sort secondary key (2nd col) then primary key (1st col)
+    for col in (1, 0):
+        for shift in range(0, 64, 16):
+            counts[:] = 0
+
+            # --- parallel count ---
+            for t in prange(n_cpu):
+                start = t * chunk_size
+                end = min(start + chunk_size, n)
+                for i in range(start, end):
+                    key = (edges[i, col] >> shift) & 0xFFFF
+                    counts[t, key] += 1
+
+            # --- global prefix sum (serial) ---
+            current = 0
+            for key in range(65536):
+                for t in range(n_cpu):
+                    c = counts[t, key]
+                    counts[t, key] = current
+                    current += c
+
+            # --- parallel scatter (move) ---
+            for t in prange(n_cpu):
+                start = t * chunk_size
+                end = min(start + chunk_size, n)
+                if start < end:
+                    local_offsets = counts[t]
+
+                    for i in range(start, end):
+                        key = (edges[i, col] >> shift) & 0xFFFF
+                        pos = local_offsets[key]
+
+                        # move the entire row
+                        buf[pos, 0] = edges[i, 0]
+                        buf[pos, 1] = edges[i, 1]
+                        buf[pos, 2] = edges[i, 2]
+                        local_offsets[key] += 1
+
+            # swap buffers
+            edges, buf = buf, edges
+
+    # sequential aggregation
+    buf = np.empty_like(edges) # make buf point to virtual memory again
+    idx = 0
+    u = edges[0, 0]
+    v = edges[0, 1]
+    w = edges[0, 2]
+    for i in range(1, n):
+        if edges[i, 0] != u or edges[i, 1] != v:
+            buf[idx, 0] = u
+            buf[idx, 1] = v
+            buf[idx, 2] = w
+            idx += 1
+
+            u = edges[i, 0]
+            v = edges[i, 1]
+            w = edges[i, 2]
+        else:
+            w += edges[i, 2]
+
+    buf[idx, 0] = u
+    buf[idx, 1] = v
+    buf[idx, 2] = w
+
+    return buf[:idx + 1]
 
 
 @njit(nogil=True, parallel=True) # cannot be cached
@@ -190,18 +246,18 @@ def sort_by_hash(kmers: NDArray) -> NDArray:
     # create k-mer indices
     idx = np.arange(n, dtype=_HASH_NP_DT) # use the same dtype as hash
     # create a buffer, also use the same dtype as hash
-    buf = np.empty(n, dtype=_HASH_NP_DT)
+    buf = np.empty_like(idx)
 
     # 1. sort idx by 'hash' using a stable algorithm (LSD radix sort on 64-bit keys)
     # process 16 bits at a time (4 passes for 64-bit keys: 0-15, 16-31, 32-47, 48-63)
     # allocate thread-local count array
-    counts = np.zeros((n_cpu, 65536), dtype=np.int64)
+    counts = np.empty((n_cpu, 65536), dtype=np.int64)
     # chunk size for each thread
     chunk_size = (n + n_cpu - 1) // n_cpu
     for shift in range(0, 64, 16):
-        # --- parallel count ---
         counts[:] = 0
 
+        # --- parallel count ---
         for t in prange(n_cpu):
             start = t * chunk_size
             end = min(start + chunk_size, n)
