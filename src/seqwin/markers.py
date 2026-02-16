@@ -50,8 +50,14 @@ from .graph import OrderedKmers
 from .utils import StartMethod, print_time_delta, log_and_raise, file_to_write, mp_wrapper, most_common, most_common_weighted
 from .config import Config, RunState, WORKINGDIR, BLASTCONFIG, CONSEC_KMER_TH, LEN_TH_MUL, NO_BLAST_DIV
 
+# Set ConnectedKmers.is_bad as True if any of these warnings is present
+_BAD_WARNINGS = frozenset((
+    'single', # has only one k-mer
+    'dup', # has duplicate k-mers
+    'rev' # k-mer ordering is reversible
+))
 # Translation table for complement k-mer strands, deprecated. ['+' -> '-', '-' -> '+']
-_KMER_STRAND_COMP: Mapping[str, str] = str.maketrans('+-', '-+')
+_KMER_STRAND_COMP = str.maketrans('+-', '-+')
 
 
 class ConnectedKmers(object):
@@ -64,7 +70,7 @@ class ConnectedKmers(object):
             K-mers with adjacent indices are also adjacent in the assembly sequence. 
         loc (pd.DataFrame): Location of the subgraph in each assembly. 
             Columns: ['assembly_idx', 'record_idx', 'start', 'stop', 'n_kmers', 
-            'kmers', 'is_target', 'n_repeats', 'len']. 
+            'kmers', 'is_target', 'n_repeats', 'len', 'seq']. 
         path (OrderedKmers | None): K-mer ordering in the graph. None if the graph is not linear. 
         rep (pd.Series): Representative sequence of the subgraph (a certain row in `loc`). 
         len (int): Length of the representative sequence. 
@@ -73,12 +79,12 @@ class ConnectedKmers(object):
         conservation (float | None): Average fraction of identical bases between the representative and target assemblies. 
         divergence (float | None): Average fraction of mismatches and gaps between the representative and non-target assemblies. 
         rep_ratio (float | None): Fraction of target assemblies that have the same k-mer ordering as the representative. 
-        warning (set): Warning messages for debugging. 
-        is_bad (bool): If True, this instance is not considered in downstream processing. 
+        warnings (set): Undesirable features of the k-mer ordering. 
+        is_bad (bool): Set as True if `warnings` has anything listed in `_BAD_WARNINGS`. 
     """
     __slots__ = (
         'graph', 'kmers', 'loc', 'path', 'rep', 'len', 'n_rep', 'blast', 
-        'conservation', 'divergence', 'f_neg_hits', 'rep_ratio', 'warning', 'is_bad'
+        'conservation', 'divergence', 'f_neg_hits', 'rep_ratio', 'warnings', 'is_bad'
     )
     graph: nx.Graph
     kmers: pd.DataFrame
@@ -92,7 +98,7 @@ class ConnectedKmers(object):
     divergence: float | None
     f_neg_hits: float | None
     rep_ratio: float | None
-    warning: set
+    warnings: set
     is_bad: bool
 
     def __init__(self, graph: nx.Graph, kmers: pd.DataFrame, kmerlen: int) -> None:
@@ -108,11 +114,7 @@ class ConnectedKmers(object):
                 K-mers with adjacent indices are also adjacent in the assembly sequence. 
             kmerlen (int): See `Config` in `config.py`. 
         """
-        self.warning = set() # warning messages for debugging
-        # if is_bad is True, this instance is not considered in downstream processing. Conditions:
-        # 1. duplicated k-mers in graph
-        # 2. representative only has one k-mer
-        self.is_bad = False
+        warnings = set() # passed to methods to add warnings in-place
 
         # convert categorical columns back to string
         # kmers['strand'] = kmers['strand'].astype(str)
@@ -121,20 +123,23 @@ class ConnectedKmers(object):
         loc = ConnectedKmers.__get_loc(kmers, kmerlen)
 
         # determine the representative k-mer order and the number of targets having this order
-        rep_order, n_rep = self.__get_rep_order(loc)
+        rep_order, n_rep = ConnectedKmers.__get_rep_order(loc, warnings)
         # get the representative assembly for BLAST check
         # among the assemblies with rep_order, choose the one with the smallest index
         # in this way, there will be fewer assemblies to be loaded when fetching the actual sequences
         rep = loc[loc['kmers'] == rep_order].iloc[0]
 
         # determine the representative path in the graph
-        graph_order = self.__get_graph_order(graph, rep_order)
+        graph_order = ConnectedKmers.__get_graph_order(graph, rep_order, warnings)
 
         # determine the orientation (+/-) of the subgraph in each assembly, based on k-mer ordering
         # if graph_order is not None:
-        #     loc = self.__get_strand(loc, graph_order)
+        #     loc = ConnectedKmers.__get_strand(loc, graph_order, warnings)
         # else:
-        #     loc = self.__get_strand(loc, rep_order)
+        #     loc = ConnectedKmers.__get_strand(loc, rep_order, warnings)
+
+        # if is_bad is True, this instance is not considered in downstream processing
+        is_bad = len(warnings.intersection(_BAD_WARNINGS)) > 0
 
         # saving kmers and loc might take a lot of memory
         # self.graph = graph
@@ -153,6 +158,8 @@ class ConnectedKmers(object):
         self.divergence = None
         self.f_neg_hits = None
         self.rep_ratio = None
+        self.warnings = warnings
+        self.is_bad = is_bad
 
     @staticmethod
     def __get_loc(kmers: pd.DataFrame, kmerlen: int) -> pd.DataFrame:
@@ -218,13 +225,15 @@ class ConnectedKmers(object):
         loc.reset_index(drop=True, inplace=True)
         return loc
 
-    def __get_rep_order(self, loc: pd.DataFrame) -> tuple[OrderedKmers, int]:
+    @staticmethod
+    def __get_rep_order(loc: pd.DataFrame, warnings: set) -> tuple[OrderedKmers, int]:
         """Determine the representative k-mer order and the number of target assemblies having it. 
         1. Find the most common canonical k-mer ordering in target assemblies, weighted by the number of k-mers. 
         2. Sanity check. 
 
         Args:
             loc (pd.DataFrame): See `ConnectedKmers.loc`. 
+            warnings (set): See `ConnectedKmers.warnings`. 
         
         Returns:
             tuple: A tuple containing
@@ -255,25 +264,22 @@ class ConnectedKmers(object):
 
         # sanity check
         if len(rep_order) == 1:
-            # has only one k-mer
-            self.warning.add('single')
-            self.is_bad = True
+            warnings.add('single') # has only one k-mer
         if rep_order.is_dup:
-            # has duplicate k-mers
-            self.warning.add('dup')
-            self.is_bad = True
+            warnings.add('dup') # has duplicate k-mers
 
         return rep_order, c_canonical[rep_canonical]
 
-    def __get_graph_order(self, graph: nx.Graph, rep_order: OrderedKmers) -> OrderedKmers | None:
+    @staticmethod
+    def __get_graph_order(graph: nx.Graph, rep_order: OrderedKmers, warnings: set) -> OrderedKmers | None:
         """Determine k-mer order in the subgraph. 
         1. Check if the subgraph is linear. Return None if not linear. 
         2. If linear, determine its k-mer ordering and check if it has the same orientation with `rep_order`. 
-        3. Sanity check. 
 
         Args:
             graph (nx.Graph): See `ConnectedKmers.__init__()`. 
             rep_order (OrderedKmers): See `ConnectedKmers.__get_rep_order()`. 
+            warnings (set): See `ConnectedKmers.warnings`. 
         
         Returns:
             OrderedKmers | None: If the graph is linear, return the k-mer order in the graph; else return None. 
@@ -282,7 +288,7 @@ class ConnectedKmers(object):
         leaf_nodes = tuple(node for node in graph if graph.degree[node] == 1)
         if len(leaf_nodes) != 2:
             # non-linear graph, cannot determine k-mer ordering
-            self.warning.add('non-linear')
+            warnings.add('non-linear')
             return None
 
         # get k-mer ordering in the graph
@@ -291,7 +297,7 @@ class ConnectedKmers(object):
             graph_order = all_paths[0]
         else:
             # multiple paths, choose the best one
-            self.warning.add('multi-paths')
+            warnings.add('multi-paths')
             graph_order = None
             # choose the one that is the same as rep_order, if possible
             for path in all_paths:
@@ -314,22 +320,19 @@ class ConnectedKmers(object):
         # check if graph_order the same as rep_order
         graph_order = OrderedKmers(graph_order)
         if graph_order != rep_order:
-            self.warning.add('inconsistent')
-
-        # check if there is any duplicated k-mers
-        if graph_order.is_dup:
-            self.warning.add('dup')
-            self.is_bad = True
+            warnings.add('inconsistent')
 
         return graph_order
 
-    def __get_strand(self, loc: pd.DataFrame, ref_order: OrderedKmers) -> pd.DataFrame:
+    @staticmethod
+    def __get_strand(loc: pd.DataFrame, ref_order: OrderedKmers, warnings: set) -> pd.DataFrame:
         """Determine the orientation of the subgraph in each assembly, based on k-mer ordering 
         ('+': forward, '-': reverse, '?': undetermined, 'u': single k-mer). 
 
         Args:
             loc (pd.DataFrame): See `ConnectedKmers.loc`. 
             ref_order (OrderedKmers): The reference k-mer ordering (representative or graph). 
+            warnings (set): See `ConnectedKmers.warnings`. 
         
         Returns:
             pd.DataFrame: See `ConnectedKmers.loc` (with updated 'strand' column). 
@@ -340,26 +343,27 @@ class ConnectedKmers(object):
         if ref_order != ref_order.rev:
             # forward and reverse ordering is not the same
             loc['strand'] = loc['kmers'].apply(ref_order.which_strand)
-            self.warning.update(ref_order.warning)
+            warnings.update(ref_order.warning)
 
             # handle sequences with only one shared k-mer with ref_order (strand as 'u'), deprecated
             # not needed if using graph_order as ref, since these are sequences with only one k-mer
-            # loc = self.__get_strand_single(loc, ref_order)
+            # loc = ConnectedKmers.__get_strand_single(loc, ref_order, warnings)
         else:
             # k-mer ordering is reversible
-            self.warning.add('rev')
-            self.is_bad = True
+            warnings.add('rev')
             # determine strand based on 'kmer_strand', deprecated
-            # loc = self.__get_strand_ks(loc)
-        
+            # loc = ConnectedKmers.__get_strand_ks(loc)
+
         return loc
-    
-    def __get_strand_single(self, loc: pd.DataFrame, ref_order: OrderedKmers) -> pd.DataFrame:
+
+    @staticmethod
+    def __get_strand_single(loc: pd.DataFrame, ref_order: OrderedKmers, warnings: set) -> pd.DataFrame:
         """Handle rows in `ConnectedKmers.loc` that have only one shared k-mer with `ref_order`. 
 
         Args:
             loc (pd.DataFrame): See `ConnectedKmers.loc`. 
             ref_order (OrderedKmers): The reference k-mer ordering (representative or graph). 
+            warnings (set): See `ConnectedKmers.warnings`. 
         
         Returns:
             pd.DataFrame: See `ConnectedKmers.loc` (with updated 'strand' column). 
@@ -367,7 +371,7 @@ class ConnectedKmers(object):
         is_single = (loc['strand'] == 'u')
         if not is_single.any():
             return loc
-        
+
         # get kmer_strand of ref_order
         # it's likely that they all have the same kmer_strand, but just in case we find the most common one
         loc_ref = loc[loc['kmers'] == ref_order]
@@ -378,7 +382,7 @@ class ConnectedKmers(object):
             # might happen when the most common order and graph_order is not the same
             return loc
         strand_map = {kmer: strand for kmer, strand in zip(ref_order, ref_strand)}
-        
+
         # determine strand by k-mer strand
         def which_strand(row: pd.Series) -> str:
             """To be applied to all rows of loc[is_single]. 
@@ -394,18 +398,19 @@ class ConnectedKmers(object):
                     # the current k-mer is not included in the most common ordering
                     continue
             # no shared k-mer with mc_order, which should not happen since this is handled in OrderedKmers.which_strand()
-            self.warning.add('single_?')
+            warnings.add('single_?')
             return '?'
         loc.loc[is_single, 'strand'] = loc[is_single].apply(which_strand, axis=1)
         return loc
-    
-    def __get_strand_ks(self, loc: pd.DataFrame) -> pd.DataFrame:
+
+    def __get_strand_ks(loc: pd.DataFrame, warnings: set) -> pd.DataFrame:
         """Determine sequence strand based on 'kmer_strand'. Only used when strand cannot be determined by k-mer ordering
         (e.g., forward and reverse ordering are the same (ABA), or mc_order has only one k-mer). 
         NOTE: forward / reverse strand might have the same k-mer strand ordering (e.g., '++--'). 
 
         Args:
             loc (pd.DataFrame): See `ConnectedKmers.loc`. 
+            warnings (set): See `ConnectedKmers.warnings`. 
         
         Returns:
             pd.DataFrame: See `ConnectedKmers.loc` (with updated 'strand' column). 
@@ -414,7 +419,7 @@ class ConnectedKmers(object):
         mc_strand: str = most_common_weighted(loc['kmer_strand'])
         # reverse complement of mc_strand
         mc_strand_rc = mc_strand.translate(_KMER_STRAND_COMP)[::-1]
-        
+
         def which_strand(kmer_strand: str) -> str:
             if kmer_strand == mc_strand:
                 return '+'
@@ -425,11 +430,11 @@ class ConnectedKmers(object):
             elif (kmer_strand in mc_strand_rc) and (kmer_strand not in mc_strand):
                 return '-'
             else: # undetermined strand
-                self.warning.add('rev_?')
+                warnings.add('rev_?')
                 return '?'
         loc['strand'] = loc['kmer_strand'].apply(which_strand)
         return loc
-    
+
     @staticmethod
     def __filter(loc: pd.DataFrame) -> pd.DataFrame:
         """Remove abnormal rows in loc. 
@@ -471,24 +476,23 @@ def _get_create_ck_args(
     Yields:
         tuple: Input arguments of `_create_ck()`. 
     """
-    # convert the k-mers df to a dict of k-mer clusters, this will make fetching k-mers with the same hash much faster
-    # although this can be done before calculating cluster penalty, but converting groupby to dict is much slower than groupby.agg()
-    # so unless we are not filtering any k-mer clusters, it is faster to 
-    # 1. calculate cluster penalty with groupby.agg()
-    # 2. filter out high penalty k-mer clusters
-    # 3. convert the smaller df to a dict of k-mer clusters
-    kmer_clusters = pd.DataFrame(kmers.kmers, index=kmers.idx, copy=False)
-    kmer_clusters = dict(tuple(kmer_clusters.groupby('hash', sort=False)))
+    # create a dict of hash -> k-mer group
+    kmer_groups = pd.DataFrame(kmers.kmers, index=kmers.idx, copy=False)
+    kmer_groups = {
+        # kmers and nodes are both sorted by 'hash'
+        node['hash']: kmer_groups.iloc[node['start']:node['stop']] 
+        for node in kmers.nodes
+    }
 
-    # create a nx instance for each subgraph, and extract underlying k-mers from the df
+    # yield function args
     graph = kmers.graph
     for subgraph in kmers.subgraphs:
         # each subgraph is a set of nodes, so it's not ordered
         arg_graph = graph.subgraph(subgraph).copy()
 
-        # fetch k-mers for each node (k-mer cluster) and keep k-mer index
+        # fetch the k-mer group of each node and keep k-mer indices
         arg_kmers = pd.concat(
-            (kmer_clusters.pop(node) for node in subgraph), # remove node from dict to save memory
+            (kmer_groups.pop(node) for node in subgraph), 
             ignore_index=False
         )
 
@@ -745,7 +749,7 @@ def eval_markers(
         g.reset_index(drop=True, inplace=True)
         all_blast[i] = g
     #---------- extract BLAST hits of each marker ----------#
-    
+
     if not neg_only: # check for markers with no BLAST hit
         for i, b in enumerate(all_blast):
             if b is None:
