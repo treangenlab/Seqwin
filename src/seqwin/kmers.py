@@ -64,10 +64,10 @@ class KmerGraph(object):
     3. Extract low-penalty subgraphs from the k-mer graph with `self.filter()`. 
     
     Attributes:
-        kmers (NDArray): A 1-D Numpy array of k-mers from all assemblies, with dtype `KMER_DTYPE` defined in `minimizer.py`. 
-        idx (NDArray | None): The original indices when k-mers are generated (k-mers with consecutive indices are adjacent in the genome). 
-        nodes (NDArray): A 1-D Numpy structured array of k-mer nodes, with fields ['hash', 'n_tar', 'n_neg', 'penalty']. 
-        edges (NDArray): A 3-column Numpy array of weighted edges (u, v, w). 
+        kmers (NDArray): A 1-D Numpy structured array of k-mers from all assemblies, with dtype `KMER_DTYPE` defined in `minimizer.py`. 
+        idx (NDArray | None): The original indices assigned when k-mers are generated (k-mers with consecutive indices are adjacent in the genome). 
+        nodes (NDArray): A 1-D Numpy structured array of k-mer nodes, with dtype `NODE_DTYPE` defined in `helpers.py`. 
+        edges (NDArray): A 3-column Numpy array of weighted, undirected edges (u, v, w). 
             Edge weight is the number of assemblies where the two k-mers are adjacent. 
         graph (nx.Graph): The graph instance built from filtered nodes and edges. 
         cnt_mtx (NDArray | None): A matrix of the number of shared k-mers between each assembly pair. 
@@ -92,8 +92,8 @@ class KmerGraph(object):
 
     def __init__(self, assemblies: Assemblies, kmerlen: int, windowsize: int, get_dist: bool, n_cpu: int) -> None:
         """
-        1. Generate weighted edges and k-mer nodes. 
-        2. Calculate node penalty scores. 
+        1. Generate minimizer sketches and weighted edges. 
+        2. Generate k-mer nodes and calculate node penalty scores. 
         3. Calculate assembly distances if `get_dist=True`. 
 
         Args:
@@ -440,7 +440,7 @@ class KmerGraph(object):
         # remove isolated nodes
         nodes_to_keep = np.unique(edges[:, :2])
         nodes = nodes[
-            np.isin(nodes['hash'], nodes_to_keep, assume_unique=True)
+            np.searchsorted(nodes['hash'], nodes_to_keep)
         ]
         logger.info(f' - Removed {n_nodes - len(nodes)} isolated nodes, {len(nodes)} nodes left')
 
