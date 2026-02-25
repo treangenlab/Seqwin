@@ -30,7 +30,7 @@ Attributes:
 __author__ = 'Michael X. Wang'
 __license__ = 'GPL 3.0'
 
-import shutil, json, logging
+import shutil, json, logging, zipfile
 from pathlib import Path
 from time import time
 from enum import Enum
@@ -117,7 +117,7 @@ def search_taxon(taxon: str) -> tuple[str | None, str | None]:
         logger.debug(summary.stderr)
         logger.error(f' - Unable to find taxon "{taxon}"')
         return None, None
-    
+
     summary = json.loads(summary.stdout)
     tax_id = summary['taxonomy']['tax_id']
     tax_name = summary['taxonomy']['current_scientific_name']['name']
@@ -236,7 +236,7 @@ def download_taxon(
         args += ['--assembly-source', 'RefSeq']
     else:
         log_and_raise(ValueError, f'Invalid download source: {source}')
-    
+
     if annotated:
         args.append('--annotated')
 
@@ -244,7 +244,7 @@ def download_taxon(
         args += ['--mag', 'exclude']
     else:
         args += ['--mag', 'all']
-    
+
     logger.info(f'Downloading genome package for NCBI Taxonomy ID {tax_id}...')
     tik = time()
 
@@ -258,12 +258,13 @@ def download_taxon(
 
     # unzip dehydrated package
     logger.info(' - Unzipping dehydrated genome package...')
-    unzip_log = run_cmd('unzip', tax_zip, '-d', tax_dir, raise_error=False)
-    if unzip_log.returncode != 0:
-        logger.error(unzip_log.stderr)
+    try:
+        with zipfile.ZipFile(tax_zip, 'r') as zf:
+            zf.extractall(tax_dir)
+    except Exception:
         shutil.rmtree(tax_dir, ignore_errors=True) # remove incomplete dir
         log_and_raise(msg=f'Failed to unzip genome package for NCBI Taxonomy ID {tax_id}: {tax_zip}')
-    
+
     # download actual sequences
     args = [
         'datasets', 'rehydrate', '--directory', tax_dir, 
@@ -279,7 +280,7 @@ def download_taxon(
         logger.error(rehydrate_log.stderr)
         shutil.rmtree(tax_dir, ignore_errors=True) # remove incomplete dir
         log_and_raise(msg=f'Failed to rehydrate data package for taxon "{taxon}"')
-    
+
     # get the file path of each assembly
     assembly_paths = get_assembly_paths(tax_dir)
     logger.info(f' - Downloaded {len(assembly_paths)} genome assemblies for NCBI Taxonomy ID {tax_id}.')
@@ -312,12 +313,14 @@ def _blast_batch(
     """Run BLAST on a list of sequences and return a DataFrame of the tabular output. 
 
     Args:
-        seq_idx (Sequence[int]): indices of the input sequences. 
+        seq_idx (Sequence[int]): Indices of the input sequences. 
         seq_list (Sequence[str]): A list of sequences for BLAST. 
         db (Path): Path to the BLAST database. 
         task (str): Preset BLAST tasks ('blastn', 'blastn-short', 'megablast'). 
         columns (Sequence[str]): Columns to be included in the DataFrame output. 
         outfmt (str): Output of `_get_blast_outfmt()`. 
+        taxids (Sequence[int] | None): Only search for these taxonomy IDs and their descendants. 
+        neg_taxids (Sequence[int] | None): Do NOT search for these taxonomy IDs and their descendants. 
         n_cpu (int): Number of processes to run in parallel. 
 
     Returns:
@@ -373,6 +376,8 @@ def blast(
         db (Path): Path to the BLAST database. 
         task (str): Preset BLAST tasks ('blastn', 'blastn-short', 'megablast'). ['blastn']
         columns (Sequence[str] | None): Columns to be included in the DataFrame output. None to use default columns. [None]
+        taxids (Sequence[int] | None): Only search for these taxonomy IDs and their descendants. [None]
+        neg_taxids (Sequence[int] | None): Do NOT search for these taxonomy IDs and their descendants. [None]
         n_cpu (int, optional): Number of processes to run in parallel. [1]
         batch_size (int, optional): Number of query sequences in a single BLAST run. [1000]
 
