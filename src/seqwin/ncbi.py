@@ -45,7 +45,7 @@ if shutil.which('datasets') is None:
 if shutil.which('blastn') is None:
     raise ImportError('BLAST+ is not installed (`blastn` is not found in your PATH).')
 
-from .utils import print_time_delta, log_and_raise, file_to_write, list_dir, run_cmd
+from .utils import log_and_raise, file_to_write, list_dir, run_cmd
 
 _ZIP_EXT = '.zip' # File extension of NCBI genome package. ['.zip']
 _BLAST_COL = ( # Default columns to be included in the BLAST tsv output
@@ -66,7 +66,7 @@ _BLAST_COL = ( # Default columns to be included in the BLAST tsv output
     'qseq', # 15. aligned part of query sequence
     'sseq', # 16. aligned part of subject sequence
 )
-_MAX_REHYDRATE_WORKERS = 30 # Maximum number of CPUs for `datasets rehydrate`
+_MAX_REHYDRATE_WORKERS = 8 # Maximum number of CPUs for `datasets rehydrate` (avoid request bursts)
 _MAX_HSPS = '1000' # Maximum number of HSPs per subject sequence to save for each query. ['1000']
 _MAX_TARGET_SEQS = '50000' # Maximum number of aligned sequences to keep. ['50000']
 
@@ -110,11 +110,12 @@ def search_taxon(taxon: str) -> tuple[str | None, str | None]:
     summary = run_cmd(
         'datasets', 'summary', 'taxonomy', 'taxon', str(taxon), 
         '--as-json-lines', # output as json
-        '--report', 'names' # do not output tax ids of children
+        '--report', 'names', # do not output tax ids of children
+        raise_error=False
     )
 
     if summary.stdout == '':
-        logger.debug(summary.stderr)
+        logger.error(summary.stderr)
         logger.error(f' - Unable to find taxon "{taxon}"')
         return None, None
 
@@ -122,8 +123,7 @@ def search_taxon(taxon: str) -> tuple[str | None, str | None]:
     tax_id = summary['taxonomy']['tax_id']
     tax_name = summary['taxonomy']['current_scientific_name']['name']
     logger.info(f' - Found NCBI Taxonomy ID: {tax_id}')
-    logger.info(f' - Found NCBI Taxon: {tax_name}')
-    print_time_delta(time()-tik)
+    logger.debug(f' - Found NCBI Taxon: {tax_name}')
     return tax_id, tax_name
 
 
@@ -145,8 +145,10 @@ def get_assembly_paths(package_dir: Path) -> list[Path]:
     paths = list()
     for assembly_dir in assemblies:
         assembly_path = list_dir(assembly_dir, mode='f')
-        if len(assembly_path) != 1:
+        if len(assembly_path) > 1:
             logger.warning(f' - Found more than one files under {assembly_dir}')
+        elif len(assembly_path) == 0:
+            log_and_raise(FileNotFoundError, f'No assembly file is found {assembly_dir}')
         paths.append(assembly_path[0])
     return paths
 
@@ -160,6 +162,7 @@ def download_taxon(
     annotated: bool=True, 
     exclude_mag: bool=False, 
     gzip: bool=True, 
+    overwrite: bool=False, 
     n_cpu: int=1
 ) -> list[Path] | None:
     """Download genome assemblies under a taxon from NCBI Taxonomy. Internet connection is needed. 
@@ -174,6 +177,7 @@ def download_taxon(
         annotated (bool, optional): If True, limit to GenBank (submitter) or RefSeq annotated genomes, based on the selection of source. [True]
         exclude_mag (bool, optional): If True, exclude metagenome-assembled genomes (MAGs). [False]
         gzip (bool, optional): If True, download genome sequences in gzip format. [True]
+        overwrite (bool, optional): If True, overwrite the zipped genome package. [False]
         n_cpu (int, optional): Number of processes to run in parallel. [1]
 
     Returns:
@@ -182,13 +186,21 @@ def download_taxon(
     # sanity check
     if not prefix.is_dir():
         log_and_raise(NotADirectoryError, f'Cannot download genomes to this location, since it is not a directory: {prefix}')
-    n_cpu = min(n_cpu, _MAX_REHYDRATE_WORKERS) # --max-workers for rehydrate is 30
+    n_cpu = min(n_cpu, _MAX_REHYDRATE_WORKERS)
 
     # reuse existing genome package
     tax_dir = prefix / taxon.replace(' ', '-')
     if tax_dir.exists():
         logger.warning(f'Existing genome package is found {tax_dir}')
-        assembly_paths = get_assembly_paths(tax_dir)
+        try:
+            assembly_paths = get_assembly_paths(tax_dir)
+        except Exception as e:
+            log_and_raise(
+                RuntimeError, 
+                (f'Genome package might be incomplete {tax_dir}\n'
+                'Consider deleting it and try again.'), 
+                from_e=e
+            )
         logger.info(f' - Found {len(assembly_paths)} genome assemblies.')
         return assembly_paths
 
@@ -202,7 +214,7 @@ def download_taxon(
 
     # add .zip to tax_dir (don't use with_suffix since tax_name might contain '.')
     tax_zip = tax_dir.with_name(tax_dir.name + _ZIP_EXT)
-    file_to_write(tax_zip, overwrite=False)
+    file_to_write(tax_zip, overwrite=overwrite)
 
     # arguments for the download command
     args = [
@@ -246,24 +258,23 @@ def download_taxon(
         args += ['--mag', 'all']
 
     logger.info(f'Downloading genome package for NCBI Taxonomy ID {tax_id}...')
-    tik = time()
 
     # download metadata
-    logger.info(' - Downloading dehydrated genome package (metadata only)...')
+    logger.debug(' - Downloading dehydrated genome package (metadata only)...')
     download_log = run_cmd(*args, raise_error=False)
     if download_log.returncode != 0:
-        logger.debug(download_log.stderr)
+        logger.error(download_log.stderr)
         logger.error(f' - No genome assemblies were found for NCBI Taxonomy ID {tax_id}, try loosen the filters.')
         return None
 
     # unzip dehydrated package
-    logger.info(' - Unzipping dehydrated genome package...')
+    logger.debug(' - Unzipping dehydrated genome package...')
     try:
         with zipfile.ZipFile(tax_zip, 'r') as zf:
             zf.extractall(tax_dir)
-    except Exception:
-        shutil.rmtree(tax_dir, ignore_errors=True) # remove incomplete dir
-        log_and_raise(msg=f'Failed to unzip genome package for NCBI Taxonomy ID {tax_id}: {tax_zip}')
+    except Exception as e:
+        shutil.rmtree(tax_dir) # remove incomplete dir
+        log_and_raise(RuntimeError, f'Failed to unzip genome package for NCBI Taxonomy ID {tax_id}: {tax_zip}', from_e=e)
 
     # download actual sequences
     args = [
@@ -271,21 +282,26 @@ def download_taxon(
         '--max-workers', str(n_cpu), '--no-progressbar'
     ]
     if gzip:
-        logger.info(' - Rehydrating in gzip format...')
+        logger.debug(' - Rehydrating in gzip format...')
         args += ['--gzip']
     else:
-        logger.info(' - Rehydrating...')
-    rehydrate_log = run_cmd(*args, raise_error=False)
-    if rehydrate_log.returncode != 0:
-        logger.error(rehydrate_log.stderr)
-        shutil.rmtree(tax_dir, ignore_errors=True) # remove incomplete dir
-        log_and_raise(msg=f'Failed to rehydrate data package for taxon "{taxon}"')
+        logger.debug(' - Rehydrating...')
+    try:
+        run_cmd(*args, raise_error=True)
+    except Exception as e:
+        shutil.rmtree(tax_dir) # remove incomplete dir
+        log_and_raise(
+            RuntimeError, 
+            (f'Failed to rehydrate data package for taxon "{taxon}".\n'
+            'NCBI might have blocked the request due to high usage. Try waiting for a while before running Seqwin again.\n'
+            'Add --overwrite to the command so that downloaded taxon packages can be reused.'), 
+            from_e=e
+        )
 
     # get the file path of each assembly
     assembly_paths = get_assembly_paths(tax_dir)
     logger.info(f' - Downloaded {len(assembly_paths)} genome assemblies for NCBI Taxonomy ID {tax_id}.')
 
-    print_time_delta(time()-tik)
     return assembly_paths
 
 

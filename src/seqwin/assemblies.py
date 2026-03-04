@@ -419,16 +419,10 @@ def _get_paths_dl(taxa_list: list[str], prefix: Path, config: Config) -> list[Pa
             annotated=config.annotated, 
             exclude_mag=config.exclude_mag, 
             gzip=config.gzip, 
+            overwrite=config.overwrite, 
             n_cpu=config.n_cpu
         )
-        if download_paths is None:
-            log_and_raise(
-                RuntimeError, 
-                f'Unsuccessful download of taxon {taxon}. \
-                Try removing this taxon and re-running Seqwin with the same "--prefix" and "--title". \
-                Downloaded taxon packages will be reused.'
-            )
-        else:
+        if download_paths is not None:
             paths.extend(download_paths)
     return paths
 

@@ -43,7 +43,7 @@ Attributes:
 __author__ = 'Michael X. Wang'
 __license__ = 'GPL 3.0'
 
-import gzip, shutil, logging, datetime, subprocess, multiprocessing
+import gzip, shutil, logging, datetime, subprocess, shlex, multiprocessing
 from pathlib import Path
 from time import time
 from enum import Enum
@@ -97,12 +97,29 @@ def print_time_delta(seconds: float) -> None:
     logger.info(f' - Finished in {datetime.timedelta(seconds=seconds)}')
 
 
-def log_and_raise(exception: Exception=Exception, msg: str | None=None, from_none: bool=False) -> None:
+def log_and_raise(
+    exception: type[Exception]=Exception, 
+    msg: str='', 
+    from_none: bool=False, 
+    from_e: BaseException | None=None
+) -> None:
     """Log and raise an error. 
+
+    Args:
+        exception (type[Exception], optional): Exception type. [Exception]
+        msg (str, optional): Message to be logged and printed. ['']
+        from_none (bool, optional): If True, run `raise ... from None`. [False]
+        from_e (BaseException | None, optional): If provided, run `raise ... from ...`. [None]
     """
-    logger.critical(msg)
+    logger.critical((msg or exception.__name__))
+
+    if from_none and from_e is not None:
+        raise ValueError('Use only one of from_none or from_e')
+
     if from_none:
         raise exception(msg) from None
+    if from_e is not None:
+        raise exception(msg) from from_e
     else:
         raise exception(msg)
 
@@ -199,11 +216,16 @@ def run_cmd(*args, stdin: str | None=None, raise_error: bool=True) -> subprocess
     for a in args:
         if not isinstance(a, (str, Path)):
             log_and_raise(TypeError, 'Only str or Path are accepted as command line arguments')
-    cmd_out = subprocess.run(args, input=stdin, capture_output=True, text=True)
-    # capture error message
-    if raise_error and cmd_out.returncode != 0:
-        log_and_raise(Exception, cmd_out.stderr)
-    return cmd_out
+    try:
+        return subprocess.run(args, input=stdin, capture_output=True, text=True, check=raise_error)
+    except subprocess.CalledProcessError as e:
+        msg = (
+            'Subprocess failed\n'
+            f'cmd: {shlex.join(str(c) for c in e.cmd)}\n'
+            f'exit code: {e.returncode}\n'
+            f'stderr:\n{(e.stderr or '').strip()}'
+        )
+        log_and_raise(RuntimeError, msg, from_e=e)
 
 
 def mp_wrapper(
