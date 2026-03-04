@@ -2,11 +2,11 @@
 Seqwin
 ======
 
-Rapid and sensitive search of clade-specific microbial marker sequences via minimizer graphs
-- Output sensitive and specific marker sequences. 
+Ultrafast identification of signature sequences in microbial genomes
+- Output sensitive and specific genomic signatures. 
 - High input scalability. 
-- Robust to low-quality genomes. 
-- Do not rely on annotations. 
+- Robust to sequence variations and low-quality assemblies. 
+- Use raw sequences as input. 
 
 Usage:
 ------
