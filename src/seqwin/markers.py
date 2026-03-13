@@ -35,6 +35,7 @@ from pathlib import Path
 from time import time
 from itertools import repeat
 from collections import Counter
+from dataclasses import dataclass, fields, asdict, astuple
 from collections.abc import Mapping, Generator
 
 logger = logging.getLogger(__name__)
@@ -48,7 +49,7 @@ from .kmers import KmerGraph
 from .ncbi import blast
 from .graph import OrderedKmers
 from .utils import StartMethod, print_time_delta, log_and_raise, file_to_write, mp_wrapper, most_common, most_common_weighted
-from .config import Config, RunState, WORKINGDIR, BLASTCONFIG, CONSEC_KMER_TH, LEN_TH_MUL, NO_BLAST_DIV
+from .config import Config, RunState, WORKINGDIR, BLASTCONFIG, CONSEC_KMER_TH, LEN_TH_MUL
 
 # Set ConnectedKmers.is_bad as True if any of these warnings is present
 _BAD_WARNINGS = frozenset((
@@ -58,6 +59,37 @@ _BAD_WARNINGS = frozenset((
 ))
 # Translation table for complement k-mer strands, deprecated. ['+' -> '-', '-' -> '+']
 _KMER_STRAND_COMP = str.maketrans('+-', '-+')
+
+
+@dataclass(slots=True, frozen=True)
+class MarkerMetrics:
+    """
+    Metrics of a marker, calculated from its BLAST alignments against target / non-target assemblies. 
+    Metrics default to None if BLAST is not run. 
+
+    Attributes:
+        conservation (float| None): Average fraction of identical bases between the marker and target assemblies. 
+        f_tar_hits (float| None): Fraction of target assemblies with a BLAST hit. 
+        divergence (float| None): Average fraction of mismatches and gaps between the marker and non-target assemblies. 
+        f_neg_hits (float| None): Fraction of non-target assemblies with a BLAST hit. 
+        avg_repeats_tar (float| None): Average number of repeats of this marker in target assemblies. 
+        avg_pident_tar (float| None): Average percentage of identical bases of all repeats in target assemblies. 
+        avg_repeats_neg (float| None): Average number of repeats of this marker in non-target assemblies. 
+        avg_pident_neg (float| None): Average percentage of identical bases of all repeats in non-target assemblies. 
+    """
+    conservation: float | None = None
+    f_tar_hits: float | None = None
+    divergence: float | None = None
+    f_neg_hits: float | None = None
+    avg_repeats_tar: float | None = None
+    avg_pident_tar: float | None = None
+    avg_repeats_neg: float | None = None
+    avg_pident_neg: float | None = None
+
+_METRIC_NAMES = tuple(f.name for f in fields(MarkerMetrics))
+_EMPTY_METRICS = MarkerMetrics()
+# Baseline metrics if marker has no BLAST hit
+_BASELINE_METRICS = MarkerMetrics(**{f: .0 for f in _METRIC_NAMES})
 
 
 class ConnectedKmers(object):
@@ -76,15 +108,14 @@ class ConnectedKmers(object):
         len (int): Length of the representative sequence. 
         n_rep (int): Number of assemblies having the same k-mer order as the representative. 
         blast (pd.DataFrame | None): The best BLAST hit of the representative sequence in each assembly. 
-        conservation (float | None): Average fraction of identical bases between the representative and target assemblies. 
-        divergence (float | None): Average fraction of mismatches and gaps between the representative and non-target assemblies. 
+        metrics (MarkerMetrics): Metrics calculated with BLAST. 
         rep_ratio (float | None): Fraction of target assemblies that have the same k-mer ordering as the representative. 
         warnings (set): Undesirable features of the k-mer ordering. 
         is_bad (bool): Set as True if `warnings` has anything listed in `_BAD_WARNINGS`. 
     """
     __slots__ = (
         'graph', 'kmers', 'loc', 'path', 'rep', 'len', 'n_rep', 'blast', 
-        'conservation', 'divergence', 'f_neg_hits', 'rep_ratio', 'warnings', 'is_bad'
+        'metrics', 'rep_ratio', 'warnings', 'is_bad'
     )
     graph: nx.Graph
     kmers: pd.DataFrame
@@ -94,9 +125,7 @@ class ConnectedKmers(object):
     len: int
     n_rep: int
     blast: pd.DataFrame | None
-    conservation: float | None
-    divergence: float | None
-    f_neg_hits: float | None
+    metrics: MarkerMetrics
     rep_ratio: float | None
     warnings: set
     is_bad: bool
@@ -154,9 +183,7 @@ class ConnectedKmers(object):
         self.len = rep['len']
         self.n_rep = n_rep
         self.blast = None
-        self.conservation = None
-        self.divergence = None
-        self.f_neg_hits = None
+        self.metrics = _EMPTY_METRICS
         self.rep_ratio = None
         self.warnings = warnings
         self.is_bad = is_bad
@@ -631,58 +658,50 @@ def _get_avg_dist(blast_out: pd.DataFrame, query_len: int, n: int) -> float:
     return sum(blast_out['mismatch'] + blast_out['gaps']) / query_len / n
 
 
-def _get_scores(
-    blast_out: pd.DataFrame, marker_len: int, n_tar: int | None=None, n_neg: int | None=None
-) -> tuple[float | None, float | None, float | None]:
-    """Calculate the conservation and divergence of a marker based on its BLAST hits in all assemblies. 
+def _get_metrics(
+    blast_out: pd.DataFrame, marker_len: int, n_tar: int, n_neg: int
+) -> MarkerMetrics:
+    """Calculate the metrics of a marker based on its BLAST hits in all assemblies. 
     - Conservation is calculated with `_get_avg_ident()` on target assemblies. 
     - Divergence is calculated with `_get_avg_dist()` on non-target assemblies. 
-        For assemblies with no hit, divergence is assumed to be `NO_BLAST_DIV` in `config.py`. 
-    - Count the fraction of non-target assemblies with a BLAST hit. 
     
     Args:
         blast_out (pd.DataFrame): Each row is the best BLAST hit of the marker in an assembly. 
             Required columns: ['is_target', 'nident', 'mismatch', 'gaps']
         marker_len (int): Marker length. 
-        n_tar (int | None): Number of target assemblies. If None, conservation is not calculated. 
-        n_neg (int | None): Number of non-target assemblies. If None, divergence is not calculated. 
+        n_tar (int): Number of target assemblies. 
+        n_neg (int): Number of non-target assemblies. 
     
     Returns:
-        tuple: (conservation, divergence, f_neg_hits)
+        MarkerMetrics:
     """
-    if n_tar is None: # do not calculate conservation
-        conservation = None
-    else:
-        conservation = .0 # conservation value when no blast hit in target assemblies
-
-    if n_neg is None: # do not calculate divergence
-        divergence = None
-        f_neg_hits = None
-    else:
-        divergence = NO_BLAST_DIV # divergence value when no blast hit in non-target assemblies
-        f_neg_hits = .0
-
     if blast_out is None: # no blast hit in any assembly
-        return conservation, divergence, f_neg_hits
+        return _BASELINE_METRICS
+
+    metrics = asdict(_BASELINE_METRICS)
 
     # calculate conservation
-    if n_tar is not None:
-        df_tar = blast_out[blast_out['is_target'] == True]
-        conservation = _get_avg_ident(df_tar, marker_len, n_tar)
+    df_tar = blast_out[blast_out['is_target'] == True]
+    if len(df_tar) > 0:
+        metrics['conservation'] = _get_avg_ident(df_tar, marker_len, n_tar)
+        metrics['f_tar_hits'] = len(df_tar) / n_tar
+        metrics['avg_repeats_tar'] = df_tar['n_hits'].mean()
+        metrics['avg_pident_tar'] = df_tar['avg_nident'].mean() / marker_len
 
     # calculate divergence
-    if n_neg is not None:
-        df_neg = blast_out[blast_out['is_target'] == False]
-        divergence = _get_avg_dist(df_neg, marker_len, n_neg)
-        divergence += NO_BLAST_DIV * (n_neg - len(df_neg)) / n_neg
-        f_neg_hits = len(df_neg) / n_neg
+    df_neg = blast_out[blast_out['is_target'] == False]
+    if len(df_neg) > 0:
+        metrics['divergence'] = _get_avg_dist(df_neg, marker_len, n_neg)
+        metrics['f_neg_hits'] = len(df_neg) / n_neg
+        metrics['avg_repeats_neg'] = df_neg['n_hits'].mean()
+        metrics['avg_pident_neg'] = df_neg['avg_nident'].mean() / marker_len
 
-    return conservation, divergence, f_neg_hits
+    return MarkerMetrics(**metrics)
 
 
 def eval_markers(
     all_seqs: list[str], blastdb: Path, n_tar: int, n_neg: int, n_cpu: int=1
-) -> tuple[list[pd.DataFrame], list[float], list[float], list[float]]:
+) -> tuple[list[pd.DataFrame], list[MarkerMetrics]]:
     """BLAST check each marker sequence against all / non-target assemblies, and calculate the metrics of each marker. 
     
     Args:
@@ -695,9 +714,7 @@ def eval_markers(
     Returns:
         tuple: A tuple containing
             1. list[pd.DataFrame]: BLAST hits of each marker. 
-            2. list[float]: Conservation. 
-            3. list[float]: Divergence. 
-            4. list[float]: Fraction of non-target assemblies with a BLAST hit. 
+            2. list[MarkerMetrics]: Metrics of each marker. 
     """
     if blastdb.name == BLASTCONFIG.title_neg_only:
         neg_only = True
@@ -714,7 +731,7 @@ def eval_markers(
     blast_out = blast(all_seqs, db=blastdb, task=BLASTCONFIG.task, columns=BLASTCONFIG.columns, n_cpu=n_cpu, batch_size=BLASTCONFIG.batch_size)
     if len(blast_out) == 0:
         log_and_raise(RuntimeError, 'No BLAST hit found.')
-    #blast_out.to_csv('blast_out.tsv', sep='\t')
+    # blast_out.to_pickle('blast_out.pkl')
 
     #---------- extract BLAST hits of each marker ----------#
     logger.info(' - Formatting BLAST output...')
@@ -733,14 +750,17 @@ def eval_markers(
         ascending=[True, True, False], inplace=True
     )
     blast_out = blast_out.groupby(
-        # as_index=True so that .agg() could output a series
         by=['qseqid', 'assembly_idx'], as_index=True, sort=False
     )
-    # also keep bitscores of other less optimal alignments
-    bitscore = blast_out['bitscore'].agg(tuple)
+    # also keep nident of other less optimal alignments
+    nident = blast_out['nident'].agg(
+        n_hits='count', 
+        avg_nident='mean'
+    )
     blast_out = blast_out.head(1)
-    blast_out['bitscore_other'] = bitscore.tolist()
+    nident.reset_index(drop=True, inplace=True)
     blast_out.reset_index(drop=True, inplace=True)
+    blast_out = pd.concat([blast_out, nident], axis=1)
 
     # output a df for each query sequence (some markers might have no BLAST hit)
     all_blast = [None] * n_seqs
@@ -757,22 +777,19 @@ def eval_markers(
 
     # calculate conservation and divergence for each marker based on its blast output
     logger.info(' - Evaluating each signature...')
-    if neg_only:
-        # do not calculate conservation since target assemblies are not included in the BLAST database
-        n_tar = None
-    scores_args = zip(
+    metrics_args = zip(
         all_blast, 
         map(len, all_seqs), 
         repeat(n_tar, n_seqs), 
         repeat(n_neg, n_seqs)
     )
-    all_conservation, all_divergence, all_f_neg_hits = mp_wrapper(
-        _get_scores, scores_args, n_cpu, unpack_output=True, 
+    metrics = mp_wrapper(
+        _get_metrics, metrics_args, n_cpu, 
         n_jobs=n_seqs, start_method=StartMethod.fork
     )
 
     print_time_delta(time()-tik)
-    return all_blast, all_conservation, all_divergence, all_f_neg_hits
+    return all_blast, metrics
 
 
 def _eval_cks(
@@ -796,11 +813,14 @@ def _eval_cks(
     results = eval_markers(all_reps, blastdb, n_tar, n_neg, n_cpu)
 
     # update attributes of each ck
-    for ck, blast, conservation, divergence, f_neg_hits in zip(all_cks, *results):
-        ck.blast, ck.conservation, ck.divergence, ck.f_neg_hits = blast, conservation, divergence, f_neg_hits
+    for ck, blast, metrics in zip(all_cks, *results):
+        ck.blast, ck.metrics = blast, metrics
 
     # sort in-place
-    all_cks.sort(key=lambda ck: ck.conservation+ck.divergence, reverse=True)
+    all_cks.sort(
+        key=lambda ck: ck.metrics.conservation+ck.metrics.divergence, 
+        reverse=True
+    )
 
 
 def get_markers(
@@ -859,7 +879,7 @@ def get_markers(
         header = f'{assembly_idx}-{record_id}-{rep.start}:{rep.stop}'
         fasta.append(f'>{header}\n{rep.seq}\n')
         csv.append(
-            (header, ck.len, ck.conservation, ck.divergence, ck.f_neg_hits, ck.rep_ratio, rep.n_kmers)
+            (header, ck.len, *astuple(ck.metrics), ck.rep_ratio, rep.n_kmers)
         )
     markers_fasta.write_text(''.join(fasta))
     logger.info(f'Candidate signatures saved as {markers_fasta}')
@@ -869,7 +889,7 @@ def get_markers(
     file_to_write(markers_csv, overwrite)
     pd.DataFrame(
         csv, 
-        columns=('fasta_header', 'length', 'conservation', 'divergence', 'f_neg_hits', 'rep_ratio', 'n_nodes')
+        columns=('fasta_header', 'length', *_METRIC_NAMES, 'rep_ratio', 'n_nodes')
     ).to_csv(markers_csv, index=False)
     logger.info(f'Metrics of candidate signatures saved as {markers_csv}')
 
