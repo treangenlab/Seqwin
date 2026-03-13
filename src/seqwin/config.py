@@ -53,8 +53,9 @@ from random import Random
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from collections.abc import Mapping
+from functools import cached_property
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, computed_field, field_validator, model_validator
 
 from .ncbi import Level, Source, Task
 from ._version import __version__
@@ -66,10 +67,8 @@ class Config(BaseModel):
     Attributes:
         tar_taxa (list[str] | None): Target NCBI taxonomy name(s) / ID(s). Must be exact matches. [None]
         neg_taxa (list[str] | None): Non-target NCBI taxonomy name(s) / ID(s). Must be exact matches. [None]
-        tar_paths (Path | None): A text file of paths to target assemblies in FASTA format (gzip supported), 
-            with one path per line. [None]
-        neg_paths (Path | None): A text file of paths to non-target assemblies in FASTA format (gzip supported), 
-            with one path per line. [None]
+        tar_paths (Path | None): A text file of paths to target assemblies in FASTA format (gzip supported), with one path per line. [None]
+        neg_paths (Path | None): A text file of paths to non-target assemblies in FASTA format (gzip supported), with one path per line. [None]
         
         prefix (Path): Path prefix for the output directory. [cwd]
         title (str): Name of the output directory. ['seqwin-out']
@@ -77,8 +76,7 @@ class Config(BaseModel):
         
         kmerlen (int): K-mer length. [21]
         windowsize (int): Window size for minimizer sketch. [200]
-        penalty_th (float | None): Node penalty threshold, ranging between [0, 1]. 
-            None to compute with Jaccard indices (capped by `penalty_th_cap`). [None]
+        penalty_th (float | None): Node penalty threshold, ranging between [0, 1]. If None, compute with Jaccard indices (capped by `penalty_th_cap`). [None]
         run_mash (bool): If True, use MinHash sketches (Mash) to estimate penalty_th; else use minimizer sketches (faster but might be biased). [True]
         stringency (int): If `penalty_th` is None (computed with Jaccard), multiply the computed penalty threshold with `(1 - x/10)`. [5]
         min_len (int): Min length of output signatures. [200]
@@ -100,8 +98,7 @@ class Config(BaseModel):
         
         level (Level): NCBI download option. Limit to genomes ≥ this assembly level ('contig' < 'scaffold' < 'chromosome' < 'complete'). ['contig']
         source (Source): NCBI download option. Genome source ('genbank' or 'refseq'). ['genbank']
-        annotated (bool): NCBI download option. If True, limit to GenBank (submitter) or RefSeq annotated genomes, 
-            based on the selection of source. [False]
+        annotated (bool): NCBI download option. If True, limit to GenBank (submitter) or RefSeq annotated genomes, based on the selection of source. [False]
         exclude_mag (bool): NCBI download option. If True, exclude metagenome-assembled genomes (MAGs). [False]
         gzip (bool): NCBI download option. If True, download genome sequences in gzip format. [True]
         download_only (bool): If True, only download genome sequences without running Seqwin. [True]
@@ -153,7 +150,10 @@ class Config(BaseModel):
     gzip: bool = True
     download_only: bool = False
 
-    version: str = __version__
+    @computed_field
+    @cached_property
+    def version(self) -> str:
+        return __version__
 
     # resolve all input paths and make sure they exist
     @field_validator('tar_paths', 'neg_paths', 'prefix', mode='before')
@@ -313,5 +313,5 @@ BLASTCONFIG = BlastConfig()
 EDGE_W: str = 'w' # Key for edge weight, used in networkx graphs. ['w']
 NODE_P: str = 'p' # Key for node penalty, used in networkx graphs. ['p']
 CONSEC_KMER_TH: int = 2 # Max index difference between consecutive k-mers. [2]
-LEN_TH_MUL: float = 1.5 # Multiplier for candidate sequence length threshold, deprecated. [1.5]
-NO_BLAST_DIV: float = .0 # Assumed divergence when there is no BLAST hit. [0.5]
+LEN_TH_MUL: float = 1.5 # Deprecated. Multiplier for candidate sequence length threshold. [1.5]
+NO_BLAST_DIV: float = 0.5 # Deprecated. Assumed divergence when there is no BLAST hit. [0.5]
