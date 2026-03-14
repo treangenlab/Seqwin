@@ -16,8 +16,7 @@
 
 1. [Installation](#installation)
 2. [Quick start](#quick-start)
-3. [Key parameters](#key-parameters)
-4. [Outputs](#outputs)
+3. [Documentation](#documentation)
 
 ## Installation
 
@@ -97,36 +96,6 @@ Expected runtime (with `--threads 8` or `-p 8`):
 
 Run `seqwin --help` or `seqwin -h` to see the full command line interface. 
 
-## Key parameters
+## Documentation
 
-### Node penalty threshold
-The node penalty threshold (`--penalty-th`) controls the sensitivity and specificity of output signatures. Higher values allow longer / more signatures, but might reduce sensitivity and/or specificity. 
-
-When `--penalty-th` is not specified, it is automatically estimated with k-mer sketches. MinHash sketches (calculated with [Mash](https://doi.org/10.1186/s13059-016-0997-x)) are used by default. If `--no-mash` is provided, minimizer sketches are used instead (faster but might be biased). Use `--stringency` or `-s` to tune this auto-estimated threshold (0-10, default 5, higher stringency lowers the threshold). 
-
-### Signature evaluation
-
-By default, output signatures are BLAST checked against target genomes for sensitivity (`conservation`), and non-target genomes for specificity (`divergence`). Signatures are sorted by `conservation` and `divergence`, which can be found in `signatures.csv`. Evaluation can be turned off with `--no-blast` for shorter running time. In that case, output signatures are still very likely to be sensitive and specific, but without second validation of BLAST. 
-
-### Minimizer sketch
-`--kmerlen` or `-k` (default 21): shorter k‑mers might be helpful for genomes with more sequence variations (e.g. set to 17 for viruses). 
-
-`--windowsize` or `-w` (default 200): smaller windows generate more minimizers and increase resolution (e.g., to find shorter signatures), at the cost of runtime & memory. 
-
-### Performance tuning
-Use `--threads` or `-p` to leverage multiple CPU cores (4 by default). When the number of input genomes is large, add `--no-mash` and `--no-blast` for fastest running time. 
-- [Mash](https://doi.org/10.1186/s13059-016-0997-x) takes quadratic time as the number of genomes grows. With `--no-mash`, minimizer sketches are used to calculate node penalty threshold. 
-- Signatures are evaluated by building a BLAST database of all input genomes. With `--no-blast`, evaluation is skipped and `conservation` and `divergence` won't be calculated in `signatures.csv`. 
-
-## Outputs
-Seqwin creates the following files/directories inside the directory specified by `--title` or `-o` (default `seqwin-out/`):
-| Name | Description|
-| :-------  | :-------- |
-| `signatures.fasta`| Signature sequences (top candidates are listed first) |
-| `signatures.csv`| Tabulated metrics for each signature |
-| `assemblies.csv`| Mapping of internal genome IDs to file paths (used in `signatures.fasta`) |
-| `blastdb/`| BLAST database built from all input genomes |
-| `assemblies/`| Genomes downloaded from NCBI |
-| `results.seqwin`| Serialized run snapshot (Python pickle) |
-| `config.json`| Full run configuration |
-| `seqwin.log`| Execution log |
+See the [Seqwin Wiki](https://github.com/treangenlab/Seqwin/wiki) for full documentation. 
