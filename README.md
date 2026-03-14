@@ -5,18 +5,15 @@
 
 **Seqwin** is a lightning‑fast, memory‑efficient toolkit for discovering **signature sequences** (genomic markers) that balance **high sensitivity** with **high specificity**. It builds a minimizer‑based pan‑genome graph across target and neighboring non‑target genomes and extracts signature sequences using a novel graph algorithm. Signatures can be used for downstream assay design such as qPCR, ddPCR, amplicon sequencing and hybrid capture probes. 
 
-> [!NOTE]
-> **Citation:** If you use Seqwin in your research, please cite: 
-> 
-> **Michael X. Wang, Bryce Kille, Michael G. Nute, Siyi Zhou, Lauren B. Stadler, and Todd J. Treangen** ["Seqwin: Ultrafast identification of signature sequences in microbial genomes"](https://doi.org/10.1101/2025.11.07.687294). *Proceedings of ISMB 2026*, accepted (2026).
-
 ---
 
 ## Table of contents
 
 1. [Installation](#installation)
 2. [Quick start](#quick-start)
-3. [Documentation](#documentation)
+3. [Citation](#citation)
+
+See the [Seqwin Wiki](https://github.com/treangenlab/Seqwin/wiki) for full documentation. 
 
 ## Installation
 
@@ -96,6 +93,8 @@ Expected runtime (with `--threads 8` or `-p 8`):
 
 Run `seqwin --help` or `seqwin -h` to see the full command line interface. 
 
-## Documentation
+## Citation
 
-See the [Seqwin Wiki](https://github.com/treangenlab/Seqwin/wiki) for full documentation. 
+If you use Seqwin in your research, please cite: 
+
+**Michael X. Wang, Bryce Kille, Michael G. Nute, Siyi Zhou, Lauren B. Stadler, and Todd J. Treangen** ["Seqwin: Ultrafast identification of signature sequences in microbial genomes"](https://doi.org/10.1101/2025.11.07.687294). *Proceedings of ISMB 2026*, accepted (2026). 
