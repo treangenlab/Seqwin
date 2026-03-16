@@ -28,7 +28,7 @@ app = typer.Typer(
     help=f'Seqwin: Ultrafast identification of signature sequences', 
     add_completion=False, # do not show command completion options in help
     pretty_exceptions_show_locals=False, # do not show huge blocks of local variables
-    context_settings={'help_option_names': ['-h', '--help']},
+    add_help_option=False # disable built-in --help
 )
 
 
@@ -38,105 +38,154 @@ def print_version(ctx: typer.Context, value: bool):
         ctx.exit()
 
 
+def print_help(ctx: typer.Context, value: bool):
+    if value:
+        typer.echo(ctx.get_help())
+        ctx.exit()
+
+
 @app.command()
 def main(
     # even if only one value is provided, typer will still provide a list with only one element
     tar_taxa: list[str] | None = typer.Option(
         None, '--tar-taxa', '-t', show_default=False, 
-        help='Target NCBI taxonomy name / ID. Must be exact match. Repeat the option to pass multiple values (-t <tax1> -t <tax2> ...).'
+        help='Target NCBI taxonomy name or ID. Must be an exact match. '
+        'Repeat the option to pass multiple values (-t <tax1> -t <tax2> ...).', 
+        rich_help_panel='Input selection'
     ), 
     neg_taxa: list[str] | None = typer.Option(
         None, '--neg-taxa', '-n', show_default=False, 
-        help='Non-target NCBI taxonomy name / ID. Must be exact match. Repeat the option to pass multiple values (-n <tax1> -n <tax2> ...).'
+        help='Non-target NCBI taxonomy name or ID. Must be an exact match. '
+        'Repeat the option to pass multiple values (-n <tax1> -n <tax2> ...).', 
+        rich_help_panel='Input selection'
     ), 
     tar_paths: Path | None = typer.Option(
         None, '--tar-paths', show_default=False, 
-        help='A text file of paths to target genomes in FASTA format (gzip supported), with one path per line.'
+        help='Text file containing paths to target genomes in FASTA format, one path per line. Gzipped FASTA is supported.', 
+        rich_help_panel='Input selection'
     ), 
     neg_paths: Path | None = typer.Option(
         None, '--neg-paths', show_default=False, 
-        help='A text file of paths to non-target genomes in FASTA format (gzip supported), with one path per line.'
+        help='Text file containing paths to non-target genomes in FASTA format, one path per line. Gzipped FASTA is supported.', 
+        rich_help_panel='Input selection'
     ), 
     prefix: Path = typer.Option(
-        Path.cwd(), '--prefix', help='Path prefix for the output directory. Use the current directory by default.'
+        Path.cwd(), '--prefix', 
+        help='Parent path where the output directory will be created. Use the current working directory by default.', 
+        rich_help_panel='Output options'
     ), 
     title: str = typer.Option(
-        'seqwin-out', '--title', '-o', help='Name of the output directory.'
+        'seqwin-out', '--title', '-o', 
+        help='Name of the output directory created under --prefix.', 
+        rich_help_panel='Output options'
     ), 
     overwrite: bool = typer.Option(
         False, '--overwrite', show_default=False, 
-        help='Overwrite existing output files.'
+        help='Overwrite existing output files.', 
+        rich_help_panel='Output options'
     ), 
     kmerlen: int = typer.Option(
-        21, '--kmerlen', '-k', help='K-mer length.'
+        21, '--kmerlen', '-k', 
+        help='K-mer length.', 
+        rich_help_panel='Signature options'
     ), 
     windowsize: int = typer.Option(
-        200, '--windowsize', '-w', help='Window size for minimizer sketch.'
+        200, '--windowsize', '-w', 
+        help='Window size for minimizer sketch.', 
+        rich_help_panel='Signature options'
     ), 
     penalty_th: float | None = typer.Option(
         None, '--penalty-th', show_default=False, 
-        help='Node penalty threshold (0-1). Automatically computed if not provided.'
+        help='Node penalty threshold, from 0 to 1. If not provided, Seqwin computes it automatically.', 
+        rich_help_panel='Signature options'
     ), 
     # always default flags to False (can be reversed later in the function body)
     no_mash: bool = typer.Option(
         False, '--no-mash', show_default=False, 
-        help='Do NOT run Mash to estimate node penalty threshold. Instead, use minimizer sketches (faster but might be biased). ' \
-        'Used only if --penalty-th is not provided (auto mode).'
+        help='Do not run Mash to estimate node penalty threshold. Instead, use minimizer sketches. '
+        'This is much faster but the estimation might be biased. '
+        'Only used when --penalty-th is not provided.', 
+        rich_help_panel='Signature options'
     ), 
     stringency: int = typer.Option(
         5, '--stringency', '-s', show_default=True, 
-        help='Stringency level (0-10) for the sensitivity and specificity of output signatures. ' \
-        'Higher levels result in lower estimated node penalty thresholds. Used only if --penalty-th is not provided (auto mode).'
+        help='Controls the sensitivity and specificity of output signatures (0-10). '
+        'Increasing this value generally yields fewer and shorter signatures, while improving their sensitivity and specificity. '
+        'Internally, Seqwin uses this setting to adjust the estimated node penalty threshold. '
+        'Only used when `--penalty-th` is not provided.', 
+        rich_help_panel='Signature options'
     ), 
     min_len: int = typer.Option(
-        200, '--min-len', help='Min length of output signatures.'
+        200, '--min-len', 
+        help='Minimum length of output signatures.', 
+        rich_help_panel='Signature options'
     ), 
     max_len: int | None = typer.Option(
         None, '--max-len', show_default=False, 
-        help='Max length of output signatures (estimated). No explicit limit if not provided.'
+        help='Estimated maximum length of output signatures. If not provided, no explicit limit is applied.', 
+        rich_help_panel='Signature options'
     ), 
     no_blast: bool = typer.Option(
         False, '--no-blast', show_default=False, 
-        help='Do NOT evaluate (BLAST) signature sequences.'
+        help='Do not evaluate signature sequences with BLAST.', 
+        rich_help_panel='Signature options'
     ), 
     # blast_neg_only: bool = typer.Option(
     #     False, '--fast-blast', is_flag=True, flag_value=True, show_default=False, 
     #     help='Only evaluate (BLAST) against non-target assemblies.'
     # ), 
-    seed: int = typer.Option(
-        42, '--seed', help='Random seed for reproducibility.'
-    ), 
-    n_cpu: int = typer.Option(
-        4, '--threads', '-p', help='Number of parallel processes (CPU cores) to use.'
-    ), 
     level: Level = typer.Option(
         Level.contig, '--level', metavar='TEXT', # hide choices
-        help='NCBI download option. Limit to genomes ≥ this assembly level (contig < scaffold < chromosome < complete).'
+        help="Limit downloads to genomes at or above this assembly level. "
+        "Possible values follow this order: 'contig', 'scaffold', 'chromosome', 'complete'", 
+        rich_help_panel='NCBI download options'
     ), 
     source: Source = typer.Option(
         Source.genbank, '--source', metavar='TEXT', # hide choices
-        help="NCBI download option. Genome source ('genbank' or 'refseq')."
+        help="Genome source to download from. Supported values: 'genbank', 'refseq'", 
+        rich_help_panel='NCBI download options'
     ), 
     annotated: bool = typer.Option(
         False, '--annotated', show_default=False, 
-        help='NCBI download option. Only include annotated genomes.'
+        help='Only include annotated genomes.', 
+        rich_help_panel='NCBI download options'
     ), 
     exclude_mag: bool = typer.Option(
         False, '--exclude-mag', show_default=False, 
-        help='NCBI download option. Exclude metagenome-assembled genomes (MAGs).'
+        help='Exclude metagenome-assembled genomes (MAGs).', 
+        rich_help_panel='NCBI download options'
     ), 
     no_gzip: bool = typer.Option(
         False, '--no-gzip', show_default=False, 
-        help='NCBI download option. Do NOT download genomes as gzipped FASTA.'
+        help='Do not download genomes as gzipped FASTA.', 
+        rich_help_panel='NCBI download options'
     ), 
     download_only: bool = typer.Option(
         False, '--download-only', show_default=False, 
-        help='Only download genome sequences without running Seqwin.'
+        help='Only download genome sequences without running Seqwin.', 
+        rich_help_panel='NCBI download options'
+    ), 
+    seed: int = typer.Option(
+        42, '--seed', 
+        help='Random seed for reproducibility.', 
+        rich_help_panel='Miscellaneous'
+    ), 
+    n_cpu: int = typer.Option(
+        4, '--threads', '-p', 
+        help='Number of parallel processes or threads to use.', 
+        rich_help_panel='Miscellaneous'
     ), 
     version: bool = typer.Option(
-        False, '--version', callback=print_version, show_default=False, 
+        False, '--version', callback=print_version, show_default=False, expose_value=False, 
         is_eager=True, # run this before any other options
-        help='Show Seqwin version and exit.'
+        help='Show Seqwin version and exit.', 
+        rich_help_panel='Miscellaneous'
+    ), 
+    help_: bool = typer.Option(
+        False, '--help', '-h', callback=print_help, show_default=False, expose_value=False, 
+        is_eager=True, # run this before any other options
+        help='Show this message and exit.', 
+        rich_help_panel='Miscellaneous'
     )
 ):
     if not download_only:
@@ -145,9 +194,9 @@ def main(
         elif (neg_paths is None) and (neg_taxa is None):
             raise typer.BadParameter('You must provide either --neg-paths or --neg-taxa')
     if (penalty_th is not None) and (penalty_th < 0 or penalty_th > 1):
-            raise ValueError('--penalty-th must be between [0, 1]')
+            raise typer.BadParameter('--penalty-th must be between [0, 1]')
     if stringency < 0 or stringency > 10:
-            raise ValueError('--stringency must be between [0, 10]')
+            raise typer.BadParameter('--stringency must be between [0, 10]')
     if (max_len is not None) and (max_len < min_len):
         raise typer.BadParameter('--max-len must be greater than --min-len')
 

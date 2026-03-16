@@ -67,26 +67,25 @@ class Config(BaseModel):
     Attributes:
         tar_taxa (list[str] | None): Target NCBI taxonomy name(s) / ID(s). Must be exact matches. [None]
         neg_taxa (list[str] | None): Non-target NCBI taxonomy name(s) / ID(s). Must be exact matches. [None]
-        tar_paths (Path | None): A text file of paths to target assemblies in FASTA format (gzip supported), with one path per line. [None]
-        neg_paths (Path | None): A text file of paths to non-target assemblies in FASTA format (gzip supported), with one path per line. [None]
+        tar_paths (Path | None): Text file containing paths to target genomes in FASTA format, one path per line. Gzipped FASTA is supported. [None]
+        neg_paths (Path | None): Text file containing paths to non-target genomes in FASTA format, one path per line. Gzipped FASTA is supported. [None]
         
-        prefix (Path): Path prefix for the output directory. [cwd]
-        title (str): Name of the output directory. ['seqwin-out']
+        prefix (Path): Parent path where the output directory will be created. Use the current working directory by default. [cwd]
+        title (str): Name of the output directory created under `prefix`. ['seqwin-out']
         overwrite (bool): If True, overwrite existing output files. [False]
         
         kmerlen (int): K-mer length. [21]
         windowsize (int): Window size for minimizer sketch. [200]
-        penalty_th (float | None): Node penalty threshold, ranging between [0, 1]. If None, compute with Jaccard indices (capped by `penalty_th_cap`). [None]
-        run_mash (bool): If True, use MinHash sketches (Mash) to estimate penalty_th; else use minimizer sketches (faster but might be biased). [True]
-        stringency (int): If `penalty_th` is None (computed with Jaccard), multiply the computed penalty threshold with `(1 - x/10)`. [5]
-        min_len (int): Min length of output signatures. [200]
-        max_len (int | None): Max length of output signatures (estimated). None for no explicit limit (capped by `max_nodes_cap`). [None]
-        run_blast (bool): If True, BLAST check representative sequences. [True]
-        blast_neg_only (bool): If True, only include non-target assemblies in the BLAST database (less sensitive but faster). [False]
-        seed (int): Random seed for reproducibility. [42]
+        penalty_th (float | None): Node penalty threshold, from 0 to 1. If None, Seqwin computes it automatically (capped by `penalty_th_cap`). [None]
+        run_mash (bool): If True, use MinHash sketches (Mash) to estimate `penalty_th`; else use minimizer sketches (faster but might be biased). [True]
+        stringency (int): If `penalty_th` is None, multiply the computed penalty threshold with `(1 - x/10)`. [5]
+        min_len (int): Minimum length of output signatures. [200]
+        max_len (int | None): Estimated maximum length of output signatures. If None, no explicit limit is applied (capped by `max_nodes_cap`). [None]
+        run_blast (bool): If True, evaluate signature sequences with BLAST. [True]
+        blast_neg_only (bool): If True, only include non-target assemblies in the BLAST database. [False]
         
         no_filter (bool): If True, skip filtering k-mers (debug only). [False]
-        penalty_th_cap (float): If `penalty_th` is None (computed with Jaccard), penalty threshold cannot be higher than this value. [0.2]
+        penalty_th_cap (float): If `penalty_th` is None, penalty threshold cannot be higher than this value. [0.2]
         edge_w_th_mul (float): Multiplier for determining the threshold for low-weight edges. [0.3]
         min_nodes_floor (int): Lowest possible value for `min_nodes` (see `RunState`), regardless of `min_len`. [3]
         max_nodes_cap (int | None): If `max_len` is None, `max_nodes` (see `RunState`) cannot be higher than this value. None for no limit. [100]
@@ -94,15 +93,15 @@ class Config(BaseModel):
         sketchsize (int): Sketch size for Mash (MinHash) sketch. [1000]
         get_dist (bool): If True, calculate assembly distance with minimizer sketches (slow). [False]
         
-        n_cpu (int): Number of threads to use. [4]
-        
         level (Level): NCBI download option. Limit to genomes ≥ this assembly level ('contig' < 'scaffold' < 'chromosome' < 'complete'). ['contig']
         source (Source): NCBI download option. Genome source ('genbank' or 'refseq'). ['genbank']
         annotated (bool): NCBI download option. If True, limit to GenBank (submitter) or RefSeq annotated genomes, based on the selection of source. [False]
         exclude_mag (bool): NCBI download option. If True, exclude metagenome-assembled genomes (MAGs). [False]
         gzip (bool): NCBI download option. If True, download genome sequences in gzip format. [True]
-        download_only (bool): If True, only download genome sequences without running Seqwin. [True]
+        download_only (bool): If True, only download genome sequences without running Seqwin. [False]
         
+        seed (int): Random seed for reproducibility. [42]
+        n_cpu (int): Number of parallel processes or threads to use. [4]
         version (str): Seqwin version. 
     """
     # Inputs
@@ -126,7 +125,6 @@ class Config(BaseModel):
     max_len: int | None = None
     run_blast: bool = True
     blast_neg_only: bool = False # NOTE: need to fix when this is turned on
-    seed: int = 42
 
     # Graph filtering options (not included in CLI)
     no_filter: bool = False
@@ -139,9 +137,6 @@ class Config(BaseModel):
     sketchsize: int = 1000
     get_dist: bool = False
 
-    # Performance
-    n_cpu: int = 4
-
     # NCBI download options
     level: Level = Level.contig
     source: Source = Source.genbank
@@ -149,6 +144,10 @@ class Config(BaseModel):
     exclude_mag: bool = False
     gzip: bool = True
     download_only: bool = False
+
+    # Miscellaneous
+    seed: int = 42
+    n_cpu: int = 4
 
     @computed_field
     @cached_property
