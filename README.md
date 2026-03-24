@@ -98,3 +98,5 @@ Run `seqwin --help` or `seqwin -h` to see the full command line interface.
 If you use Seqwin in your research, please cite: 
 
 **Michael X. Wang, Bryce Kille, Michael G. Nute, Siyi Zhou, Lauren B. Stadler, and Todd J. Treangen** ["Seqwin: Ultrafast identification of signature sequences in microbial genomes"](https://doi.org/10.1101/2025.11.07.687294). *Proceedings of ISMB 2026*, accepted (2026). 
+
+Benchmarking datasets, outputs and scripts are available on [Zenodo](https://doi.org/10.5281/zenodo.19176444). 
