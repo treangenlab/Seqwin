@@ -51,7 +51,7 @@ except ImportError:
 from .assemblies import Assemblies
 from .helpers import get_edges, merge_weighted_edges, sort_by_hash, agg_by_hash, \
     get_subgraphs, filter_kmers, HASH_ARR_NB_DT, NODE_DTYPE
-from .minimizer import indexlr_py
+from .btllib import indexlr
 from .utils import StartMethod, SharedArr, print_time_delta, log_and_raise, mp_wrapper, \
     get_chunks, concat_to_shm, concat_from_shm
 from .config import Config, RunState, WORKINGDIR, EDGE_W, NODE_P
@@ -537,46 +537,21 @@ def _get_edges(
                 Return a `SharedArr` instance if `return_shm` is True; else return a Numpy array. 
             3. list[tuple[str, ...]]: Record IDs of each assembly. 
     """
-    #---------- generate k-mers ----------#
-    kmers = list()
-    record_ids = list() # record ids of each assembly
+    # generate k-mers
+    kmers, record_ids, record_offsets, assembly_offsets = indexlr(
+        assemblies.path, 
+        kmerlen, 
+        windowsize, 
+        assemblies.index, 
+        assemblies.is_target
+    )
 
-    for idx, assembly in assemblies.iterrows():
-        # get the minimizer sketch of the current assembly
-        kmers_assembly, ids = indexlr_py(
-            assembly.path, kmerlen, windowsize, idx, assembly.is_target
-        )
-        kmers.append(kmers_assembly)
-        record_ids.append(ids)
-    #---------- generate k-mers ----------#
+    edges = get_edges(kmers['hash'], record_offsets, assembly_offsets)
 
-    #---------- generate graph edges ----------#
-    # define input types of the numba function
-    # this is a List[List[Array]]
-    hashes = typed.List.empty_list(types.ListType(HASH_ARR_NB_DT))
-
-    for kmers_assembly in kmers:
-        # this is a List[Array]
-        hashes_assembly = typed.List.empty_list(HASH_ARR_NB_DT)
-
-        for kmers_record in kmers_assembly:
-            # this does not create a copy, kmers_record['hash'] returns a strided view
-            # must be specified in the numba dtype ('A')
-            hashes_assembly.append(kmers_record['hash'])
-
-        hashes.append(hashes_assembly)
-
-    # get weighted edges and isolated nodes
-    edges, isolates = get_edges(hashes)
-    #---------- generate graph edges ----------#
-
-    # concat arrays and return
-    kmers = list(chain.from_iterable(kmers)) # flatten kmers before concat
+    # send to shared memory
     if return_shm:
-        kmers = concat_to_shm(kmers)
-        edges = concat_to_shm((edges,)) # just send to shared mem
-    else:
-        kmers = np.concatenate(kmers)
+        kmers = concat_to_shm((kmers,))
+        edges = concat_to_shm((edges,))
 
     return kmers, edges, record_ids
 
