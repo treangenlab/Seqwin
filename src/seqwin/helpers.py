@@ -9,7 +9,7 @@ Dependencies:
 - numpy
 - numba
 - networkx
-- .minimizer
+- .btllib
 - .utils
 - .config
 
@@ -139,7 +139,7 @@ def merge_weighted_edges(edges: NDArray) -> NDArray:
 
     Args:
         edges (NDArray): A 3-column array of weighted edges (u, v, w). 
-    
+
     Returns:
         NDArray: Unique edges with sum of weights. 
     """
@@ -549,7 +549,7 @@ def filter_kmers(
         idx (NDArray): See `KmerGraph.idx`. 
         nodes (NDArray): See `KmerGraph.nodes` (sorted by 'hash'). 
         used (frozenset[int]): Output of `get_subgraphs()`. 
-    
+
     Returns:
         tuple: A tuple containing
             1. NDArray: See `KmerGraph.kmers`. 

@@ -134,7 +134,7 @@ def get_assembly_paths(package_dir: Path) -> list[Path]:
         package_dir (Path): Path of the genome package directory (e.g., ncbi_dataset). 
 
     Returns:
-        list[str]: File paths of all genome assemblies in the package. 
+        list[Path]: File paths of all genome assemblies in the package. 
     """
     # sanity check
     if not package_dir.is_dir():
@@ -335,8 +335,8 @@ def _blast_batch(
         task (str): Preset BLAST tasks ('blastn', 'blastn-short', 'megablast'). 
         columns (Sequence[str]): Columns to be included in the DataFrame output. 
         outfmt (str): Output of `_get_blast_outfmt()`. 
-        taxids (Sequence[int] | None): Only search for these taxonomy IDs and their descendants. 
-        neg_taxids (Sequence[int] | None): Do NOT search for these taxonomy IDs and their descendants. 
+        taxids (str | None): Only search for these taxonomy IDs and their descendants. 
+        neg_taxids (str | None): Do NOT search for these taxonomy IDs and their descendants. 
         n_cpu (int): Number of processes to run in parallel. 
 
     Returns:

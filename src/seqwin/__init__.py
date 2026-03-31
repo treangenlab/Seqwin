@@ -19,17 +19,20 @@ Usage:
 Dependencies:
 -------------
 - python >=3.10
-- numpy
+- numpy >=2
 - numba
-- pandas
+- pandas >=2
 - networkx
 - pydantic
 - typer
-- btllib
 - mash
 - blast
 - ncbi-datasets-cli
 - scipy (optional)
+
+Packages:
+--------
+- btllib
 
 Modules:
 --------
@@ -38,7 +41,6 @@ Modules:
 - kmers
 - markers
 - helpers
-- minimizer
 - ncbi
 - mash
 - graph

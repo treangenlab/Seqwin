@@ -7,7 +7,8 @@ Generate minimizer sketches, with code adopted from `btllib<https://github.com/b
 Usage:
 ------
 ```python
->>> from btllib import indexlr
+>>> from pathlib import Path
+>>> from seqwin.btllib import indexlr
 >>> kmers, record_ids, record_offsets, assembly_offsets = indexlr(
 >>>     assembly_paths=[Path('example1.fa'), Path('example2.fa.gz')], 
 >>>     kmerlen=21, 
@@ -32,6 +33,7 @@ Attributes:
 """
 
 __license__ = 'GPL 3.0'
+__author__ = 'Michael X. Wang'
 
 from pathlib import Path
 from collections.abc import Iterable
@@ -94,6 +96,3 @@ def indexlr(
         list(bool(target) for target in is_target)
     )
     return kmers.view(KMER_DTYPE), list(tuple(ids) for ids in idx_to_id), record_offsets, assembly_offsets
-
-
-__all__ = ['indexlr']

@@ -4,8 +4,8 @@ Core
 
 Seqwin entry point. 
 
-Dependencies
-------------
+Dependencies:
+-------------
 - pandas
 - .assemblies
 - .kmers
@@ -149,7 +149,7 @@ class Seqwin(object):
 
 def run(config: Config) -> Seqwin:
     """Run Seqwin. 
-    
+
     Args:
         config (Config): See `Config` in `config.py`. 
 
@@ -164,9 +164,9 @@ def run(config: Config) -> Seqwin:
 
 def load(path: str | Path) -> Seqwin:
     """Load a Seqwin run instance from file. 
-    
+
     Args:
-        path (Path): Path to the Seqwin run snapshot (`results.seqwin`). 
+        path (str | Path): Path to the Seqwin run snapshot (`results.seqwin`). 
 
     Returns:
         Seqwin: The Seqwin run instance. 
