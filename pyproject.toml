@@ -1,11 +1,11 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["scikit-build-core>=0.12", "pybind11>=2.12"]
+build-backend = "scikit_build_core.build"
 
 [project]
 name = "seqwin"
 dynamic = ["version"]
-description = "Seqwin: Ultrafast identification of signature sequences in microbial genomes via minimizer graphs"
+description = "Seqwin: Ultrafast identification of signature sequences in microbial genomes"
 readme = "README.md"
 authors = [
     { name = "Michael X. Wang", email = "xw66@rice.edu" }
@@ -13,14 +13,28 @@ authors = [
 license = { text = "GPL-3.0" }
 requires-python = ">=3.10"
 
-[tool.setuptools.dynamic]
-version = { attr = "seqwin._version.__version__" }
+[tool.scikit-build.metadata.version]
+provider = "scikit_build_core.metadata.regex"
+input = "src/seqwin/_version.py"
+regex = "__version__\\s*=\\s*['\\\"](?P<version>[^'\\\"]+)['\\\"]"
+result = "{version}"
 
 [project.scripts]
 seqwin = "seqwin.cli:app"
 
-[tool.setuptools]
-package-dir = { "" = "src" }
+[tool.scikit-build]
+minimum-version = "build-system.requires"
 
-[tool.setuptools.packages.find]
-where = ["src"]
+# cache build artifacts per wheel tag for faster rebuilds
+build-dir = "build/{wheel_tag}"
+
+cmake.source-dir = "cpp"
+cmake.build-type = "Release"
+cmake.version = ">=3.18"
+ninja.version = ">=1.10"
+ninja.make-fallback = true
+
+wheel.packages = ["src/seqwin"]
+
+# Ensure the sdist contains your C++ sources
+sdist.include = ["cpp/**"]
