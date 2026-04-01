@@ -23,6 +23,9 @@ Functions:
 
 Attributes:
 -----------
+- HAS_MASH (bool)
+- HAS_BLAST (bool)
+- HAS_DATASETS (bool)
 - WORKINGDIR (WorkingDir)
 - BLASTCONFIG (BlastConfig)
 - EDGE_W (str)
@@ -35,7 +38,7 @@ Attributes:
 __author__ = 'Michael X. Wang'
 __license__ = 'GPL 3.0'
 
-import sys, logging
+import sys, logging, shutil
 
 _LOG_FMT = '%(asctime)s | %(levelname)-8s | %(message)s'
 _LOG_DATEFMT = '%Y-%m-%d %H:%M:%S'
@@ -59,6 +62,10 @@ from pydantic import BaseModel, Field, computed_field, field_validator, model_va
 
 from .ncbi import Level, Source, Task
 from ._version import __version__
+
+HAS_MASH = shutil.which("mash") is not None
+HAS_BLAST = (shutil.which("makeblastdb") is not None) and (shutil.which("blastn") is not None)
+HAS_DATASETS = shutil.which("datasets") is not None
 
 
 class Config(BaseModel):
@@ -165,17 +172,26 @@ class Config(BaseModel):
 
     @model_validator(mode='after')
     def _check_inputs(self) -> 'Config':
+        if (not HAS_DATASETS) and (self.tar_taxa or self.neg_taxa):
+            raise FileNotFoundError(
+                ('ncbi-datasets-cli is not installed. Genomes cannot be downloaded from the '
+                'provided taxon names or IDs. Please provide local file paths instead.'))
+
         if not self.download_only:
             if (self.tar_paths is None) and (self.tar_taxa is None):
                 raise ValueError('You must provide either tar_paths or tar_taxa')
             elif (self.neg_paths is None) and (self.neg_taxa is None):
                 raise ValueError('You must provide either neg_paths or neg_taxa')
+
         if (self.penalty_th is not None) and (self.penalty_th < 0 or self.penalty_th > 1):
             raise ValueError('penalty_th must be between [0, 1]')
+
         if self.stringency < 0 or self.stringency > 10:
             raise ValueError('stringency must be between [0, 10]')
+
         if (self.max_len is not None) and (self.max_len < self.min_len):
             raise ValueError('max_len must be greater than min_len')
+
         return self
 
     model_config = {

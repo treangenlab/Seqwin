@@ -26,7 +26,7 @@ Functions:
 __author__ = 'Michael X. Wang'
 __license__ = 'GPL 3.0'
 
-import re, gzip, shutil, logging, subprocess
+import re, gzip, logging, subprocess
 import multiprocessing as mp
 from pathlib import Path
 from io import BufferedWriter
@@ -45,9 +45,6 @@ from .mash import sketch, get_jaccard
 from .utils import print_time_delta, log_and_raise, mkdir, file_to_write, \
     mp_wrapper, get_dups, load_paths_txt, load_fasta, GZIP_EXT
 from .config import Config, RunState, WORKINGDIR, BLASTCONFIG
-
-if shutil.which('makeblastdb') is None:
-    raise ImportError('BLAST+ is not installed (`makeblastdb` is not found in your PATH).')
 
 
 class Assemblies(pd.DataFrame):
@@ -161,7 +158,7 @@ class Assemblies(pd.DataFrame):
             df = self[self.is_target == False]
             title = BLASTCONFIG.title_neg_only
         else:
-            logger.info('Creating a BLAST database of all assemblies (more sensitive but slower)...')
+            logger.info('Creating a BLAST database of all assemblies...')
             df = self
             title = BLASTCONFIG.title_all
         tik = time()

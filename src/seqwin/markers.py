@@ -50,7 +50,7 @@ from .kmers import KmerGraph
 from .ncbi import blast
 from .graph import OrderedKmers
 from .utils import StartMethod, print_time_delta, log_and_raise, file_to_write, mp_wrapper, most_common, most_common_weighted
-from .config import Config, RunState, WORKINGDIR, BLASTCONFIG, CONSEC_KMER_TH, LEN_TH_MUL
+from .config import Config, RunState, HAS_BLAST, WORKINGDIR, BLASTCONFIG, CONSEC_KMER_TH, LEN_TH_MUL
 
 # Set ConnectedKmers.is_bad as True if any of these warnings is present
 _BAD_WARNINGS = frozenset((
@@ -854,7 +854,7 @@ def get_markers(
     all_cks, all_reps = _get_cks(kmers, assemblies, kmerlen, min_len, n_tar, n_cpu)
 
     # evaluate each marker with BLAST
-    if run_blast:
+    if run_blast and HAS_BLAST:
         logger.info('Evaluating candidate signatures with BLAST...')
         blastdb = assemblies.makeblastdb(
             prefix=working_dir / WORKINGDIR.blast_dir, 
@@ -864,7 +864,10 @@ def get_markers(
         )
         _eval_cks(all_cks, all_reps, blastdb, n_tar, n_neg, n_cpu)
     else:
-        logger.warning(f'Signature evaluation is turned off (--no-blast), skip running BLAST')
+        if run_blast:
+            logger.error('BLAST+ is not installed. Signature evaluation is skipped.')
+        else:
+            logger.warning(f'Signature evaluation is turned off (--no-blast), skip running BLAST')
         blastdb = None
 
     # save to fasta

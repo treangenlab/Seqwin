@@ -54,7 +54,7 @@ from .helpers import get_edges, concat, merge_weighted_edges, sort_by_hash, agg_
     get_subgraphs, filter_kmers, NODE_DTYPE
 from .btllib import indexlr
 from .utils import print_time_delta, log_and_raise, get_chunks
-from .config import Config, RunState, WORKINGDIR, EDGE_W, NODE_P
+from .config import Config, RunState, HAS_MASH, WORKINGDIR, EDGE_W, NODE_P
 
 
 class KmerGraph(object):
@@ -167,7 +167,6 @@ class KmerGraph(object):
             logger.info(' - Merging from all threads...')
             kmers = concat(kmers, n_cpu)
             edges = concat(edges, n_cpu)
-            logger.info(' - Merging from all threads...')
             edges = merge_weighted_edges(edges)
             record_ids = list(chain.from_iterable(record_ids))
 
@@ -609,7 +608,7 @@ def get_kmers(
         tik = time()
 
         # we only care about the presence & absence of k-mers in target assemblies
-        if run_mash:
+        if run_mash and HAS_MASH:
             jaccard = assemblies.mash(
                 kmerlen=kmerlen, 
                 sketchsize=sketchsize, 
@@ -620,6 +619,8 @@ def get_kmers(
             e_absence_tar = 1 - _expected_frac(jaccard[:n_tar, :n_tar])
             e_presence_neg = _expected_frac(jaccard[n_tar:, :n_tar])
         else:
+            if run_mash:
+                logger.error('Mash is not installed. Falling back to minimizer sketches.')
             # calculate expected fractions directly from minimizer sketches
             # for tar absence or neg presence, k-mer weights should always be nodes['n_tar'] (how many target assemblies have this k-mer)
             nodes = kmers.nodes

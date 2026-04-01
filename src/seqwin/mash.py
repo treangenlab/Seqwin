@@ -20,7 +20,7 @@ Functions:
 __author__ = 'Michael X. Wang'
 __license__ = 'GPL 3.0'
 
-import logging, shutil, subprocess
+import logging, subprocess
 from pathlib import Path
 from io import StringIO
 from collections.abc import Iterable, Generator
@@ -28,8 +28,6 @@ from collections.abc import Iterable, Generator
 logger = logging.getLogger(__name__)
 
 import pandas as pd
-if shutil.which('mash') is None:
-    raise ImportError('Mash is not installed (`mash` is not found in your PATH).')
 
 from .utils import log_and_raise, file_to_write, run_cmd
 

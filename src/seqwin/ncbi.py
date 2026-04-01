@@ -40,10 +40,6 @@ from collections.abc import Sequence
 logger = logging.getLogger(__name__)
 
 import pandas as pd
-if shutil.which('datasets') is None:
-    raise ImportError('ncbi-datasets-cli is not installed (`datasets` is not found in your PATH).')
-if shutil.which('blastn') is None:
-    raise ImportError('BLAST+ is not installed (`blastn` is not found in your PATH).')
 
 from .utils import log_and_raise, file_to_write, list_dir, run_cmd
 
