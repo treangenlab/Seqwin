@@ -29,6 +29,7 @@ __license__ = 'GPL 3.0'
 import logging
 from random import Random
 from heapq import heappush, heappop
+from concurrent.futures import ThreadPoolExecutor
 
 logger = logging.getLogger(__name__)
 
@@ -129,6 +130,55 @@ def get_edges(hashes: NDArray, record_offsets: NDArray, assembly_offsets: NDArra
         i += 1
 
     return edges
+
+
+def concat(arrays: list[NDArray], n_cpu: int) -> NDArray:
+    """Concatenate a list of NumPy arrays along the first dimension in parallel.
+
+    Args:
+        arrays (list[NDArray]): Arrays to be concatenated. 
+        n_cpu (int): Number of threads to run in parallel. 
+
+    Returns:
+        NDArray: The concatenated Numpy array. 
+    """
+    if not arrays:
+        log_and_raise(ValueError, 'No array is provided')
+    dtype = arrays[0].dtype
+    trailing_shape = arrays[0].shape[1:]
+
+    # validation and layout calculation
+    starts = list()
+    ends = list()
+    total_rows = 0
+
+    for arr in arrays:
+        if arr.dtype != dtype:
+            log_and_raise(TypeError, 'Arrays must have the same dtype')
+        elif arr.shape[1:] != trailing_shape:
+            log_and_raise(ValueError, 'Arrays must match on dimensions 1...N')
+
+        starts.append(total_rows)
+        total_rows += arr.shape[0]
+        ends.append(total_rows)
+
+    # pre-allocate the output array
+    out = np.empty((total_rows, *trailing_shape), dtype=dtype)
+
+    # copy each array into its slot in out
+    def copy_array(i: int):
+        """Worker function for each thread. 
+        """
+        # GIL is released for numpy commands
+        out[starts[i]:ends[i]] = arrays[i]
+        # allow immediate garbage collection
+        arrays[i] = None
+
+    # copy in arrays parallel
+    with ThreadPoolExecutor(max_workers=n_cpu) as executor:
+        list(executor.map(copy_array, range(len(arrays))))
+
+    return out
 
 
 @njit(nogil=True, parallel=True)

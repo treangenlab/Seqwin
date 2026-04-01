@@ -32,6 +32,7 @@ __license__ = 'GPL 3.0'
 import logging
 from random import Random
 from itertools import repeat, chain
+from concurrent.futures import ThreadPoolExecutor
 from time import time
 
 logger = logging.getLogger(__name__)
@@ -49,11 +50,10 @@ except ImportError:
     _HAS_DIST_DEPS = False
 
 from .assemblies import Assemblies
-from .helpers import get_edges, merge_weighted_edges, sort_by_hash, agg_by_hash, \
+from .helpers import get_edges, concat, merge_weighted_edges, sort_by_hash, agg_by_hash, \
     get_subgraphs, filter_kmers, NODE_DTYPE
 from .btllib import indexlr
-from .utils import StartMethod, SharedArr, print_time_delta, log_and_raise, mp_wrapper, \
-    get_chunks, concat_to_shm, concat_from_shm
+from .utils import print_time_delta, log_and_raise, get_chunks
 from .config import Config, RunState, WORKINGDIR, EDGE_W, NODE_P
 
 
@@ -154,22 +154,20 @@ class KmerGraph(object):
         if n_cpu <= 1:
             kmers, edges, record_ids = _get_edges(assemblies, kmerlen, windowsize, return_shm=False)
         else:
-            # to make mp work, the method/function must be static and should not start with double underscores (single is fine)
-            # difference between single & double underscores: https://docs.python.org/3/tutorial/classes.html#private-variables
-            logger.info(f' - Parallelizing across {n_cpu} processes (~{n_assemblies//n_cpu} assemblies per process)...')
-            graph_args = zip(
-                get_chunks(assemblies, n_cpu), 
-                repeat(kmerlen, n_cpu), 
-                repeat(windowsize, n_cpu)
-            )
-            kmers, edges, record_ids = mp_wrapper(
-                _get_edges, graph_args, n_cpu, unpack_output=True, 
-                start_method=StartMethod.forkserver # must use spawn/forkserver for the indexlr python wrapper
-            )
-            # merge outputs from multiple processes
-            logger.info(' - Merging from all processes...')
-            kmers = concat_from_shm(kmers, n_cpu)
-            edges = concat_from_shm(edges, n_cpu)
+            logger.info(f' - Parallelizing across {n_cpu} threads (~{n_assemblies//n_cpu} assemblies per thread)...')
+            with ThreadPoolExecutor(max_workers=n_cpu) as executor:
+                results = executor.map(
+                    _get_edges, 
+                    get_chunks(assemblies, n_cpu), 
+                    repeat(kmerlen, n_cpu), 
+                    repeat(windowsize, n_cpu)
+                )
+            kmers, edges, record_ids = map(list, zip(*results))
+
+            logger.info(' - Merging from all threads...')
+            kmers = concat(kmers, n_cpu)
+            edges = concat(edges, n_cpu)
+            logger.info(' - Merging from all threads...')
             edges = merge_weighted_edges(edges)
             record_ids = list(chain.from_iterable(record_ids))
 
@@ -513,31 +511,21 @@ class KmerGraph(object):
 def _get_edges(
     assemblies: Assemblies, 
     kmerlen: int, 
-    windowsize: int, 
-    return_shm: bool=True
-) -> tuple[
-    SharedArr | NDArray, 
-    SharedArr | NDArray, 
-    list[tuple[str, ...]]
-]:
-    """Worker function for `KmerGraph.__get_edges()`. If `return_shm` is True, 
-    Numpy arrays are returned as shared memory blocks for multiprocessing. 
+    windowsize: int
+) -> tuple[NDArray, NDArray, list[tuple[str, ...]]]:
+    """Worker function for `KmerGraph.__get_edges()`. 
 
     Args:
         assemblies (Assemblies): See `Assemblies` in `assemblies.py` (could be a slice of the DataFrame). 
         kmerlen (int): See `Config` in `config.py`. 
         windowsize (int): See `Config` in `config.py`. 
-        return_shm (bool, optional): If True, return the kmers and edges arrays using shared memory blocks; else return regular Numpy arrays. 
 
     Returns:
         tuple: A tuple containing
-            1. SharedArr | NDArray: K-mers. Return a `SharedArr` instance if `return_shm` is True; else return a Numpy array. 
-                dtype is defined in `minimizer.py` (`KMER_DTYPE`). 
-            2. SharedArr | NDArray: Weighted edges in a 3-column Numpy array: the first two columns are edges and the third column is weights. 
-                Return a `SharedArr` instance if `return_shm` is True; else return a Numpy array. 
+            1. NDArray: See `KmerGraph.kmers`. 
+            2. NDArray: See `KmerGraph.edges`. 
             3. list[tuple[str, ...]]: Record IDs of each assembly. 
     """
-    # generate k-mers
     kmers, record_ids, record_offsets, assembly_offsets = indexlr(
         assemblies.path, 
         kmerlen, 
@@ -545,13 +533,7 @@ def _get_edges(
         assemblies.index, 
         assemblies.is_target
     )
-
     edges = get_edges(kmers['hash'], record_offsets, assembly_offsets)
-
-    # send to shared memory
-    if return_shm:
-        kmers = concat_to_shm((kmers,))
-        edges = concat_to_shm((edges,))
 
     return kmers, edges, record_ids
 
