@@ -81,7 +81,7 @@ class Assemblies(pd.DataFrame):
             out_path (Path): Output path for the Mash sketch file (.msh). 
             overwrite (bool): If True, overwrite the existing Mash sketch file. 
             n_cpu (int): Number of processes to run in parallel. 
-        
+
         Returns:
             NDArray[np.floating]: A matrix of Jaccard indices of all assembly pairs. 
         """
@@ -110,7 +110,7 @@ class Assemblies(pd.DataFrame):
                 row indices should be sorted with `ascending=True`. 
                 Required columns: ['assembly_idx', 'record_idx', 'start', 'stop']. 
             n_cpu (int): Number of processes to run in parallel. 
-        
+
         Returns:
             pd.Series: A sequence is fetched for each row in `loc`. indices are sorted with `ascending=True`. 
         """
@@ -150,7 +150,7 @@ class Assemblies(pd.DataFrame):
             neg_only (bool): If True, create the BLAST database on non-target assemblies only. 
             overwrite (bool): If True, overwrite prefix if it already exists. 
             n_cpu (int): Number of processes to run in parallel. 
-        
+
         Returns:
             Path: Path to the BLAST database. 
         """
@@ -231,7 +231,7 @@ class Assemblies(pd.DataFrame):
             neg_only (bool): If True, create the BLAST database on non-target assemblies only. 
             overwrite (bool): If True, overwrite prefix if it already exists. 
             n_cpu (int): Number of processes to run in parallel. 
-        
+
         Returns:
             Path: Path to the BLAST database. 
         """
@@ -325,9 +325,9 @@ def _add_fasta_to_queue(path: Path, assembly_idx: int, is_target: bool, queue_id
 
 def _stream_to_stdin(queue: mp.Queue, n_items: int, proc_stdin: BufferedWriter) -> None:
     """Get items from an indexed queue, and write them to the stdin of a process by the order of their indices. 
-    
+
     Args:
-        indexed_queue (mp.Queue): Each queue item should be a tuple of (idx, data). 
+        queue (mp.Queue): Each queue item should be a tuple of (idx, data). 
         n_items (int): Total number of items in the queue. 
         proc_stdin (io.BufferedWriter): Standard input of a process (e.g., `subprocess.Popen().stdin`). 
     """
@@ -363,7 +363,7 @@ def _load_seq(
             sequence (upper case), and the total number of bases in the assembly. Supported functions: `parsers.load_fasta()`, 
             `parsers.load_genbank()`. [load_fasta]
         n_cpu (int, optional): Number of processes to run in parallel. [1]
-    
+
     Returns:
         list[dict[str,str]]: Each dict has record IDs as keys and record sequences as values. 
     """
@@ -406,7 +406,7 @@ def _get_paths_dl(taxa_list: list[str], prefix: Path, config: Config) -> list[Pa
         config (Config): See `Config` in `config.py`. 
 
     Returns:
-        list[str]: Paths to assembly files. 
+        list[Path]: Paths to assembly files. 
     """
     paths = list()
     # download genome assemblies under each taxon
@@ -443,11 +443,11 @@ def _get_paths_txt(paths_txt: Path) -> list[Path]:
 
 def _download(config: Config, working_dir: Path) -> tuple[list[Path], list[Path]]:
     """Download assemblies and return file paths. Return empty lists if nothing to download. 
-    
+
     Args:
         config (Config): See `Seqwin` in `main.py`. 
         working_dir (Path): See `RunState` in `config.py`. 
-    
+
     Returns:
         tuple: A tuple containing
             1. list[Path]: Paths to downloaded target assemblies. 
@@ -487,11 +487,11 @@ def _download(config: Config, working_dir: Path) -> tuple[list[Path], list[Path]
 
 def get_assemblies(config: Config, state: RunState) -> Assemblies:
     """Load assembly paths and build a BLAST database. 
-    
+
     Args:
         config (Config): See `Seqwin` in `main.py`. 
         state (RunState): See `Seqwin` in `main.py`. 
-    
+
     Returns:
         Assemblies: The Assemblies instance. 
     """

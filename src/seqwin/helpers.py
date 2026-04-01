@@ -9,7 +9,7 @@ Dependencies:
 - numpy
 - numba
 - networkx
-- .minimizer
+- .btllib
 - .utils
 - .config
 
@@ -29,6 +29,7 @@ __license__ = 'GPL 3.0'
 import logging
 from random import Random
 from heapq import heappush, heappop
+from concurrent.futures import ThreadPoolExecutor
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +38,7 @@ import networkx as nx
 from numpy.typing import NDArray
 from numba import types, typed, prange, njit, from_dtype, get_num_threads
 
-from .minimizer import KMER_DTYPE
+from .btllib import KMER_DTYPE
 from .utils import log_and_raise
 from .config import NODE_P
 
@@ -61,16 +62,16 @@ HASH_ARR_NB_DT = types.Array(_HASH_NB_DT, 1, 'A') # array of hashes; 'A': accept
 
 
 @njit(nogil=True, cache=True)
-def get_edges(hashes) -> tuple[NDArray, NDArray]:
-    """Get weighted edges and isolated nodes. 
+def get_edges(hashes: NDArray, record_offsets: NDArray, assembly_offsets: NDArray) -> NDArray:
+    """Get weighted edges. 
 
     Args:
-        hashes (List[List[Array]]): K-mer hash values from all assemblies. 
+        hashes (NDArray): 1-D strided array of k-mer hash values from all assemblies. 
+        record_offsets (NDArray): Global indices where a new sequence record starts contributing k-mers. 
+        assembly_offsets (NDArray): Global indices where a new assembly starts contributing k-mers. 
     
     Returns:
-        tuple: A tuple containing
-            1. NDArray: A 3-column array of unique edges and their weights. 
-            2. NDArray: Isolated nodes. 
+        NDArray: A 3-column array of unique edges and their weights. 
     """
     # a counter for edges and weight
     edge_w = typed.Dict.empty(
@@ -78,37 +79,45 @@ def get_edges(hashes) -> tuple[NDArray, NDArray]:
         key_type=_EDGE_NB_DT, 
         value_type=_WEIGHT_NB_DT # a tuple of (w, last_seen_assembly_idx)
     )
-    # isolated k-mers found in short sequence records
-    # there is no numba typed set, just use set()
-    isolates = set()
+    n_hashes = len(hashes)
+    n_records = len(record_offsets)
+    n_assemblies = len(assembly_offsets)
 
-    for assembly_idx, hashes_assembly in enumerate(hashes):
+    assembly_idx = 0
 
-        for hashes_record in hashes_assembly:
-            n = len(hashes_record)
-            if n == 1:
-                # isolate nodes cannot be added to graph since they don't have any edge
-                # they might be included in another path of another record, but that doesn't matter
-                isolates.add(hashes_record[0])
-            else:
-                # get edges of the current sequence record
-                for i in range(n - 1):
-                    h1 = hashes_record[i]
-                    h2 = hashes_record[i + 1]
-                    # canonical order of edge nodes (undirected graph)
-                    if h1 > h2:
-                        h1, h2 = h2, h1
-                    e = (h1, h2)
+    for record_idx in range(n_records):
+        start = record_offsets[record_idx]
 
-                    # check if edge exists in previous assemblies
-                    if e in edge_w:
-                        w, last_seen = edge_w[e]
-                        # only increment if we haven't seen this edge in the current assembly yet
-                        if last_seen != assembly_idx:
-                            edge_w[e] = (w + _HASH_NB_DT(1), assembly_idx)
-                    else:
-                        # first time seeing this edge
-                        edge_w[e] = (_HASH_NB_DT(1), assembly_idx)
+        # get the end of the current record
+        if record_idx == n_records - 1:
+            end = n_hashes
+        else:
+            end = record_offsets[record_idx + 1]
+
+        # advance the assembly index if the current start falls into the next assembly's offset boundary
+        while assembly_idx + 1 < n_assemblies and start >= assembly_offsets[assembly_idx + 1]:
+            assembly_idx += 1
+
+        n = end - start
+        if n > 1:
+            # get edges of the current sequence record
+            for i in range(start, end - 1):
+                h1 = hashes[i]
+                h2 = hashes[i + 1]
+                # canonical order of edge nodes (undirected graph)
+                if h1 > h2:
+                    h1, h2 = h2, h1
+                e = (h1, h2)
+
+                # check if edge exists in previous assemblies
+                if e in edge_w:
+                    w, last_seen = edge_w[e]
+                    # only increment if we haven't seen this edge in the current assembly yet
+                    if last_seen != assembly_idx:
+                        edge_w[e] = (w + _HASH_NB_DT(1), assembly_idx)
+                else:
+                    # first time seeing this edge
+                    edge_w[e] = (_HASH_NB_DT(1), assembly_idx)
 
     # prepare output edges and weights as a 3-column np array
     n_edges = len(edge_w)
@@ -120,15 +129,56 @@ def get_edges(hashes) -> tuple[NDArray, NDArray]:
         edges[i, 2] = w[0]
         i += 1
 
-    # convert isolates to a np array
-    n_isolates = len(isolates)
-    isolates_arr = np.empty(n_isolates, dtype=_HASH_NP_DT)
-    i = 0
-    for h in isolates:
-        isolates_arr[i] = h
-        i += 1
+    return edges
 
-    return edges, isolates_arr
+
+def concat(arrays: list[NDArray], n_cpu: int) -> NDArray:
+    """Concatenate a list of NumPy arrays along the first dimension in parallel.
+
+    Args:
+        arrays (list[NDArray]): Arrays to be concatenated. 
+        n_cpu (int): Number of threads to run in parallel. 
+
+    Returns:
+        NDArray: The concatenated Numpy array. 
+    """
+    if not arrays:
+        log_and_raise(ValueError, 'No array is provided')
+    dtype = arrays[0].dtype
+    trailing_shape = arrays[0].shape[1:]
+
+    # validation and layout calculation
+    starts = list()
+    ends = list()
+    total_rows = 0
+
+    for arr in arrays:
+        if arr.dtype != dtype:
+            log_and_raise(TypeError, 'Arrays must have the same dtype')
+        elif arr.shape[1:] != trailing_shape:
+            log_and_raise(ValueError, 'Arrays must match on dimensions 1...N')
+
+        starts.append(total_rows)
+        total_rows += arr.shape[0]
+        ends.append(total_rows)
+
+    # pre-allocate the output array
+    out = np.empty((total_rows, *trailing_shape), dtype=dtype)
+
+    # copy each array into its slot in out
+    def copy_array(i: int):
+        """Worker function for each thread. 
+        """
+        # GIL is released for numpy commands
+        out[starts[i]:ends[i]] = arrays[i]
+        # allow immediate garbage collection
+        arrays[i] = None
+
+    # copy in arrays parallel
+    with ThreadPoolExecutor(max_workers=n_cpu) as executor:
+        list(executor.map(copy_array, range(len(arrays))))
+
+    return out
 
 
 @njit(nogil=True, parallel=True)
@@ -139,7 +189,7 @@ def merge_weighted_edges(edges: NDArray) -> NDArray:
 
     Args:
         edges (NDArray): A 3-column array of weighted edges (u, v, w). 
-    
+
     Returns:
         NDArray: Unique edges with sum of weights. 
     """
@@ -549,7 +599,7 @@ def filter_kmers(
         idx (NDArray): See `KmerGraph.idx`. 
         nodes (NDArray): See `KmerGraph.nodes` (sorted by 'hash'). 
         used (frozenset[int]): Output of `get_subgraphs()`. 
-    
+
     Returns:
         tuple: A tuple containing
             1. NDArray: See `KmerGraph.kmers`. 

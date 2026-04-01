@@ -5,8 +5,8 @@ Markers
 A core module of Seqwin. Extract candidate markers (signatures) from subgraphs of a k-mer graph 
 (`kmers.KmerGraph.subgraphs`). 
 
-Dependencies
-------------
+Dependencies:
+-------------
 - numpy
 - pandas
 - networkx
@@ -19,6 +19,7 @@ Dependencies
 
 Classes:
 --------
+- MarkerMetrics
 - ConnectedKmers
 
 Functions:
@@ -94,7 +95,7 @@ _BASELINE_METRICS = MarkerMetrics(**{f: .0 for f in _METRIC_NAMES})
 
 class ConnectedKmers(object):
     """The candidate marker Class, created from a low-penalty subgraph of the k-mer graph `KmerGraph.graph`. 
-    
+
     Attributes:
         graph (nx.Graph): A low-penalty subgraph of the k-mer graph `KmerGraph.graph`. 
         kmers (pd.DataFrame): K-mers of each node in the subgraph, from all assemblies. 
@@ -198,7 +199,7 @@ class ConnectedKmers(object):
         Args:
             kmers (pd.DataFrame): See `ConnectedKmers.__init__()`. 
             kmerlen (int): See `Config` in `config.py`. 
-        
+
         Returns:
             pd.DataFrame: See `ConnectedKmers.loc`. 
         """
@@ -261,7 +262,7 @@ class ConnectedKmers(object):
         Args:
             loc (pd.DataFrame): See `ConnectedKmers.loc`. 
             warnings (set): See `ConnectedKmers.warnings`. 
-        
+
         Returns:
             tuple: A tuple containing
                 1. OrderedKmers: The representative k-mer order. 
@@ -307,7 +308,7 @@ class ConnectedKmers(object):
             graph (nx.Graph): See `ConnectedKmers.__init__()`. 
             rep_order (OrderedKmers): See `ConnectedKmers.__get_rep_order()`. 
             warnings (set): See `ConnectedKmers.warnings`. 
-        
+
         Returns:
             OrderedKmers | None: If the graph is linear, return the k-mer order in the graph; else return None. 
         """
@@ -360,7 +361,7 @@ class ConnectedKmers(object):
             loc (pd.DataFrame): See `ConnectedKmers.loc`. 
             ref_order (OrderedKmers): The reference k-mer ordering (representative or graph). 
             warnings (set): See `ConnectedKmers.warnings`. 
-        
+
         Returns:
             pd.DataFrame: See `ConnectedKmers.loc` (with updated 'strand' column). 
         """
@@ -391,7 +392,7 @@ class ConnectedKmers(object):
             loc (pd.DataFrame): See `ConnectedKmers.loc`. 
             ref_order (OrderedKmers): The reference k-mer ordering (representative or graph). 
             warnings (set): See `ConnectedKmers.warnings`. 
-        
+
         Returns:
             pd.DataFrame: See `ConnectedKmers.loc` (with updated 'strand' column). 
         """
@@ -438,7 +439,7 @@ class ConnectedKmers(object):
         Args:
             loc (pd.DataFrame): See `ConnectedKmers.loc`. 
             warnings (set): See `ConnectedKmers.warnings`. 
-        
+
         Returns:
             pd.DataFrame: See `ConnectedKmers.loc` (with updated 'strand' column). 
         """
@@ -468,7 +469,7 @@ class ConnectedKmers(object):
 
         Args:
             loc (pd.DataFrame): See `ConnectedKmers.loc`. 
-        
+
         Returns:
             pd.DataFrame: See `ConnectedKmers.loc` (with rows removed). 
         """
@@ -537,7 +538,7 @@ def _fetch_cks_seq(
         rep_only (bool): If True, only fetch the representative of each ConnectedKmers instance (fewer assemblies to be loaded); 
             else fetch all sequences. 
         n_cpu (int): See `Config` in `config.py`. 
-    
+
     Returns:
         list[str] | None: If `rep_only=True`, return a list of representative sequences; else return None. 
     """
@@ -579,7 +580,7 @@ def _get_cks(
     1. Create a ConnectedKmers instance for each low-penalty subgraph of the k-mer graph (`KmerGraph.subgraphs`). 
     2. Remove instances that are shorter than min_len or have defects (`ConnectedKmers.is_bad`). 
     3. Fetch the representative sequence for each remaining instances. 
-    
+
     Args:
         kmers (KmerGraph): See `KmerGraph` in `kmers.py`. 
         assemblies (Assemblies): See `Assemblies` in `assemblies.py`. 
@@ -627,13 +628,13 @@ def _get_avg_ident(blast_out: pd.DataFrame, query_len: int, n: int) -> float:
     """Given a list of BLAST hits, calculate the average sequence identity between the query and all subjects. 
     The denominator (`n`) is the number of subject sequences that are expected to include the query sequence. 
     Note that `n` might not be the same as `len(blast_out)`, since some subjects may have no hit. 
-    
+
     Args:
         blast_out (pd.DataFrame): Each row should be a BLAST hit of the query, with column
             'nident' (number of identical matches). 
         query_len (int): Length of the query sequence. 
         n (int): The number of subjects that are expected to include the query sequence. 
-    
+
     Returns:
         float:
     """
@@ -644,14 +645,14 @@ def _get_avg_dist(blast_out: pd.DataFrame, query_len: int, n: int) -> float:
     """Given a list of BLAST hits, calculate the average distance between the query and all subjects. 
     The denominator (`n`) is the number of subject sequences that are expected to include the query sequence. 
     Note that `n` might not be the same as `len(blast_out)`, since some subjects may have no hit. 
-    
+
     Args:
         blast_out (pd.DataFrame): Each row should be a BLAST hit of the query, with columns, 
             1. 'mismatch': number of mismatches. 
             2. 'gaps': total number of gaps in BOTH query and subject (might cause inaccuracy). 
         query_len (int): Length of the query sequence. 
         n (int): The number of subjects that are expected to include the query sequence. 
-    
+
     Returns:
         float:
     """
@@ -664,14 +665,14 @@ def _get_metrics(
     """Calculate the metrics of a marker based on its BLAST hits in all assemblies. 
     - Conservation is calculated with `_get_avg_ident()` on target assemblies. 
     - Divergence is calculated with `_get_avg_dist()` on non-target assemblies. 
-    
+
     Args:
         blast_out (pd.DataFrame): Each row is the best BLAST hit of the marker in an assembly. 
             Required columns: ['is_target', 'nident', 'mismatch', 'gaps']
         marker_len (int): Marker length. 
         n_tar (int): Number of target assemblies. 
         n_neg (int): Number of non-target assemblies. 
-    
+
     Returns:
         MarkerMetrics:
     """
@@ -703,14 +704,14 @@ def eval_markers(
     all_seqs: list[str], blastdb: Path, n_tar: int, n_neg: int, n_cpu: int=1
 ) -> tuple[list[pd.DataFrame], list[MarkerMetrics]]:
     """BLAST check each marker sequence against all / non-target assemblies, and calculate the metrics of each marker. 
-    
+
     Args:
         all_seqs (list[str]): A list of marker sequences. 
         blastdb (Path): Path to the BLAST database. 
         n_tar (int): Number of target assemblies. 
         n_neg (int): Number of non-target assemblies. 
         n_cpu (int, optional): Number of threads to use. [1]
-    
+
     Returns:
         tuple: A tuple containing
             1. list[pd.DataFrame]: BLAST hits of each marker. 
@@ -800,7 +801,7 @@ def _eval_cks(
     2. Calculate the conservation and divergence for each ck. 
     3. Update the attributes of each ck. 
     4. Sort all_cks by conservation + divergence. 
-    
+
     Args:
         all_cks (list[ConnectedKmers]): ConnectedKmers instances. 
         all_reps (list[str]): Representative sequences, in the same order as all_cks. 
@@ -827,7 +828,7 @@ def get_markers(
     kmers: KmerGraph, assemblies: Assemblies, config: Config, state: RunState
 ) -> list[ConnectedKmers]:
     """Extract candidate markers from a k-mer graph, and save them to files. 
-    
+
     Args:
         kmers (KmerGraph): See `KmerGraph` in `kmers.py`. 
         assemblies (Assemblies): See `Assemblies` in `assemblies.py`. 

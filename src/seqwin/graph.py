@@ -65,7 +65,8 @@ class WeightedGraph(Counter):
         """Add a path to the weighted graph. 
 
         Args:
-            nodes (Iterable): A path will be constructed from the nodes (in order) and added to the graph.
+            nodes (Iterable): A path will be constructed from the nodes (in order) and added to the graph. 
+            cyclic (bool, optional): If True, connect the last node back to the first node. [False]
         """
         nodes = iter(nodes)
         start_nodes, stop_nodes = tee(nodes, n=2) # edge direction: start node -> stop node
@@ -92,12 +93,12 @@ class OrderedKmers(tuple):
     """Ordered k-mers created from an Iterable of integers. 
     The `which_strand()` method can take another Iterable of k-mers and determine its strand ('+'/'-'/'?'/'u'), 
     by comparing its ordering to self. 
-    
+
     Attributes:
         rev (tuple): K-mers in reversed order. 
         is_dup (bool): True if there are duplicates in the k-mers. 
         warning (set): For debugging only. 
-    
+
     Examples:
         ```
         l = [
@@ -121,7 +122,7 @@ class OrderedKmers(tuple):
             k = OrderedKmers((1,2,3,3,4,5))
             print(t)
             print(k.which_strand(t))
-            print(k._warning)
+            print(k.warning)
             print()
         ```
     """

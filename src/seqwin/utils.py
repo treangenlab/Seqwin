@@ -68,7 +68,6 @@ except ImportError:
 GZIP_EXT = '.gz'
 BASE_COMP = str.maketrans('ATCGatcg', 'TAGCtagc') # Translation table for complement DNA bases
 
-
 class StartMethod(str, Enum):
     """Start methods for multiprocessing. 
     """
