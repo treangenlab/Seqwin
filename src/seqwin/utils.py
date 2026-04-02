@@ -189,7 +189,7 @@ def list_dir(path: Path=Path.cwd(), mode: Literal['a', 'd', 'f']='a') -> list[Pa
     # sanity check
     if not path.is_dir():
         log_and_raise(NotADirectoryError, f'Not a directory: {path}')
-    
+
     entries = path.iterdir()
     if mode == 'd':
         return list(p for p in entries if p.is_dir())
@@ -222,7 +222,7 @@ def run_cmd(*args, stdin: str | None=None, raise_error: bool=True) -> subprocess
             'Subprocess failed\n'
             f'cmd: {shlex.join(str(c) for c in e.cmd)}\n'
             f'exit code: {e.returncode}\n'
-            f'stderr:\n{(e.stderr or '').strip()}'
+            f'stderr:\n{(e.stderr or "").strip()}'
         )
         log_and_raise(RuntimeError, msg, from_e=e)
 
@@ -334,7 +334,7 @@ def concat_to_shm(arrays: Sequence[NDArray]) -> SharedArr:
 
     Args:
         arrays (Sequence[NDArray]): Arrays to be concatenated. 
-    
+
     Returns:
         SharedArr: The concatenated array attached to a SharedMemory instance. 
     """
@@ -389,7 +389,7 @@ def concat_from_shm(arrays: Sequence[SharedArr], n_cpu: int=1) -> NDArray:
     Args:
         arrays (Sequence[SharedArr]): Arrays to be concatenated. 
         n_cpu (int, optional): Number of threads to run in parallel. [1]
-    
+
     Returns:
         NDArray: The concatenated Numpy array. 
     """
