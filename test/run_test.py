@@ -20,6 +20,7 @@ python run_test.py --force-download
 
 from __future__ import annotations
 
+import os
 import argparse
 import hashlib
 import shutil
@@ -36,6 +37,7 @@ INPUT_SHA256S = (
 DATASET_URL = "https://github.com/treangenlab/Seqwin/releases/download/v0.1.0/assemblies.tar"
 DATASET_SHA256 = "149cf4450b3877ab88913ab340fbee60fb12f23bc0f858746b37fb678ec7fca6"
 CHUNK_SIZE = 1024 * 1024  # 1 MiB
+THREADS = max(1, min(os.cpu_count() or 1, 4))
 
 
 def sha256sum(path: Path) -> str:
@@ -123,7 +125,7 @@ def run_seqwin(test_dir: Path) -> None:
         "--no-mash",
         "--no-blast",
         "--threads",
-        "4",
+        str(THREADS),
     ]
 
     print("Running:")
