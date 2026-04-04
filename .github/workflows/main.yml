@@ -58,4 +58,4 @@ jobs:
       - name: Run integration test
         if: matrix.python-version == '3.10'
         run: |
-          python test/run_integration_test.py
+          python test/run_test.py
