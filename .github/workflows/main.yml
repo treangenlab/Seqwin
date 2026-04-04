@@ -14,6 +14,7 @@ jobs:
   smoke:
     name: ${{ matrix.runner }} / py${{ matrix.python-version }}
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
 
     strategy:
       fail-fast: false
@@ -53,3 +54,8 @@ jobs:
           python -c "import seqwin; print(seqwin.__version__)"
           python -c "from seqwin.btllib import indexlr; print(indexlr.__name__)"
           python -m pip check
+
+      - name: Run integration test
+        if: matrix.python-version == '3.10'
+        run: |
+          python test/run_integration_test.py

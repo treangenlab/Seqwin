@@ -1,3 +1,9 @@
+# For test data
+test/assemblies.tar
+test/assemblies/
+test/seqwin-out/
+*.tmp
+
 # For macOS
 .DS_Store
 
