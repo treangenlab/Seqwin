@@ -1,5 +1,6 @@
 [![install with bioconda](https://img.shields.io/badge/install%20with-bioconda-brightgreen.svg?style=flat)](http://bioconda.github.io/recipes/seqwin/README.html)
 [![Anaconda-Server Badge](https://anaconda.org/bioconda/seqwin/badges/downloads.svg)](https://anaconda.org/bioconda/seqwin)
+[![Build and Test](https://github.com/treangenlab/Seqwin/actions/workflows/main.yml/badge.svg?branch=main)](https://github.com/treangenlab/Seqwin/actions/workflows/main.yml)
 
 # Seqwin
 
