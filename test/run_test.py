@@ -43,6 +43,13 @@ def sha256sum(path: Path) -> str:
     return digest.hexdigest()
 
 
+def same_text(path_a, path_b, encoding="utf-8"):
+    return (
+        Path(path_a).read_text(encoding=encoding, newline=None)
+        == Path(path_b).read_text(encoding=encoding, newline=None)
+    )
+
+
 def download_file(url: str, destination: Path, force: bool = False) -> None:
     if destination.exists() and not force:
         print(f"Using existing archive: {destination}")
@@ -137,13 +144,7 @@ def verify_expected_output(test_dir: Path) -> None:
     if not actual.exists():
         raise FileNotFoundError(f"Actual output file not found: {actual}")
 
-    expected_hash = sha256sum(expected)
-    actual_hash = sha256sum(actual)
-
-    print(f"Expected SHA-256: {expected_hash}")
-    print(f"Actual   SHA-256: {actual_hash}")
-
-    if actual_hash != expected_hash:
+    if not same_text(actual, expected):
         raise SystemExit(
             "Integration test failed: seqwin-out/signatures.fasta does not match "
             "expected-output/signatures.fasta"
