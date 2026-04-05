@@ -43,7 +43,7 @@ Attributes:
 __author__ = 'Michael X. Wang'
 __license__ = 'GPL 3.0'
 
-import gzip, shutil, logging, datetime, subprocess, shlex, multiprocessing
+import sys, gzip, shutil, logging, datetime, subprocess, shlex, multiprocessing
 from pathlib import Path
 from time import time
 from enum import Enum
@@ -74,6 +74,10 @@ class StartMethod(str, Enum):
     spawn = 'spawn'
     fork = 'fork'
     forkserver = 'forkserver'
+
+_START_METHOD = (
+    StartMethod.spawn if sys.platform == 'win32' else StartMethod.fork
+)
 
 
 @dataclass(slots=True, frozen=True)
@@ -235,7 +239,7 @@ def mp_wrapper(
     starmap: bool=True, 
     unpack_output: bool=False, 
     n_jobs: int | None=None, 
-    start_method: StartMethod | None=None
+    start_method: StartMethod | None=_START_METHOD
 ) -> list:
     """Wrapper for multiprocessing.Pool(). 
 
@@ -250,7 +254,7 @@ def mp_wrapper(
         n_jobs (int | None, optional): Number of elements in `all_args`. 
             Helps determine the `chunksize` option for `pool.map` and `pool.starmap`. None to let Python decide. [None]
         start_method (str | None, optional): Set the start methods for multiprocessing ('fork', 'spawn', 'forkserver'). 
-            None to use the default method. [None]
+            By default, 'spawn' is used for Windows and 'fork' for other systems. Use None to let Python decide. 
 
     Returns:
         list: A list of func outputs, in the same order as all_args. 

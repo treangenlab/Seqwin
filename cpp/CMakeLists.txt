@@ -4,9 +4,18 @@ project(minimizer_btllib LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 find_package(Python REQUIRED COMPONENTS Interpreter Development.Module)
-find_package(ZLIB REQUIRED)
+
+# Fetch and build zlib from source
+include(FetchContent)
+FetchContent_Declare(
+    zlib
+    GIT_REPOSITORY https://github.com/madler/zlib.git
+    GIT_TAG        v1.3.2
+)
+FetchContent_MakeAvailable(zlib)
 
 execute_process(
   COMMAND "${Python_EXECUTABLE}" -c "import pybind11; print(pybind11.get_include())"
@@ -26,7 +35,7 @@ Python_add_library(_core MODULE WITH_SOABI
 )
 
 target_include_directories(_core PRIVATE include "${PYBIND11_INCLUDE}")
-target_link_libraries(_core PRIVATE Python::Module ZLIB::ZLIB)
+target_link_libraries(_core PRIVATE Python::Module zlibstatic)
 target_compile_definitions(_core PRIVATE PYBIND11_DETAILED_ERROR_MESSAGES)
 
 set_target_properties(_core PROPERTIES PREFIX "")

@@ -2,6 +2,7 @@
 
 #include "nthash.hpp"
 
+#include <cstddef>
 #include <limits>
 #include <string>
 #include <vector>
@@ -14,14 +15,14 @@ inline void
 calc_minimizer(const std::vector<Minimizer>& hashed_kmers_buffer,
                const Minimizer*& min_current,
                const std::size_t idx,
-               ssize_t& min_idx_left,
-               ssize_t& min_idx_right,
-               ssize_t& min_pos_prev,
+               std::ptrdiff_t& min_idx_left,
+               std::ptrdiff_t& min_idx_right,
+               std::ptrdiff_t& min_pos_prev,
                const std::size_t w,
                std::vector<Minimizer>& minimizers)
 {
-  min_idx_left = ssize_t(idx + 1 - w);
-  min_idx_right = ssize_t(idx + 1);
+  min_idx_left = static_cast<std::ptrdiff_t>(idx + 1 - w);
+  min_idx_right = static_cast<std::ptrdiff_t>(idx + 1);
 
   const auto& min_left =
     hashed_kmers_buffer[std::size_t(min_idx_left) % hashed_kmers_buffer.size()];
@@ -30,7 +31,7 @@ calc_minimizer(const std::vector<Minimizer>& hashed_kmers_buffer,
 
   if (min_current == nullptr || min_current->pos < min_left.pos) {
     min_current = &min_left;
-    for (ssize_t i = min_idx_left; i < min_idx_right; i++) {
+    for (std::ptrdiff_t i = min_idx_left; i < min_idx_right; i++) {
       const auto& min_i = hashed_kmers_buffer[std::size_t(i) % hashed_kmers_buffer.size()];
       if (min_i.min_hash <= min_current->min_hash) {
         min_current = &min_i;
@@ -40,9 +41,9 @@ calc_minimizer(const std::vector<Minimizer>& hashed_kmers_buffer,
     min_current = &min_right;
   }
 
-  if (ssize_t(min_current->pos) > min_pos_prev &&
+  if (static_cast<std::ptrdiff_t>(min_current->pos) > min_pos_prev &&
       min_current->min_hash != std::numeric_limits<uint64_t>::max()) {
-    min_pos_prev = ssize_t(min_current->pos);
+    min_pos_prev = static_cast<std::ptrdiff_t>(min_current->pos);
     minimizers.push_back(*min_current);
   }
 }
@@ -60,9 +61,9 @@ minimize_sequence(const std::string& seq, std::size_t k, std::size_t w)
   minimizers.reserve(2 * (seq.size() - k + 1) / w);
 
   std::vector<Minimizer> hashed_kmers_buffer(w + 1);
-  ssize_t min_idx_left = -1;
-  ssize_t min_idx_right = -1;
-  ssize_t min_pos_prev = -1;
+  std::ptrdiff_t min_idx_left = -1;
+  std::ptrdiff_t min_idx_right = -1;
+  std::ptrdiff_t min_pos_prev = -1;
   const Minimizer* min_current = nullptr;
 
   std::size_t idx = 0;

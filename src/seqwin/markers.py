@@ -602,8 +602,7 @@ def _get_cks(
     all_cks: list[ConnectedKmers] = mp_wrapper(
         _create_ck, 
         _get_create_ck_args(kmers, kmerlen), 
-        n_cpu=n_cpu, n_jobs=len(kmers.subgraphs), 
-        start_method=StartMethod.fork
+        n_cpu=n_cpu, n_jobs=len(kmers.subgraphs)
     )
 
     # get candidate ConnectedKmers instances
@@ -785,8 +784,7 @@ def eval_markers(
         repeat(n_neg, n_seqs)
     )
     metrics = mp_wrapper(
-        _get_metrics, metrics_args, n_cpu, 
-        n_jobs=n_seqs, start_method=StartMethod.fork
+        _get_metrics, metrics_args, n_cpu, n_jobs=n_seqs
     )
 
     print_time_delta(time()-tik)
@@ -885,7 +883,7 @@ def get_markers(
         csv.append(
             (header, ck.len, *astuple(ck.metrics), ck.rep_ratio, rep.n_kmers)
         )
-    markers_fasta.write_text(''.join(fasta))
+    markers_fasta.write_text(''.join(fasta), encoding='utf-8', newline='\n')
     logger.info(f'Candidate signatures saved as {markers_fasta}')
 
     # save to csv
@@ -894,7 +892,7 @@ def get_markers(
     pd.DataFrame(
         csv, 
         columns=('fasta_header', 'length', *_METRIC_NAMES, 'rep_ratio', 'n_nodes')
-    ).to_csv(markers_csv, index=False)
+    ).to_csv(markers_csv, index=False, encoding='utf-8', lineterminator='\n')
     logger.info(f'Metrics of candidate signatures saved as {markers_csv}')
 
     state.blastdb = blastdb

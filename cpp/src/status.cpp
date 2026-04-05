@@ -1,10 +1,16 @@
 #include "status.hpp"
 
+#include <cerrno>
 #include <cstdlib>
 #include <iostream>
 #include <string>
 
+#ifdef _WIN32
+#include <sys/types.h>
 #include <sys/stat.h>
+#else
+#include <sys/stat.h>
+#endif
 
 namespace btllib {
 
@@ -19,7 +25,11 @@ get_time()
   }
   char buf[sizeof("2011-10-08T07:07:09Z")];
   std::tm tm_result = {};
+#ifdef _WIN32
+  localtime_s(&tm_result, &now);
+#else
   localtime_r(&now, &tm_result);
+#endif
   const auto ret = std::strftime(buf, sizeof(buf), "%F %T", &tm_result);
   if (ret < sizeof(buf) - 2) {
     std::cerr << "btllib: strftime failed." << std::endl;
@@ -82,6 +92,10 @@ get_strerror()
 {
   static const size_t buflen = 1024;
   char buf[buflen];
+#ifdef _WIN32
+  strerror_s(buf, buflen, errno);
+  return buf;
+#else
 // POSIX and GNU implementation of strerror_r differ, even in function signature
 // and so we need to check which one is used
 #if __APPLE__ ||                                                               \
@@ -90,6 +104,7 @@ get_strerror()
   return buf;
 #else
   return strerror_r(errno, buf, buflen);
+#endif
 #endif
 }
 
@@ -105,9 +120,15 @@ check_stream(const std::ios& stream, const std::string& name)
 void
 check_file_accessibility(const std::string& filepath)
 {
+#ifdef _WIN32
+  struct _stat buffer
+  {};
+  const auto ret = _stat(filepath.c_str(), &buffer);
+#else
   struct stat buffer
   {};
   const auto ret = stat(filepath.c_str(), &buffer);
+#endif
   btllib::check_error(ret != 0, get_strerror() + ": " + filepath);
 }
 
