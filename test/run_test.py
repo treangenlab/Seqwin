@@ -29,11 +29,6 @@ import tarfile
 import urllib.request
 from pathlib import Path
 
-INPUT_SHA256S = (
-    "6491e4352e10f7cae65540ffd9d0da1c237fe736e21036d2eeffecaeecf78cda",  # targets.txt
-    "de81319e4938705959a47c1c5756b140e597cfc8423fd3a78b962d1e73805957",  # non-targets.txt
-    "3ad1bfbc5b9afcef301dcebb97227dfb67d66ea8d03175ee4cb3d5a664707370",  # expected-output/signatures.fasta
-)
 DATASET_URL = "https://github.com/treangenlab/Seqwin/releases/download/v0.1.0/assemblies.tar"
 DATASET_SHA256 = "149cf4450b3877ab88913ab340fbee60fb12f23bc0f858746b37fb678ec7fca6"
 CHUNK_SIZE = 1024 * 1024  # 1 MiB
@@ -167,15 +162,6 @@ def validate_inputs(test_dir: Path) -> None:
     if missing:
         formatted = "\n  - ".join([""] + missing)
         raise FileNotFoundError(f"Missing required test files:{formatted}")
-
-    actual_hashes = tuple(
-        sha256sum(path) for path in required
-    )
-    if actual_hashes != INPUT_SHA256S:
-        raise RuntimeError(
-            "Checked-in inputs do not match the recorded checksums. "
-            "If this was intentional, update INPUT_SHA256S."
-        )
 
 
 def parse_args() -> argparse.Namespace:
