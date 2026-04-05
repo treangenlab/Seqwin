@@ -474,7 +474,7 @@ def get_subgraphs(
     # use <=, otherwise there will be no seed when penalty_th = 0
     seeds = list(n for n, p in node_penalty.items() if p <= penalty_th)
     rng.shuffle(seeds)
-    logger.info(f' - Expanding subgraphs from {len(seeds)} seed nodes (penalty≤{penalty_th:.5f})...')
+    logger.info(f' - Expanding subgraphs from {len(seeds)} seed nodes (penalty<={penalty_th:.5f})...')
 
     used: set[int] = set() # nodes already assigned to a subgraph
     subgraphs: list[set[int]] = list() # list of subgraphs to return

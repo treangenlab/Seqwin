@@ -1,9 +1,10 @@
 #include "fasta_reader.hpp"
 
+#include <array>
+#include <algorithm>
 #include <cctype>
 #include <filesystem>
 #include <fstream>
-#include <algorithm>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -17,6 +18,7 @@ namespace {
 
 constexpr std::size_t plain_fasta_seq_len_per_byte = 1;
 constexpr std::size_t gz_fasta_seq_len_per_byte = 4;
+constexpr std::size_t gz_read_buf_size = 1U << 16;
 
 bool
 ends_with(std::string_view text, std::string_view suffix)
@@ -132,7 +134,6 @@ read_gz_fasta(const std::string& assembly_path)
 
   std::unique_ptr<gzFile_s, GzCloser> gz(reinterpret_cast<gzFile_s*>(raw_gz));
 
-  constexpr int kBufSize = 1 << 16;
   std::string carry;
   std::size_t line_start = 0;
   std::size_t search_start = 0;
@@ -143,8 +144,9 @@ read_gz_fasta(const std::string& assembly_path)
       return;
     }
 
-    char buf[kBufSize];
-    int bytes = gzread(reinterpret_cast<gzFile>(gz.get()), buf, kBufSize);
+    std::array<char, gz_read_buf_size> buf{};
+    int bytes =
+      gzread(reinterpret_cast<gzFile>(gz.get()), buf.data(), static_cast<unsigned int>(buf.size()));
     if (bytes < 0) {
       int errnum = 0;
       const char* err = gzerror(reinterpret_cast<gzFile>(gz.get()), &errnum);
@@ -154,7 +156,7 @@ read_gz_fasta(const std::string& assembly_path)
       at_eof = true;
       return;
     }
-    carry.append(buf, static_cast<std::size_t>(bytes));
+    carry.append(buf.data(), static_cast<std::size_t>(bytes));
   };
 
   auto records = read_fasta_core([&](std::string& line) -> bool {
@@ -169,7 +171,7 @@ read_gz_fasta(const std::string& assembly_path)
         line_start = nl + 1;
         search_start = line_start;
 
-        if (line_start > kBufSize && line_start >= carry.size() / 2) {
+        if (line_start > gz_read_buf_size && line_start >= carry.size() / 2) {
           carry.erase(0, line_start);
           search_start -= line_start;
           line_start = 0;
@@ -194,7 +196,7 @@ read_gz_fasta(const std::string& assembly_path)
       }
 
       fill_buffer();
-      if (line_start > kBufSize && line_start >= carry.size() / 2) {
+      if (line_start > gz_read_buf_size && line_start >= carry.size() / 2) {
         carry.erase(0, line_start);
         search_start -= line_start;
         line_start = 0;
