@@ -44,10 +44,10 @@ def sha256sum(path: Path) -> str:
 
 
 def same_text(path_a, path_b, encoding="utf-8"):
-    return (
-        Path(path_a).read_text(encoding=encoding, newline=None)
-        == Path(path_b).read_text(encoding=encoding, newline=None)
-    )
+    # ensure universal newline handling with newline=None
+    with open(Path(path_a), "r", encoding=encoding, newline=None) as f1, \
+         open(Path(path_b), "r", encoding=encoding, newline=None) as f2:
+        return f1.read() == f2.read()
 
 
 def download_file(url: str, destination: Path, force: bool = False) -> None:
