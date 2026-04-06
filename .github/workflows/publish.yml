@@ -1,0 +1,167 @@
+name: Build and publish to PyPI
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check_version:
+    name: Check version matches tag
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Verify version
+        # skip unless this run is on a v* tag ref
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          # Extract tag name and strip the 'v' prefix
+          TAG_VERSION=${GITHUB_REF#refs/tags/v}
+          echo "Triggered by tag: v$TAG_VERSION"
+
+          # Safely extract the __version__ string from _version.py without executing it
+          FILE_VERSION=$(python3 -c "
+          import re
+          with open('src/seqwin/_version.py', 'r') as f:
+              match = re.search(r'__version__\s*=\s*[\'\"]([^\'\"]+)[\'\"]', f.read())
+              if match:
+                  print(match.group(1))
+              else:
+                  print('NOT_FOUND')
+          ")
+
+          echo "Version in src/seqwin/_version.py: $FILE_VERSION"
+          
+          if [ "$FILE_VERSION" = "NOT_FOUND" ]; then
+            echo "::error::Could not find __version__ in src/seqwin/_version.py"
+            exit 1
+          fi
+
+          if [ "$TAG_VERSION" != "$FILE_VERSION" ]; then
+            echo "::error::Tag version ($TAG_VERSION) does not match file version ($FILE_VERSION)"
+            exit 1
+          fi
+
+          echo "Success: Versions match!"
+
+  build_sdist:
+    name: Build sdist
+    needs: [check_version]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+          cache: pip
+
+      - name: Build source distribution
+        run: |
+          python -m pip install --upgrade pip build twine
+          python -m build --sdist --outdir dist
+          twine check dist/*
+
+      - name: Upload sdist
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  build_wheels:
+    name: Build wheels / ${{ matrix.name }}
+    needs: [check_version]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x64
+            runner: ubuntu-24.04
+          - name: linux-arm64
+            runner: ubuntu-24.04-arm
+          - name: macos-x64
+            runner: macos-15-intel
+          - name: macos-arm64
+            runner: macos-15
+          - name: windows-x64
+            runner: windows-2025
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+          cache: pip
+
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v3.4.1
+        env:
+          CIBW_BUILD: 'cp310-* cp311-* cp312-* cp313-*'
+          CIBW_SKIP: 'pp* cp3??t-* *-musllinux_*'
+          CIBW_TEST_COMMAND: >
+            seqwin --help &&
+            python -c "import seqwin; print(seqwin.__version__)" &&
+            python -c "from seqwin.btllib import indexlr; print(indexlr.__name__)" &&
+            python -m pip check
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.name }}
+          path: wheelhouse/*.whl
+          if-no-files-found: error
+
+  publish:
+    name: Publish to PyPI
+    needs: [build_sdist, build_wheels]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    environment:
+      name: pypi
+      url: https://pypi.org/p/seqwin
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Download wheels
+        uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-*
+          path: dist
+          merge-multiple: true
+
+      - name: Download sdist
+        uses: actions/download-artifact@v4
+        with:
+          name: sdist
+          path: dist
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - name: Verify distributions
+        run: |
+          python -m pip install --upgrade pip twine
+          twine check dist/*
+          ls -lh dist
+
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
