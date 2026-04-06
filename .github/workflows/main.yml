@@ -42,7 +42,7 @@ jobs:
       - name: Build and install package
         run: |
           python -m pip install --upgrade pip
-          python -m pip install . -v
+          python -m pip install --prefer-binary . -v
 
       - name: Smoke tests
         run: |
