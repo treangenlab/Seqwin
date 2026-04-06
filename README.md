@@ -19,20 +19,23 @@ Seqwin computes minimizers with [ntHash](https://doi.org/10.1093/bioinformatics/
 See the [Seqwin Wiki](https://github.com/treangenlab/Seqwin/wiki) for full documentation. 
 
 ## Installation
-Seqwin is supported on Linux, macOS, and Windows via [WSL](https://learn.microsoft.com/en-us/windows/wsl/install) for x86-64 and AArch64 systems. 
+Seqwin can be installed from **Bioconda** or **PyPI**. 
+
+- **Bioconda** is the recommended installation method because it can install Seqwin and all its dependencies. But it requires Conda and supports Linux and macOS only. 
+- **PyPI** (`pip install seqwin`) supports Windows (x64), Linux, and macOS, but installs only Seqwin and its Python dependencies. Non-Python dependencies can be installed separately (optional for core Seqwin features). 
 
 ### Bioconda (recommended)
+Works on Linux (x64 / arm64) and macOS (Intel / Apple Silicon). 
+
 If Conda is not installed, install it with [miniforge](https://github.com/conda-forge/miniforge#install) or [miniconda](https://www.anaconda.com/docs/getting-started/miniconda/install#quickstart-install-instructions). 
 
-**1. Create a new Conda environment "seqwin" and install Seqwin via Bioconda**
+**1. Create a new Conda environment "seqwin" and install Seqwin via [Bioconda](https://bioconda.github.io/index.html)**
 ```bash
 conda create -n seqwin seqwin \
   --channel conda-forge \
   --channel bioconda \
   --strict-channel-priority
 ```
-> [!TIP]
-> Setting channel priority is important for Bioconda packages to function properly. You may also persist channel priority settings for all package installation by modifying your `~/.condarc` file. For more information, check the [Bioconda documentation](https://bioconda.github.io/). 
 
 **2. Activate the environment and verify the install**
 ```bash
@@ -40,24 +43,18 @@ conda activate seqwin
 seqwin --help
 ```
 
-### Install from source with `pip`
+### PyPI
+Works on Windows (x64), Linux (x64 / arm64), and macOS (Intel / Apple Silicon). 
 
-**Prerequisites**
-- Python >=3.10 (with `pip` and development headers; usually included with official installers)
-- A C++17 compiler ([GCC](https://gcc.gnu.org/), [Clang](https://clang.llvm.org/))
-- zlib development headers/library ([zlib](https://zlib.net/))
-
-**1. Clone this repository and install with `pip`**  
-This will build the C++ extension/wrapper and install the required Python dependencies. 
+**1. Install Seqwin from PyPI**
 ```bash
-git clone https://github.com/treangenlab/Seqwin.git
-cd Seqwin
-pip install . -v
+python -m pip install --upgrade pip
+python -m pip install seqwin
 seqwin --help
 ```
 
-**2. Install non-Python dependencies**  
-Seqwin can still run without these tools, but some features will be unavailable or skipped. See the [Command Line Parameters](https://github.com/treangenlab/Seqwin/wiki/Command-Line-Parameters) for details. 
+**2. Install non-Python dependencies (optional)**  
+Seqwin can run without these tools, but some features will be unavailable or skipped. See the [Command Line Parameters](https://github.com/treangenlab/Seqwin/wiki/Command-Line-Parameters) for details. 
 - [Mash](https://github.com/marbl/Mash) (see the [publication](https://doi.org/10.1186/s13059-016-0997-x))
 - [NCBI BLAST+](https://www.ncbi.nlm.nih.gov/books/NBK279690/)  
 - [NCBI Datasets CLI](https://www.ncbi.nlm.nih.gov/datasets/docs/v2/reference-docs/command-line/datasets/)
