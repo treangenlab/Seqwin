@@ -113,6 +113,8 @@ jobs:
         env:
           CIBW_BUILD: 'cp310-* cp311-* cp312-* cp313-*'
           CIBW_SKIP: 'pp* cp3??t-* *-musllinux_*'
+          CIBW_ARCHS_WINDOWS: AMD64
+          CIBW_ENVIRONMENT_MACOS: MACOSX_DEPLOYMENT_TARGET=10.15
           CIBW_TEST_COMMAND: >
             seqwin --help &&
             python -c "import seqwin; print(seqwin.__version__)" &&
