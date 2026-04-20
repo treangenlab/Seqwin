@@ -1,7 +1,6 @@
-[![install with bioconda](https://img.shields.io/badge/install%20with-bioconda-brightgreen.svg?style=flat)](https://bioconda.github.io/recipes/seqwin/README.html)
-[![conda downloads](https://img.shields.io/conda/d/bioconda/seqwin)](https://anaconda.org/bioconda/seqwin)
-[![pypi version](https://img.shields.io/pypi/v/seqwin?color=blue)](https://pypi.org/project/seqwin/)
-[![supported platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20Linux%20%7C%20macOS-blue)](https://pypi.org/project/seqwin/)
+[![Bioconda downloads](https://img.shields.io/conda/d/bioconda/seqwin?label=Bioconda%20downloads)](https://bioconda.github.io/recipes/seqwin/README.html)
+[![PyPI downloads](https://img.shields.io/pepy/dt/seqwin?label=PyPI%20downloads&color=blue)](https://pypi.org/project/seqwin/)
+[![Platforms](https://img.shields.io/badge/Platforms-Windows%20%7C%20Linux%20%7C%20macOS-blue)](https://pypi.org/project/seqwin/)
 [![Build and Test](https://github.com/treangenlab/Seqwin/actions/workflows/main.yml/badge.svg?branch=main)](https://github.com/treangenlab/Seqwin/actions/workflows/main.yml)
 
 # Seqwin
@@ -21,12 +20,12 @@ Seqwin computes minimizers with [ntHash](https://doi.org/10.1093/bioinformatics/
 See the [Seqwin Wiki](https://github.com/treangenlab/Seqwin/wiki) for full documentation. 
 
 ## Installation
-Seqwin can be installed from **Bioconda** or **PyPI**. 
+Seqwin can be installed from **Bioconda** or **PyPI**. For a local checkout or developer build, see [Build and install from source](https://github.com/treangenlab/Seqwin/wiki/Build-and-install-from-source). 
 
-- **Bioconda** is the recommended installation method because it installs Seqwin with all dependencies, but it requires Conda and supports only Linux and macOS. 
+- **Bioconda** installs Seqwin with all dependencies, but it requires Conda and supports only Linux and macOS. 
 - **PyPI** (`pip install seqwin`) supports Windows (x64), Linux, and macOS, but installs only Seqwin and its Python dependencies. Non-Python dependencies can be installed separately if needed. 
 
-### Bioconda (recommended)
+### Bioconda
 Works on Linux (x64 / arm64) and macOS (Intel / Apple Silicon). 
 
 If Conda is not installed, install it with [Miniforge](https://github.com/conda-forge/miniforge#install) or [Miniconda](https://www.anaconda.com/docs/getting-started/miniconda/install#quickstart-install-instructions). 
@@ -46,7 +45,7 @@ seqwin --help
 ```
 
 ### PyPI
-Works on Windows (x64), Linux (x64 / arm64), and macOS (Intel / Apple Silicon). Requires Python >= 3.10. 
+Works on Windows (x64), Linux (x64 / arm64), and macOS (Intel / Apple Silicon). Requires Python 3.10+. 
 
 **1. Install Seqwin from PyPI**
 ```bash
@@ -58,8 +57,8 @@ seqwin --help
 **2. Install non-Python dependencies (optional)**  
 Seqwin can run without these tools, but some features will be unavailable or skipped. See the [Command Line Parameters](https://github.com/treangenlab/Seqwin/wiki/Command-Line-Parameters) for details. 
 - [Mash](https://github.com/marbl/Mash) (minimizer sketches are used if it is not installed)
-- [NCBI BLAST+](https://www.ncbi.nlm.nih.gov/books/NBK279690/) (needed for signature evaluation)
-- [NCBI Datasets CLI](https://www.ncbi.nlm.nih.gov/datasets/docs/v2/reference-docs/command-line/datasets/) (needed for downloading NCBI genomes)
+- [NCBI BLAST+](https://ftp.ncbi.nlm.nih.gov/blast/executables/LATEST/) (needed for signature evaluation)
+- [NCBI Datasets CLI](https://www.ncbi.nlm.nih.gov/datasets/docs/v2/command-line-tools/download-and-install/) (needed for downloading NCBI genomes)
 
 ## Quick start
 
