@@ -45,3 +45,7 @@ ninja.make-fallback = true
 wheel.packages = ["src/seqwin"]
 
 sdist.include = ["cpp/**"]
+
+# export compile_commands.json under build/
+[tool.scikit-build.cmake.define]
+CMAKE_EXPORT_COMPILE_COMMANDS = "ON"
