@@ -21,7 +21,6 @@ Usage:
 Dependencies:
 -------------
 - numpy
-- zlib
 
 Functions:
 ----------
@@ -41,8 +40,7 @@ from collections.abc import Iterable
 import numpy as np
 from numpy.typing import NDArray
 
-# _core.so will be installed under this dir (see cpp/CMakeLists.txt)
-from ._core import indexlr_native
+from ._core import _indexlr_native
 
 KMER_DTYPE = np.dtype([
     ('hash', np.uint64), 
@@ -88,11 +86,11 @@ def indexlr(
             3. NDArray[np.uint64]: Global minimizer indices where a new FASTA record starts contributing minimizers. 
             4. NDArray[np.uint64]: Global minimizer indices where a new assembly starts contributing minimizers. 
     """
-    kmers, idx_to_id, record_offsets, assembly_offsets = indexlr_native(
+    kmers, idx_to_id, record_offsets, assembly_offsets = _indexlr_native(
         list(str(p) for p in assembly_paths), 
         int(kmerlen), 
         int(windowsize), 
         list(int(idx) for idx in assembly_idx), 
         list(bool(target) for target in is_target)
     )
-    return kmers.view(KMER_DTYPE), list(tuple(ids) for ids in idx_to_id), record_offsets, assembly_offsets
+    return kmers.view(KMER_DTYPE), idx_to_id, record_offsets, assembly_offsets
