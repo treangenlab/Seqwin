@@ -152,7 +152,7 @@ class KmerGraph(object):
 
         # collect k-mers from all assembies
         if n_cpu <= 1:
-            kmers, edges, record_ids = _get_edges(assemblies, kmerlen, windowsize, return_shm=False)
+            kmers, edges, record_ids = _get_edges(assemblies, kmerlen, windowsize)
         else:
             logger.info(f' - Parallelizing across {n_cpu} threads (~{n_assemblies//n_cpu} assemblies per thread)...')
             with ThreadPoolExecutor(max_workers=n_cpu) as executor:
@@ -599,7 +599,16 @@ def get_kmers(
 
     if no_filter:
         # skip kmers.filter(), debug only
-        return kmers, None
+        kmers_path = working_dir / 'kmers.npz'
+        np.savez(
+            kmers_path, 
+            kmers=kmers.kmers, 
+            idx=kmers.idx, 
+            nodes=kmers.nodes, 
+            edges=kmers.edges, 
+            allow_pickle=False
+        )
+        log_and_raise(SystemExit, f'Filtering is turned off. Raw k-mers are saved to {kmers_path}')
 
     # calculate filter params
     # 1. calculate penalty threshold
