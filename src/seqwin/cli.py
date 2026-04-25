@@ -61,12 +61,22 @@ def main(
     ), 
     tar_paths: Path | None = typer.Option(
         None, '--tar-paths', show_default=False, 
-        help='Text file containing paths to target genomes in FASTA format, one path per line. Gzipped FASTA is supported.', 
+        help='Text file containing paths to target genome FASTA files, one path per line. Gzipped FASTA is supported.', 
         rich_help_panel='Input selection'
     ), 
     neg_paths: Path | None = typer.Option(
         None, '--neg-paths', show_default=False, 
-        help='Text file containing paths to non-target genomes in FASTA format, one path per line. Gzipped FASTA is supported.', 
+        help='Text file containing paths to non-target genome FASTA files, one path per line.', 
+        rich_help_panel='Input selection'
+    ), 
+    tar_dir: Path | None = typer.Option(
+        None, '--tar-dir', show_default=False,
+        help='Directory containing target genome FASTA files.', 
+        rich_help_panel='Input selection'
+    ), 
+    neg_dir: Path | None = typer.Option(
+        None, '--neg-dir', show_default=False,
+        help='Directory containing non-target genome FASTA files.', 
         rich_help_panel='Input selection'
     ), 
     prefix: Path = typer.Option(
@@ -189,22 +199,18 @@ def main(
     )
 ):
     if not download_only:
-        if (tar_paths is None) and (tar_taxa is None):
-            raise typer.BadParameter('You must provide either --tar-paths or --tar-taxa')
-        elif (neg_paths is None) and (neg_taxa is None):
-            raise typer.BadParameter('You must provide either --neg-paths or --neg-taxa')
-    if (penalty_th is not None) and (penalty_th < 0 or penalty_th > 1):
-            raise typer.BadParameter('--penalty-th must be between [0, 1]')
-    if stringency < 0 or stringency > 10:
-            raise typer.BadParameter('--stringency must be between [0, 10]')
-    if (max_len is not None) and (max_len < min_len):
-        raise typer.BadParameter('--max-len must be greater than --min-len')
+        if (tar_paths is None) and (tar_taxa is None) and (tar_dir is None):
+            raise typer.BadParameter('You must provide at least one target input: --tar-paths, --tar-taxa, or --tar-dir')
+        elif (neg_paths is None) and (neg_taxa is None) and (neg_dir is None):
+            raise typer.BadParameter('You must provide at least one non-target input: --neg-paths, --neg-taxa, or --neg-dir')
 
     config = Config(
         tar_taxa=tar_taxa, 
         neg_taxa=neg_taxa, 
         tar_paths=tar_paths, 
         neg_paths=neg_paths, 
+        tar_dir=tar_dir,
+        neg_dir=neg_dir,
         prefix=prefix, 
         title=title, 
         overwrite=overwrite, 

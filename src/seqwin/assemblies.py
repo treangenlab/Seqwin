@@ -46,6 +46,11 @@ from .utils import print_time_delta, log_and_raise, mkdir, file_to_write, \
     mp_wrapper, get_dups, load_paths_txt, load_fasta, GZIP_EXT
 from .config import Config, RunState, WORKINGDIR, BLASTCONFIG
 
+_FASTA_EXT = (
+    '.fna', '.fasta', '.fna.gz', '.fasta.gz', 
+    '.fa', '.fas', '.fa.gz', '.fas.gz'
+)
+
 
 class Assemblies(pd.DataFrame):
     """Package all input genome assemblies as a pandas DataFrame. 
@@ -438,6 +443,24 @@ def _get_paths_txt(paths_txt: Path) -> list[Path]:
     return paths
 
 
+def _get_paths_dir(input_dir: Path) -> list[Path]:
+    """Load assembly paths from a directory (non-recursive)."""
+    paths = list()
+
+    for p in sorted(input_dir.iterdir(), key=lambda x: x.name):
+        if p.is_dir():
+            logger.warning(f'- Skipped subdirectory {p}')
+            continue
+        if p.is_file():
+            if p.name.lower().endswith(_FASTA_EXT):
+                paths.append(p.resolve(strict=True))
+            else:
+                logger.warning(f'- Skipped unsupported file {p}')
+
+    logger.info(f'Found {len(paths)} assemblies from {input_dir}')
+    return paths
+
+
 def _download(config: Config, working_dir: Path) -> tuple[list[Path], list[Path]]:
     """Download assemblies and return file paths. Return empty lists if nothing to download. 
 
@@ -494,6 +517,8 @@ def get_assemblies(config: Config, state: RunState) -> Assemblies:
     """
     tar_paths_txt = config.tar_paths
     neg_paths_txt = config.neg_paths
+    tar_dir = config.tar_dir
+    neg_dir = config.neg_dir
     overwrite = config.overwrite
     download_only = config.download_only
 
@@ -508,6 +533,10 @@ def get_assemblies(config: Config, state: RunState) -> Assemblies:
             tar_paths.extend(_get_paths_txt(tar_paths_txt))
         if neg_paths_txt is not None:
             neg_paths.extend(_get_paths_txt(neg_paths_txt))
+        if tar_dir is not None:
+            tar_paths.extend(_get_paths_dir(tar_dir))
+        if neg_dir is not None:
+            neg_paths.extend(_get_paths_dir(neg_dir))
 
         if not tar_paths:
             log_and_raise(RuntimeError, msg='No target assembly found.')
