@@ -58,7 +58,7 @@ from types import MappingProxyType
 from collections.abc import Mapping
 from functools import cached_property
 
-from pydantic import BaseModel, Field, computed_field, field_validator, model_validator
+from pydantic import BaseModel, ValidationInfo, Field, computed_field, field_validator, model_validator
 
 from .ncbi import Level, Source, Task
 from ._version import __version__
@@ -67,6 +67,9 @@ HAS_MASH = shutil.which("mash") is not None
 HAS_BLAST = (shutil.which("makeblastdb") is not None) and (shutil.which("blastn") is not None)
 HAS_DATASETS = shutil.which("datasets") is not None
 
+_INPUT_FILES = ('tar_paths', 'neg_paths')
+_INPUT_DIRS = ('tar_dir', 'neg_dir', 'prefix')
+
 
 class Config(BaseModel):
     """Seqwin configurations. 
@@ -74,8 +77,10 @@ class Config(BaseModel):
     Attributes:
         tar_taxa (list[str] | None): Target NCBI taxonomy name(s) / ID(s). Must be exact matches. [None]
         neg_taxa (list[str] | None): Non-target NCBI taxonomy name(s) / ID(s). Must be exact matches. [None]
-        tar_paths (Path | None): Text file containing paths to target genomes in FASTA format, one path per line. Gzipped FASTA is supported. [None]
-        neg_paths (Path | None): Text file containing paths to non-target genomes in FASTA format, one path per line. Gzipped FASTA is supported. [None]
+        tar_paths (Path | None): Text file containing paths to target genome FASTA files, one path per line. Gzipped FASTA is supported. [None]
+        neg_paths (Path | None): Text file containing paths to non-target genome FASTA files, one path per line. [None]
+        tar_dir (Path | None): Directory containing target genome FASTA files. [None]
+        neg_dir (Path | None): Directory containing non-target genome FASTA files. [None]
         
         prefix (Path): Parent path where the output directory will be created. Use the current working directory by default. [cwd]
         title (str): Name of the output directory created under `prefix`. ['seqwin-out']
@@ -116,6 +121,8 @@ class Config(BaseModel):
     neg_taxa: list[str] | None = None
     tar_paths: Path | None = None
     neg_paths: Path | None = None
+    tar_dir: Path | None = None
+    neg_dir: Path | None = None
 
     # Outputs
     prefix: Path = Field(default_factory=Path.cwd) # pass a func for dynamic default
@@ -162,13 +169,23 @@ class Config(BaseModel):
         return __version__
 
     # resolve all input paths and make sure they exist
-    @field_validator('tar_paths', 'neg_paths', 'prefix', mode='before')
+    @field_validator(*_INPUT_FILES, *_INPUT_DIRS, mode='before')
     @classmethod
-    def _resolve_paths(cls, v):
+    def _resolve_path(cls, v: Path | None, info: ValidationInfo) -> Path | None:
         if v is None:
             return v
-        p = Path(v).expanduser()
-        return p.resolve(strict=True)
+        try:
+            path = Path(v).expanduser().resolve(strict=True)
+        except OSError:
+            raise ValueError(f'Path does not exist or cannot be resolved: {v!r}')
+
+        if info.field_name in _INPUT_FILES:
+            if not path.is_file():
+                raise ValueError(f'Not a file: {path}')
+        elif info.field_name in _INPUT_DIRS:
+            if not path.is_dir():
+                raise ValueError(f'Not a directory: {path}')
+        return path
 
     @model_validator(mode='after')
     def _check_inputs(self) -> 'Config':
@@ -178,10 +195,10 @@ class Config(BaseModel):
                 'provided taxon names or IDs. Please provide local file paths instead.'))
 
         if not self.download_only:
-            if (self.tar_paths is None) and (self.tar_taxa is None):
-                raise ValueError('You must provide either tar_paths or tar_taxa')
-            elif (self.neg_paths is None) and (self.neg_taxa is None):
-                raise ValueError('You must provide either neg_paths or neg_taxa')
+            if (self.tar_paths is None) and (self.tar_taxa is None) and (self.tar_dir is None):
+                raise ValueError('You must provide at least one target input: tar_paths, tar_taxa, or tar_dir')
+            elif (self.neg_paths is None) and (self.neg_taxa is None) and (self.neg_dir is None):
+                raise ValueError('You must provide at least one non-target input: neg_paths, neg_taxa, or neg_dir')
 
         if (self.penalty_th is not None) and (self.penalty_th < 0 or self.penalty_th > 1):
             raise ValueError('penalty_th must be between [0, 1]')
@@ -189,7 +206,7 @@ class Config(BaseModel):
         if self.stringency < 0 or self.stringency > 10:
             raise ValueError('stringency must be between [0, 10]')
 
-        if (self.max_len is not None) and (self.max_len < self.min_len):
+        if (self.max_len is not None) and (self.max_len <= self.min_len):
             raise ValueError('max_len must be greater than min_len')
 
         return self
@@ -198,7 +215,8 @@ class Config(BaseModel):
         # similar to @dataclass(slots=True, frozen=True)
         'frozen': True, 
         'slots': True, 
-        'validate_default': True
+        'validate_default': True, 
+        'hide_input_in_errors': True
     }
 
 

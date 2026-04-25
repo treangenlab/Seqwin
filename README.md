@@ -78,6 +78,11 @@ Alternatively, a list of target or non-target genomes can be provided as a text 
 ```bash
 seqwin --tar-paths targets.txt --neg-paths non-targets.txt
 ```
+You can also provide directories of genome FASTA files:
+```bash
+seqwin --tar-dir targets/ --neg-dir non-targets/
+```
+
 Examples can be found under [`test/`](test/). Use the [test script](test/run_test.py) to download and run the test dataset. 
 ```bash
 git clone https://github.com/treangenlab/Seqwin.git

@@ -1,7 +1,5 @@
 # For test data
-test/assemblies.tar
-test/assemblies/
-test/seqwin-out/
+test/*
 *.tmp
 
 # For macOS
