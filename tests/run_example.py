@@ -9,12 +9,12 @@ This script:
 
 To run the script:
 ```bash
-python run_test.py
+python run_example.py
 ```
 
 To force a fresh download of the archive:
 ```bash
-python run_test.py --force-download
+python run_example.py --force-download
 ```
 """
 
