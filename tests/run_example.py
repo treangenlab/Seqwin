@@ -18,8 +18,6 @@ python run_example.py --force-download
 ```
 """
 
-from __future__ import annotations
-
 import os
 import argparse
 import hashlib
@@ -28,6 +26,8 @@ import subprocess
 import tarfile
 import urllib.request
 from pathlib import Path
+
+from seqwin.utils import read_text
 
 DATASET_URL = "https://github.com/treangenlab/Seqwin/releases/download/v0.1.0/assemblies.tar"
 DATASET_SHA256 = "149cf4450b3877ab88913ab340fbee60fb12f23bc0f858746b37fb678ec7fca6"
@@ -41,13 +41,6 @@ def sha256sum(path: Path) -> str:
         for chunk in iter(lambda: handle.read(CHUNK_SIZE), b""):
             digest.update(chunk)
     return digest.hexdigest()
-
-
-def same_text(path_a, path_b, encoding="utf-8"):
-    # ensure universal newline handling with newline=None
-    with open(Path(path_a), "r", encoding=encoding, newline=None) as f1, \
-         open(Path(path_b), "r", encoding=encoding, newline=None) as f2:
-        return f1.read() == f2.read()
 
 
 def download_file(url: str, destination: Path, force: bool = False) -> None:
@@ -120,14 +113,11 @@ def run_seqwin(test_dir: Path) -> None:
 
     command = [
         "seqwin",
-        "--tar-paths",
-        "targets.txt",
-        "--neg-paths",
-        "non-targets.txt",
+        "--tar-paths", "targets.txt",
+        "--neg-paths", "non-targets.txt",
         "--no-mash",
         "--no-blast",
-        "--threads",
-        str(THREADS),
+        "--threads", str(THREADS),
     ]
 
     print("Running:")
@@ -144,7 +134,7 @@ def verify_expected_output(test_dir: Path) -> None:
     if not actual.exists():
         raise FileNotFoundError(f"Actual output file not found: {actual}")
 
-    if not same_text(actual, expected):
+    if read_text(actual) != read_text(expected):
         raise SystemExit(
             "Integration test failed: seqwin-out/signatures.fasta does not match "
             "expected-output/signatures.fasta"
