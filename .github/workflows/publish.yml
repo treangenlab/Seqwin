@@ -115,7 +115,7 @@ jobs:
           CIBW_SKIP: 'pp* cp3??t-* *-musllinux_*'
           CIBW_ARCHS_WINDOWS: AMD64
           CIBW_ENVIRONMENT_MACOS: MACOSX_DEPLOYMENT_TARGET=10.15
-          CIBW_TEST_ENVIRONMENT_MACOS: PIP_PREFER_BINARY=1
+          CIBW_TEST_ENVIRONMENT: PIP_PREFER_BINARY=1
           CIBW_TEST_COMMAND: >
             seqwin --help &&
             python -c "import seqwin; print(seqwin.__version__)" &&
