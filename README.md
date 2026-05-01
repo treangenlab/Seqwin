@@ -83,11 +83,11 @@ You can also provide directories of genome FASTA files:
 seqwin --tar-dir targets/ --neg-dir non-targets/
 ```
 
-Examples can be found under [`test/`](test/). Use the [test script](test/run_test.py) to download and run the test dataset. 
+Examples can be found under [`tests/`](tests/). Use the [test script](tests/run_example.py) to download and run the test dataset. 
 ```bash
 git clone https://github.com/treangenlab/Seqwin.git
-cd Seqwin/test/
-python run_test.py
+cd Seqwin/tests/
+python run_example.py
 ```
 
 Expected runtime (with `--threads 8` or `-p 8`): 

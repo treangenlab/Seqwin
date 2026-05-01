@@ -115,13 +115,15 @@ jobs:
           CIBW_SKIP: 'pp* cp3??t-* *-musllinux_*'
           CIBW_ARCHS_WINDOWS: AMD64
           CIBW_ENVIRONMENT_MACOS: MACOSX_DEPLOYMENT_TARGET=10.15
-          CIBW_TEST_ENVIRONMENT_MACOS: PIP_PREFER_BINARY=1
+          CIBW_TEST_ENVIRONMENT: PIP_PREFER_BINARY=1
           CIBW_TEST_COMMAND: >
             seqwin --help &&
             python -c "import seqwin; print(seqwin.__version__)" &&
             python -c "from seqwin.btllib import indexlr; print(indexlr.__name__)" &&
-            python {project}/test/run_test.py &&
-            python -m pip check
+            python -m pip check &&
+            python -m pip install pytest &&
+            pytest -q {project}/tests/smoke &&
+            python {project}/tests/run_example.py
 
       - name: Upload wheels
         uses: actions/upload-artifact@v4

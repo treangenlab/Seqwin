@@ -1,0 +1,2 @@
+tests/smoke/fixtures/targets/target-1.fasta
+tests/smoke/fixtures/targets/target-2.fasta

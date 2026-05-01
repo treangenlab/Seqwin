@@ -17,6 +17,7 @@ Functions:
 - log_and_raise
 - overwrite_warning
 - overwrite_error
+- read_text
 - mkdir
 - file_to_write
 - list_dir
@@ -137,6 +138,13 @@ def overwrite_error(path: Path) -> None:
     """Raise FileExistsError. 
     """
     log_and_raise(FileExistsError, f'File/directory already exists, and overwriting is turned off: {path}', from_none=True)
+
+
+def read_text(path: Path) -> str:
+    """Read a UTF-8 text file with universal newline normalization. 
+    """
+    with open(path, 'r', encoding='utf-8', newline=None) as f:
+        return f.read()
 
 
 def mkdir(path: Path, overwrite: bool=False, verbose=False) -> None:

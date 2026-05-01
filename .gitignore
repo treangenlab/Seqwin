@@ -1,5 +1,6 @@
 # For test data
-test/*
+tests/assemblies*
+tests/seqwin-out
 *.tmp
 
 # For macOS
