@@ -44,14 +44,14 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install --prefer-binary . -v
 
-      - name: Smoke tests
+      - name: Package sanity checks
         run: |
           seqwin --help
           python -c "import seqwin; print(seqwin.__version__)"
           python -c "from seqwin.btllib import indexlr; print(indexlr.__name__)"
           python -m pip check
 
-      - name: Run integration test
-        if: matrix.python-version == '3.10'
+      - name: Run smoke test suite
         run: |
-          python test/run_test.py
+          python -m pip install pytest
+          pytest -q tests/smoke
