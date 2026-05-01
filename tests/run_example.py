@@ -5,7 +5,7 @@ This script:
 1. Downloads the test dataset `assemblies.tar`.
 2. Extracts it into `assemblies/`.
 3. Runs Seqwin with `targets.txt` and `non-targets.txt`.
-4. Verifies the SHA-256 of `seqwin-out/signatures.fasta` against `expected-output/signatures.fasta`.
+4. Verifies the content of `seqwin-out/signatures.fasta` matches `expected-output/signatures.fasta`.
 
 To run the script:
 ```bash
