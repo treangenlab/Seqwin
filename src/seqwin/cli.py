@@ -170,6 +170,11 @@ def main(
         help='Do not download genomes as gzipped FASTA.', 
         rich_help_panel='NCBI download options'
     ), 
+    api_key: str | None = typer.Option(
+        None, '--api-key', show_default=False,
+        help='NCBI API key passed to the Datasets command-line tools.', 
+        rich_help_panel='NCBI download options'
+    ), 
     download_only: bool = typer.Option(
         False, '--download-only', show_default=False, 
         help='Only download genome sequences without running Seqwin.', 
@@ -230,6 +235,7 @@ def main(
         annotated=annotated, 
         exclude_mag=exclude_mag, 
         gzip=not no_gzip, 
+        api_key=api_key,
         download_only=download_only
     )
     _ = run(config)

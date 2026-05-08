@@ -19,6 +19,7 @@ def test_help_shows_key_options() -> None:
         '--neg-paths',
         '--tar-dir',
         '--neg-dir',
+        '--api-key',
         '--no-mash',
         '--no-blast',
         '--threads',
@@ -98,3 +99,27 @@ def test_cli_to_config_mapping_dir(monkeypatch, tmp_path: Path, targets_dir: Pat
     assert cfg.neg_dir == non_targets_dir.resolve(strict=True)
     assert cfg.prefix == tmp_path.resolve(strict=True)
     assert cfg.title == 'cli-dir-mode'
+
+
+def test_cli_api_key_mapping(monkeypatch, tmp_path: Path, targets_txt: Path, non_targets_txt: Path) -> None:
+    captured = {}
+
+    def _fake_run(config):
+        captured['config'] = config
+        return object()
+
+    monkeypatch.setattr('seqwin.cli.run', _fake_run)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            '--tar-paths', str(targets_txt),
+            '--neg-paths', str(non_targets_txt),
+            '--prefix', str(tmp_path),
+            '--api-key', 'test-key',
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert captured['config'].api_key is not None
+    assert captured['config'].api_key.get_secret_value() == 'test-key'

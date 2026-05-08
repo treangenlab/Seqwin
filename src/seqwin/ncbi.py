@@ -90,11 +90,20 @@ class Task(str, Enum):
     megablast = 'megablast'
 
 
-def search_taxon(taxon: str) -> tuple[str | None, str | None]:
+def _add_api_key(args: list[str | Path], api_key: str | None) -> list[str | Path]:
+    """Append `--api-key` for NCBI datasets commands when provided.
+    """
+    if api_key is not None:
+        args += ['--api-key', api_key]
+    return args
+
+
+def search_taxon(taxon: str, api_key: str | None=None) -> tuple[str | None, str | None]:
     """Search a taxon on NCBI Taxonomy. Internet connection is needed. 
 
     Args:
         taxon (str): Name or ID of the taxon (exact match). 
+        api_key (str | None, optional): NCBI API key. [None]
 
     Returns:
         tuple: A tuple containing
@@ -102,13 +111,13 @@ def search_taxon(taxon: str) -> tuple[str | None, str | None]:
             2. str | None: Current scientific name of the taxon. 
     """
     logger.info(f'Searching NCBI Taxonomy for "{taxon}"...')
-    tik = time()
-    summary = run_cmd(
+    args = [
         'datasets', 'summary', 'taxonomy', 'taxon', str(taxon), 
         '--as-json-lines', # output as json
         '--report', 'names', # do not output tax ids of children
-        raise_error=False
-    )
+    ]
+    args = _add_api_key(args, api_key)
+    summary = run_cmd(*args, raise_error=False)
 
     if summary.stdout == '':
         logger.error(summary.stderr)
@@ -158,6 +167,7 @@ def download_taxon(
     annotated: bool=True, 
     exclude_mag: bool=False, 
     gzip: bool=True, 
+    api_key: str | None=None, 
     overwrite: bool=False, 
     n_cpu: int=1
 ) -> list[Path] | None:
@@ -201,7 +211,7 @@ def download_taxon(
         return assembly_paths
 
     # search taxon id and name
-    tax_id, tax_name = search_taxon(taxon)
+    tax_id, tax_name = search_taxon(taxon, api_key=api_key)
     if tax_id is None:
         return None
 
@@ -252,6 +262,7 @@ def download_taxon(
         args += ['--mag', 'exclude']
     else:
         args += ['--mag', 'all']
+    args = _add_api_key(args, api_key)
 
     logger.info(f'Downloading genome package for NCBI Taxonomy ID {tax_id}...')
 
@@ -282,6 +293,7 @@ def download_taxon(
         args += ['--gzip']
     else:
         logger.debug(' - Rehydrating...')
+    args = _add_api_key(args, api_key)
     try:
         run_cmd(*args, raise_error=True)
     except Exception as e:
