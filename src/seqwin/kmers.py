@@ -50,8 +50,7 @@ except ImportError:
     _HAS_DIST_DEPS = False
 
 from .assemblies import Assemblies
-from .helpers import get_edges, concat, merge_weighted_edges, sort_by_hash, agg_by_hash, \
-    get_subgraphs, filter_kmers, NODE_DTYPE
+from .helpers import concat, merge_weighted_edges, sort_by_hash, agg_by_hash, get_subgraphs, filter_kmers, NODE_DTYPE
 from .btllib import indexlr
 from .utils import print_time_delta, log_and_raise, get_chunks
 from .config import Config, RunState, HAS_MASH, WORKINGDIR, EDGE_W, NODE_P
@@ -152,15 +151,19 @@ class KmerGraph(object):
 
         # collect k-mers from all assembies
         if n_cpu <= 1:
-            kmers, edges, record_ids = _get_edges(assemblies, kmerlen, windowsize)
+            kmers, edges, record_ids = indexlr(
+                assemblies.path, kmerlen, windowsize, assemblies.index, assemblies.is_target
+            )
         else:
             logger.info(f' - Parallelizing across {n_cpu} threads (~{n_assemblies//n_cpu} assemblies per thread)...')
             with ThreadPoolExecutor(max_workers=n_cpu) as executor:
                 results = executor.map(
-                    _get_edges, 
-                    get_chunks(assemblies, n_cpu), 
+                    indexlr, 
+                    get_chunks(assemblies.path, n_cpu), 
                     repeat(kmerlen, n_cpu), 
-                    repeat(windowsize, n_cpu)
+                    repeat(windowsize, n_cpu), 
+                    get_chunks(assemblies.index, n_cpu), 
+                    get_chunks(assemblies.is_target, n_cpu), 
                 )
             kmers, edges, record_ids = map(list, zip(*results))
 
@@ -505,36 +508,6 @@ class KmerGraph(object):
         self.graph = graph
         self.subgraphs = subgraphs
         self._filtered_flag = True
-
-
-def _get_edges(
-    assemblies: Assemblies, 
-    kmerlen: int, 
-    windowsize: int
-) -> tuple[NDArray, NDArray, list[tuple[str, ...]]]:
-    """Worker function for `KmerGraph.__get_edges()`. 
-
-    Args:
-        assemblies (Assemblies): See `Assemblies` in `assemblies.py` (could be a slice of the DataFrame). 
-        kmerlen (int): See `Config` in `config.py`. 
-        windowsize (int): See `Config` in `config.py`. 
-
-    Returns:
-        tuple: A tuple containing
-            1. NDArray: See `KmerGraph.kmers`. 
-            2. NDArray: See `KmerGraph.edges`. 
-            3. list[tuple[str, ...]]: Record IDs of each assembly. 
-    """
-    kmers, record_ids, record_offsets, assembly_offsets = indexlr(
-        assemblies.path, 
-        kmerlen, 
-        windowsize, 
-        assemblies.index, 
-        assemblies.is_target
-    )
-    edges = get_edges(kmers['hash'], record_offsets, assembly_offsets)
-
-    return kmers, edges, record_ids
 
 
 def _expected_frac(jaccard_mtx: NDArray) -> np.floating:

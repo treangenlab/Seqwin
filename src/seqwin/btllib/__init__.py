@@ -9,7 +9,7 @@ Usage:
 ```python
 >>> from pathlib import Path
 >>> from seqwin.btllib import indexlr
->>> kmers, record_ids, record_offsets, assembly_offsets = indexlr(
+>>> kmers, edges, record_ids = indexlr(
 >>>     assembly_paths=[Path('example1.fa'), Path('example2.fa.gz')], 
 >>>     kmerlen=21, 
 >>>     windowsize=200, 
@@ -59,9 +59,8 @@ def indexlr(
     is_target: Iterable[bool]
 ) -> tuple[
     NDArray[np.void], 
-    list[tuple[str, ...]], 
     NDArray[np.uint64], 
-    NDArray[np.uint64]
+    list[tuple[str, ...]]
 ]:
     """Compute minimizers for all FASTA records in each assembly in order. 
     `assembly_paths`, `assembly_idx`, and `is_target` are parallel lists. 
@@ -82,15 +81,14 @@ def indexlr(
                 - 'record_idx' (uint16): 0-based index of the sequence records, in the same order as they appear in the FASTA file. 
                 - 'assembly_idx' (uint16): Assembly index. 
                 - 'is_target' (bool): True for target assemblies. 
-            2. list[tuple[str, ...]]: FASTA record IDs of each assembly. 
-            3. NDArray[np.uint64]: Global minimizer indices where a new FASTA record starts contributing minimizers. 
-            4. NDArray[np.uint64]: Global minimizer indices where a new assembly starts contributing minimizers. 
+            2. NDArray[np.uint64]: A 3-column Numpy array of weighted, undirected edges (u, v, w). 
+            3. list[tuple[str, ...]]: FASTA record IDs of each assembly. 
     """
-    kmers, idx_to_id, record_offsets, assembly_offsets = _indexlr_native(
+    kmers, edges, idx_to_id = _indexlr_native(
         list(str(p) for p in assembly_paths), 
         int(kmerlen), 
         int(windowsize), 
         list(int(idx) for idx in assembly_idx), 
         list(bool(target) for target in is_target)
     )
-    return kmers.view(KMER_DTYPE), idx_to_id, record_offsets, assembly_offsets
+    return kmers.view(KMER_DTYPE), edges, idx_to_id
