@@ -58,7 +58,7 @@ from types import MappingProxyType
 from collections.abc import Mapping
 from functools import cached_property
 
-from pydantic import BaseModel, ValidationInfo, Field, computed_field, field_validator, model_validator
+from pydantic import BaseModel, ValidationInfo, Field, SecretStr, computed_field, field_validator, model_validator
 
 from .ncbi import Level, Source, Task
 from ._version import __version__
@@ -110,6 +110,7 @@ class Config(BaseModel):
         annotated (bool): NCBI download option. If True, limit to GenBank (submitter) or RefSeq annotated genomes, based on the selection of source. [False]
         exclude_mag (bool): NCBI download option. If True, exclude metagenome-assembled genomes (MAGs). [False]
         gzip (bool): NCBI download option. If True, download genome sequences in gzip format. [True]
+        api_key (SecretStr | None): NCBI API key passed to the Datasets command-line tools. [None]
         download_only (bool): If True, only download genome sequences without running Seqwin. [False]
         
         seed (int): Random seed for reproducibility. [42]
@@ -157,6 +158,7 @@ class Config(BaseModel):
     annotated: bool = False
     exclude_mag: bool = False
     gzip: bool = True
+    api_key: SecretStr | None = None
     download_only: bool = False
 
     # Miscellaneous

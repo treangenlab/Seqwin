@@ -196,28 +196,29 @@ def list_dir(path: Path=Path.cwd(), mode: Literal['a', 'd', 'f']='a') -> list[Pa
         mode (str, optional): 'd' to list subdirectories, 'f' to list files, 'a' to list all. ['a']
 
     Returns:
-        list: A list of subdirectories and/or files. 
+        list: A list of sub-directories and/or files, sorted by names. 
     """
     # sanity check
     if not path.is_dir():
         log_and_raise(NotADirectoryError, f'Not a directory: {path}')
 
-    entries = path.iterdir()
     if mode == 'd':
-        return list(p for p in entries if p.is_dir())
+        entries = (p for p in path.iterdir() if p.is_dir())
     elif mode == 'f':
-        return list(p for p in entries if p.is_file())
+        entries = (p for p in path.iterdir() if p.is_file())
     elif mode == 'a':
-        return list(entries)
+        entries = path.iterdir()
     else:
         log_and_raise(ValueError, f'Invalid mode for list_dir: {mode}')
 
+    return sorted(entries, key=lambda p: p.name)
 
-def run_cmd(*args, stdin: str | None=None, raise_error: bool=True) -> subprocess.CompletedProcess[str]:
+
+def run_cmd(*args: str | Path, stdin: str | None=None, raise_error: bool=True) -> subprocess.CompletedProcess[str]:
     """Run a command using subprocess.run(). Example usage: run_cmd('ls', '-a'). 
 
     Args:
-        *args (str): Command arguments. Must be strings. 
+        *args (str | Path): Command arguments. Must be strings or paths. 
         stdin (str, optional): Standard input. [None]
         raise_error (bool, optional): If True, raise an error if the command did not run successfully. [True]
 
@@ -269,7 +270,7 @@ def mp_wrapper(
     """
     tik = time()
     if text:
-        logger.info(f'{text} (threads={n_cpu})')
+        logger.info(f'{text} (processes={n_cpu})')
 
     if n_cpu == 1:
         if starmap:
@@ -293,12 +294,12 @@ def mp_wrapper(
                 func_out = pool.map(func, all_args, chunksize=chunksize)
     else:
         log_and_raise(ValueError, 'n_cpu should be an positive integer')
-    
+
     if text:
         print_time_delta(time()-tik)
 
-    if unpack_output:
-        return list(zip(*func_out))
+    if unpack_output and func_out:
+        return list(zip(*func_out, strict=True))
     else:
         return func_out
 

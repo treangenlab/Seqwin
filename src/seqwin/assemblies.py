@@ -421,6 +421,7 @@ def _get_paths_dl(taxa_list: list[str], prefix: Path, config: Config) -> list[Pa
             annotated=config.annotated, 
             exclude_mag=config.exclude_mag, 
             gzip=config.gzip, 
+            api_key=config.api_key.get_secret_value() if config.api_key is not None else None,
             overwrite=config.overwrite, 
             n_cpu=config.n_cpu
         )

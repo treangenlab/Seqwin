@@ -84,3 +84,19 @@ def test_json_serialization_contains_important_fields(
     assert '"run_mash":false' in json_text
     assert '"run_blast":false' in json_text
     assert '"n_cpu":2' in json_text
+
+
+def test_api_key_secret_and_serialization(tmp_path: Path, targets_txt: Path, non_targets_txt: Path) -> None:
+    config = Config(
+        tar_paths=targets_txt,
+        neg_paths=non_targets_txt,
+        prefix=tmp_path,
+        api_key='test-key',
+    )
+
+    assert config.api_key is not None
+    assert config.api_key.get_secret_value() == 'test-key'
+
+    json_text = config.model_dump_json()
+    assert '"api_key":"**********"' in json_text
+    assert 'test-key' not in json_text
