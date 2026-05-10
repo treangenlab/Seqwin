@@ -56,7 +56,8 @@ def indexlr(
     kmerlen: int, 
     windowsize: int, 
     assembly_idx: Iterable[int], 
-    is_target: Iterable[bool]
+    is_target: Iterable[bool],
+    n_cpu: int = 1
 ) -> tuple[
     NDArray[np.void], 
     NDArray[np.uint64], 
@@ -71,6 +72,7 @@ def indexlr(
         windowsize (int): Window size for minimizer sketch. 
         assembly_idx (Iterable[int]): Index of each assembly. 
         is_target (Iterable[bool]): True for target assemblies. 
+        n_cpu (int, optional): Number of threads. [1]
 
     Returns:
         tuple: A tuple containing
@@ -89,6 +91,7 @@ def indexlr(
         int(kmerlen), 
         int(windowsize), 
         list(int(idx) for idx in assembly_idx), 
-        list(bool(target) for target in is_target)
+        list(bool(target) for target in is_target),
+        int(n_cpu)
     )
     return kmers.view(KMER_DTYPE), edges, idx_to_id

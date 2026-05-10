@@ -16,5 +16,6 @@ IndexlrResult indexlr_impl(
     std::size_t kmerlen,
     std::size_t windowsize,
     const std::vector<std::size_t>& assembly_indices,
-    const std::vector<bool>& is_targets
+    const std::vector<bool>& is_targets,
+    std::size_t n_cpu
 );

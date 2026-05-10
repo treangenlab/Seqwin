@@ -31,8 +31,6 @@ __license__ = 'GPL 3.0'
 
 import logging
 from random import Random
-from itertools import repeat, chain
-from concurrent.futures import ThreadPoolExecutor
 from time import time
 
 logger = logging.getLogger(__name__)
@@ -50,9 +48,9 @@ except ImportError:
     _HAS_DIST_DEPS = False
 
 from .assemblies import Assemblies
-from .helpers import concat, merge_weighted_edges, sort_by_hash, agg_by_hash, get_subgraphs, filter_kmers, NODE_DTYPE
+from .helpers import sort_by_hash, agg_by_hash, get_subgraphs, filter_kmers, NODE_DTYPE
 from .btllib import indexlr
-from .utils import print_time_delta, log_and_raise, get_chunks
+from .utils import print_time_delta, log_and_raise
 from .config import Config, RunState, HAS_MASH, WORKINGDIR, EDGE_W, NODE_P
 
 
@@ -149,29 +147,14 @@ class KmerGraph(object):
         logger.info(f'Generating minimizer sketches from {n_assemblies} assemblies...')
         tik = time()
 
-        # collect k-mers from all assembies
-        if n_cpu <= 1:
-            kmers, edges, record_ids = indexlr(
-                assemblies.path, kmerlen, windowsize, assemblies.index, assemblies.is_target
-            )
-        else:
-            logger.info(f' - Parallelizing across {n_cpu} threads (~{n_assemblies//n_cpu} assemblies per thread)...')
-            with ThreadPoolExecutor(max_workers=n_cpu) as executor:
-                results = executor.map(
-                    indexlr, 
-                    get_chunks(assemblies.path, n_cpu), 
-                    repeat(kmerlen, n_cpu), 
-                    repeat(windowsize, n_cpu), 
-                    get_chunks(assemblies.index, n_cpu), 
-                    get_chunks(assemblies.is_target, n_cpu), 
-                )
-            kmers, edges, record_ids = map(list, zip(*results))
-
-            logger.info(' - Merging from all threads...')
-            kmers = concat(kmers, n_cpu)
-            edges = concat(edges, n_cpu)
-            edges = merge_weighted_edges(edges)
-            record_ids = list(chain.from_iterable(record_ids))
+        kmers, edges, record_ids = indexlr(
+            assemblies.path, 
+            kmerlen, 
+            windowsize, 
+            assemblies.index, 
+            assemblies.is_target, 
+            n_cpu=n_cpu, 
+        )
 
         logger.info(f' - {len(edges)} weighted edges from {len(kmers)} k-mers')
         assemblies.record_ids = record_ids

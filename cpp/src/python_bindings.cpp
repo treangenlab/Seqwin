@@ -19,7 +19,8 @@ PYBIND11_MODULE(_core, m) {
            std::size_t kmerlen,
            std::size_t windowsize,
            const std::vector<std::size_t>& assembly_indices,
-           const std::vector<bool>& is_targets
+           const std::vector<bool>& is_targets,
+           std::size_t n_cpu
         ) {
             IndexlrResult result;
             {
@@ -29,7 +30,8 @@ PYBIND11_MODULE(_core, m) {
                     kmerlen,
                     windowsize,
                     assembly_indices,
-                    is_targets
+                    is_targets,
+                    n_cpu
                 );
             }
             auto owner = std::make_shared<IndexlrResult>(std::move(result));
@@ -69,6 +71,7 @@ PYBIND11_MODULE(_core, m) {
         py::arg("kmerlen"),
         py::arg("windowsize"),
         py::arg("assembly_idx"),
-        py::arg("is_target")
+        py::arg("is_target"),
+        py::arg("n_cpu") = 1
     );
 }
