@@ -29,6 +29,7 @@ endif()
 
 Python_add_library(_core MODULE WITH_SOABI
   src/python_bindings.cpp
+  src/graph.cpp
   src/minimizer.cpp
   src/fasta_reader.cpp
   src/status.cpp
