@@ -28,11 +28,11 @@ if (NOT PYBIND11_STATUS EQUAL 0)
 endif()
 
 Python_add_library(_core MODULE WITH_SOABI
-  src/python_bindings.cpp
-  src/graph.cpp
-  src/minimizer.cpp
-  src/fasta_reader.cpp
-  src/status.cpp
+  src/bindings/python_bindings.cpp
+  src/seqwin/graph.cpp
+  src/btllib/minimizer.cpp
+  src/seqwin/fasta_reader.cpp
+  src/btllib/status.cpp
 )
 
 target_include_directories(_core PRIVATE include "${PYBIND11_INCLUDE}")

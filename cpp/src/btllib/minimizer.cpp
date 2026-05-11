@@ -1,6 +1,6 @@
-#include "minimizer.hpp"
+#include "btllib/minimizer.hpp"
 
-#include "nthash.hpp"
+#include "btllib/nthash.hpp"
 
 #include <cstddef>
 #include <limits>

@@ -7,7 +7,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
-#include "graph.hpp"
+#include "seqwin/graph.hpp"
 
 namespace py = pybind11;
 
@@ -22,10 +22,10 @@ PYBIND11_MODULE(_core, m) {
            const std::vector<bool>& is_targets,
            std::size_t n_cpu
         ) {
-            IndexlrResult result;
+            seqwin::IndexlrResult result;
             {
                 py::gil_scoped_release release;
-                result = indexlr_impl(
+                result = seqwin::indexlr_impl(
                     assembly_paths,
                     kmerlen,
                     windowsize,
@@ -34,11 +34,11 @@ PYBIND11_MODULE(_core, m) {
                     n_cpu
                 );
             }
-            auto owner = std::make_shared<IndexlrResult>(std::move(result));
+            auto owner = std::make_shared<seqwin::IndexlrResult>(std::move(result));
             auto capsule = py::capsule(
-                new std::shared_ptr<IndexlrResult>(owner),
+                new std::shared_ptr<seqwin::IndexlrResult>(owner),
                 [](void* ptr) {
-                    delete static_cast<std::shared_ptr<IndexlrResult>*>(ptr);
+                    delete static_cast<std::shared_ptr<seqwin::IndexlrResult>*>(ptr);
                 }
             );
 

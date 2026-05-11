@@ -1,4 +1,4 @@
-#include "graph.hpp"
+#include "seqwin/graph.hpp"
 
 #include <algorithm>
 #include <cstdint>
@@ -11,9 +11,10 @@
 #include <utility>
 #include <vector>
 
-#include "fasta_reader.hpp"
-#include "minimizer.hpp"
+#include "seqwin/fasta_reader.hpp"
+#include "btllib/minimizer.hpp"
 
+namespace seqwin {
 namespace {
 
 constexpr std::size_t serialized_record_size = 17;
@@ -71,7 +72,7 @@ ThreadResult get_graph(
     ThreadResult result;
     result.start_assembly = start_assembly;
     result.kmers.reserve(
-        btllib::est_kmer_number(
+        seqwin::est_kmer_number(
             std::vector<std::string>(
                 assembly_paths.begin() + static_cast<std::ptrdiff_t>(start_assembly),
                 assembly_paths.begin() + static_cast<std::ptrdiff_t>(end_assembly)
@@ -90,7 +91,7 @@ ThreadResult get_graph(
         const std::uint8_t is_target_u8 =
             is_targets[assembly_i] ? std::uint8_t{1} : std::uint8_t{0};
 
-        auto records = btllib::read_fasta(assembly_paths[assembly_i]);
+        auto records = seqwin::read_fasta(assembly_paths[assembly_i]);
         auto& idx_to_id = result.ids_by_assembly.emplace_back();
         idx_to_id.reserve(records.size());
 
@@ -270,3 +271,5 @@ IndexlrResult indexlr_impl(
 
     return {std::move(kmers), std::move(edges), std::move(all_idx_to_id)};
 }
+
+} // namespace seqwin

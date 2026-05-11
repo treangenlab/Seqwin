@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 
+namespace seqwin {
+
 struct IndexlrResult {
     std::vector<std::uint8_t> kmers;
     std::vector<std::uint64_t> edges;
@@ -19,3 +21,5 @@ IndexlrResult indexlr_impl(
     const std::vector<bool>& is_targets,
     std::size_t n_cpu
 );
+
+} // namespace seqwin
