@@ -11,7 +11,7 @@ Dependencies:
 - networkx
 - pandas (optional)
 - scipy (optional)
-- .btllib
+- .graph
 - .assemblies
 - .helpers
 - .utils
@@ -32,6 +32,7 @@ __license__ = 'GPL 3.0'
 import logging
 from random import Random
 from time import time
+from itertools import chain, repeat
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +50,7 @@ except ImportError:
 
 from .assemblies import Assemblies
 from .helpers import sort_by_hash, agg_by_hash, get_subgraphs, filter_kmers, NODE_DTYPE
-from .btllib import indexlr
+from .graph import build
 from .utils import print_time_delta, log_and_raise
 from .config import Config, RunState, HAS_MASH, WORKINGDIR, EDGE_W, NODE_P
 
@@ -147,7 +148,7 @@ class KmerGraph(object):
         logger.info(f'Generating minimizer sketches from {n_assemblies} assemblies...')
         tik = time()
 
-        kmers, edges, record_ids = indexlr(
+        kmers, edges, record_ids = build(
             assemblies.path, 
             kmerlen, 
             windowsize, 

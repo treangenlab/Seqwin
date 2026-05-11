@@ -9,7 +9,7 @@ Dependencies:
 - numpy
 - numba
 - networkx
-- .btllib
+- .graph
 - .utils
 - .config
 
@@ -36,9 +36,9 @@ logger = logging.getLogger(__name__)
 import numpy as np
 import networkx as nx
 from numpy.typing import NDArray
-from numba import types, typed, prange, njit, from_dtype, get_num_threads
+from numba import prange, njit, get_num_threads
 
-from .btllib import KMER_DTYPE
+from .graph import KMER_DTYPE
 from .utils import log_and_raise
 from .config import NODE_P
 

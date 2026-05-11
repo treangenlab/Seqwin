@@ -12,9 +12,9 @@
 namespace py = pybind11;
 
 PYBIND11_MODULE(_core, m) {
-    m.doc() = "Minimal btllib indexlr bindings";
+    m.doc() = "Seqwin minimizer graph bindings";
 
-    m.def("_indexlr_native",
+    m.def("_build_native",
         [](const std::vector<std::string>& assembly_paths,
            std::size_t kmerlen,
            std::size_t windowsize,
@@ -22,10 +22,10 @@ PYBIND11_MODULE(_core, m) {
            const std::vector<bool>& is_targets,
            std::size_t n_cpu
         ) {
-            seqwin::IndexlrResult result;
+            seqwin::BuildResult result;
             {
                 py::gil_scoped_release release;
-                result = seqwin::indexlr_impl(
+                result = seqwin::build_impl(
                     assembly_paths,
                     kmerlen,
                     windowsize,
@@ -34,11 +34,11 @@ PYBIND11_MODULE(_core, m) {
                     n_cpu
                 );
             }
-            auto owner = std::make_shared<seqwin::IndexlrResult>(std::move(result));
+            auto owner = std::make_shared<seqwin::BuildResult>(std::move(result));
             auto capsule = py::capsule(
-                new std::shared_ptr<seqwin::IndexlrResult>(owner),
+                new std::shared_ptr<seqwin::BuildResult>(owner),
                 [](void* ptr) {
-                    delete static_cast<std::shared_ptr<seqwin::IndexlrResult>*>(ptr);
+                    delete static_cast<std::shared_ptr<seqwin::BuildResult>*>(ptr);
                 }
             );
 

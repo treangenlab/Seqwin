@@ -42,7 +42,7 @@ target_compile_definitions(_core PRIVATE PYBIND11_DETAILED_ERROR_MESSAGES)
 set_target_properties(_core PROPERTIES PREFIX "")
 
 install(TARGETS _core
-  LIBRARY DESTINATION seqwin/btllib
-  RUNTIME DESTINATION seqwin/btllib
-  ARCHIVE DESTINATION seqwin/btllib
+  LIBRARY DESTINATION seqwin/graph
+  RUNTIME DESTINATION seqwin/graph
+  ARCHIVE DESTINATION seqwin/graph
 )

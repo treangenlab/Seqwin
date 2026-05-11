@@ -1,15 +1,15 @@
 """
-btllib
-======
+Minimizer Graph
+===============
 
-Generate minimizer sketches, with code adopted from `btllib<https://github.com/bcgsc/btllib>`__. 
+Core functions and dtypes for Seqwin minimizer graphs. 
 
 Usage:
 ------
 ```python
 >>> from pathlib import Path
->>> from seqwin.btllib import indexlr
->>> kmers, edges, record_ids = indexlr(
+>>> from seqwin.graph import build
+>>> kmers, edges, record_ids = build(
 >>>     assembly_paths=[Path('example1.fa'), Path('example2.fa.gz')], 
 >>>     kmerlen=21, 
 >>>     windowsize=200, 
@@ -24,7 +24,7 @@ Dependencies:
 
 Functions:
 ----------
-- indexlr
+- build
 
 Attributes:
 -----------
@@ -40,7 +40,10 @@ from collections.abc import Iterable
 import numpy as np
 from numpy.typing import NDArray
 
-from ._core import _indexlr_native
+from ._core import _build_native
+
+from .utils import OrderedKmers
+
 
 KMER_DTYPE = np.dtype([
     ('hash', np.uint64), 
@@ -51,19 +54,19 @@ KMER_DTYPE = np.dtype([
 ])
 
 
-def indexlr(
+def build(
     assembly_paths: Iterable[Path],  
     kmerlen: int, 
     windowsize: int, 
     assembly_idx: Iterable[int], 
-    is_target: Iterable[bool],
+    is_target: Iterable[bool], 
     n_cpu: int = 1
 ) -> tuple[
     NDArray[np.void], 
     NDArray[np.uint64], 
     list[tuple[str, ...]]
 ]:
-    """Compute minimizers for all FASTA records in each assembly in order. 
+    """Build a Seqwin minimizer graph. 
     `assembly_paths`, `assembly_idx`, and `is_target` are parallel lists. 
 
     Args:
@@ -86,7 +89,7 @@ def indexlr(
             2. NDArray[np.uint64]: A 3-column Numpy array of weighted, undirected edges (u, v, w). 
             3. list[tuple[str, ...]]: FASTA record IDs of each assembly. 
     """
-    kmers, edges, idx_to_id = _indexlr_native(
+    kmers, edges, idx_to_id = _build_native(
         list(str(p) for p in assembly_paths), 
         int(kmerlen), 
         int(windowsize), 

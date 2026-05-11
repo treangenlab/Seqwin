@@ -32,7 +32,7 @@ Dependencies:
 
 Packages:
 --------
-- btllib
+- graph
 
 Modules:
 --------

@@ -1,6 +1,6 @@
 import numpy as np
 
-from seqwin.btllib import indexlr
+from seqwin.graph import build
 
 
 def _sorted_edges(edges: np.ndarray) -> np.ndarray:
@@ -18,7 +18,7 @@ def test_indexlr_threading_equivalence(targets_dir, non_targets_dir) -> None:
     assembly_idx = [0, 1, 2, 3]
     is_target = [True, True, False, False]
 
-    kmers_1, edges_1, record_ids_1 = indexlr(
+    kmers_1, edges_1, record_ids_1 = build(
         assembly_paths,
         kmerlen=7,
         windowsize=10,
@@ -26,7 +26,7 @@ def test_indexlr_threading_equivalence(targets_dir, non_targets_dir) -> None:
         is_target=is_target,
         n_cpu=1,
     )
-    kmers_2, edges_2, record_ids_2 = indexlr(
+    kmers_2, edges_2, record_ids_2 = build(
         assembly_paths,
         kmerlen=7,
         windowsize=10,
@@ -34,7 +34,7 @@ def test_indexlr_threading_equivalence(targets_dir, non_targets_dir) -> None:
         is_target=is_target,
         n_cpu=2,
     )
-    kmers_many, edges_many, record_ids_many = indexlr(
+    kmers_many, edges_many, record_ids_many = build(
         assembly_paths,
         kmerlen=7,
         windowsize=10,

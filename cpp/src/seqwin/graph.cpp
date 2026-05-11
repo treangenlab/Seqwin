@@ -147,7 +147,7 @@ ThreadResult get_graph(
 
 } // namespace
 
-IndexlrResult indexlr_impl(
+BuildResult build_impl(
     const std::vector<std::string>& assembly_paths,
     std::size_t kmerlen,
     std::size_t windowsize,
