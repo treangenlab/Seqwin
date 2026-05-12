@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-namespace btllib {
+namespace seqwin {
 
 struct FastaRecord
 {
@@ -18,4 +18,4 @@ read_fasta(const std::string& assembly_path);
 std::size_t
 est_kmer_number(const std::vector<std::string>& assembly_paths, std::size_t windowsize);
 
-} // namespace btllib
+} // namespace seqwin

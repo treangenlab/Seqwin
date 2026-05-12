@@ -1,4 +1,4 @@
-#include "graph.hpp"
+#include "seqwin/graph.hpp"
 
 #include <algorithm>
 #include <cstdint>
@@ -6,14 +6,16 @@
 #include <limits>
 #include <stdexcept>
 #include <exception>
+#include <mutex>
 #include <thread>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
-#include "fasta_reader.hpp"
-#include "minimizer.hpp"
+#include "seqwin/fasta_reader.hpp"
+#include "btllib/minimizer.hpp"
 
+namespace seqwin {
 namespace {
 
 constexpr std::size_t serialized_record_size = 17;
@@ -59,7 +61,7 @@ void append_record(
     std::memcpy(record + 16, &is_target, sizeof(is_target));
 }
 
-ThreadResult get_graph(
+ThreadResult build_worker(
     const std::vector<std::string>& assembly_paths,
     std::size_t kmerlen,
     std::size_t windowsize,
@@ -71,7 +73,7 @@ ThreadResult get_graph(
     ThreadResult result;
     result.start_assembly = start_assembly;
     result.kmers.reserve(
-        btllib::est_kmer_number(
+        seqwin::est_kmer_number(
             std::vector<std::string>(
                 assembly_paths.begin() + static_cast<std::ptrdiff_t>(start_assembly),
                 assembly_paths.begin() + static_cast<std::ptrdiff_t>(end_assembly)
@@ -90,7 +92,7 @@ ThreadResult get_graph(
         const std::uint8_t is_target_u8 =
             is_targets[assembly_i] ? std::uint8_t{1} : std::uint8_t{0};
 
-        auto records = btllib::read_fasta(assembly_paths[assembly_i]);
+        auto records = seqwin::read_fasta(assembly_paths[assembly_i]);
         auto& idx_to_id = result.ids_by_assembly.emplace_back();
         idx_to_id.reserve(records.size());
 
@@ -146,7 +148,7 @@ ThreadResult get_graph(
 
 } // namespace
 
-IndexlrResult indexlr_impl(
+BuildResult build_impl(
     const std::vector<std::string>& assembly_paths,
     std::size_t kmerlen,
     std::size_t windowsize,
@@ -170,6 +172,7 @@ IndexlrResult indexlr_impl(
     std::vector<std::thread> threads;
     threads.reserve(n_workers);
     std::exception_ptr thread_error = nullptr;
+    std::mutex error_mutex;
 
     // Divide assemblies into n_workers chunks for multithreading
     const std::size_t base = n_assemblies / n_workers;
@@ -180,7 +183,7 @@ IndexlrResult indexlr_impl(
         const auto end = start + chunk_size;
         threads.emplace_back([&, i, start, end]() {
             try {
-                results[i] = get_graph(
+                results[i] = build_worker(
                 assembly_paths,
                 kmerlen,
                 windowsize,
@@ -190,6 +193,7 @@ IndexlrResult indexlr_impl(
                 end
                 );
             } catch (...) {
+                std::lock_guard<std::mutex> lock(error_mutex);
                 if (!thread_error) {
                     thread_error = std::current_exception();
                 }
@@ -212,14 +216,9 @@ IndexlrResult indexlr_impl(
     // Merge results from all threads
     std::size_t total_kmer_bytes = 0;
     std::size_t total_edge_entries = 0;
-    std::vector<std::vector<std::string>> all_idx_to_id(n_assemblies);
     for (std::size_t i = 0; i < results.size(); ++i) {
         total_kmer_bytes += results[i].kmers.size();
         total_edge_entries += results[i].edge_map.size();
-        // Merge record IDs
-        for (std::size_t local_i = 0; local_i < results[i].ids_by_assembly.size(); ++local_i) {
-            all_idx_to_id[results[i].start_assembly + local_i] = std::move(results[i].ids_by_assembly[local_i]);
-        }
     }
 
     // Merge kmers
@@ -228,12 +227,28 @@ IndexlrResult indexlr_impl(
         kmers = std::move(results[0].kmers);
 
         if (results.size() > 1) {
-            kmers.reserve(total_kmer_bytes);
-
+            std::vector<std::size_t> offsets(results.size(), 0);
+            std::size_t cursor = kmers.size();
             for (std::size_t i = 1; i < results.size(); ++i) {
-                auto& src = results[i].kmers;
-                kmers.insert(kmers.end(), src.begin(), src.end());
-                std::vector<std::uint8_t>().swap(src);
+                offsets[i] = cursor;
+                cursor += results[i].kmers.size();
+            }
+
+            kmers.resize(total_kmer_bytes);
+            std::vector<std::thread> threads;
+            threads.reserve(results.size() - 1);
+            for (std::size_t i = 1; i < results.size(); ++i) {
+                threads.emplace_back([&, i]() {
+                    auto& local_kmers = results[i].kmers;
+                    const auto size = local_kmers.size();
+                    if (size != 0) {
+                        std::memcpy(kmers.data() + offsets[i], local_kmers.data(), size);
+                    }
+                    std::vector<std::uint8_t>().swap(local_kmers);
+                });
+            }
+            for (auto& t : threads) {
+                t.join();
             }
         }
     }
@@ -268,5 +283,22 @@ IndexlrResult indexlr_impl(
         edges.push_back(state.weight);
     }
 
+    // Merge record IDs
+    std::vector<std::vector<std::string>> all_idx_to_id;
+    if (!results.empty()) {
+        all_idx_to_id = std::move(results[0].ids_by_assembly);
+
+        if (results.size() > 1) {
+            all_idx_to_id.resize(n_assemblies);
+            for (std::size_t i = 1; i < results.size(); ++i) {
+                for (std::size_t j = 0; j < results[i].ids_by_assembly.size(); ++j) {
+                    all_idx_to_id[results[i].start_assembly + j] = std::move(results[i].ids_by_assembly[j]);
+                }
+            }
+        }
+    }
+
     return {std::move(kmers), std::move(edges), std::move(all_idx_to_id)};
 }
+
+} // namespace seqwin

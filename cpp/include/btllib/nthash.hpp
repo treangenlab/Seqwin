@@ -9,10 +9,10 @@
 #include <string_view>
 #include <vector>
 
-#include "hashing_internals.hpp"
-#include "nthash_kmer.hpp"
-#include "nthash_seed.hpp"
-#include "status.hpp"
+#include "btllib/hashing_internals.hpp"
+#include "btllib/nthash_kmer.hpp"
+#include "btllib/nthash_seed.hpp"
+#include "btllib/status.hpp"
 
 namespace btllib {
 

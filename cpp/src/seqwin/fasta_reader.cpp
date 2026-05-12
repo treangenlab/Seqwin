@@ -1,4 +1,4 @@
-#include "fasta_reader.hpp"
+#include "seqwin/fasta_reader.hpp"
 
 #include <array>
 #include <algorithm>
@@ -13,7 +13,7 @@
 
 #include <zlib.h>
 
-namespace btllib {
+namespace seqwin {
 namespace {
 
 constexpr std::size_t plain_fasta_seq_len_per_byte = 1;
@@ -236,4 +236,4 @@ est_kmer_number(const std::vector<std::string>& assembly_paths, std::size_t wind
   return (2 * est_total_seq_len) / (windowsize + 1);
 }
 
-} // namespace btllib
+} // namespace seqwin
