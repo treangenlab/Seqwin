@@ -6,6 +6,7 @@
 #include <limits>
 #include <stdexcept>
 #include <exception>
+#include <mutex>
 #include <thread>
 #include <unordered_map>
 #include <utility>
@@ -60,7 +61,7 @@ void append_record(
     std::memcpy(record + 16, &is_target, sizeof(is_target));
 }
 
-ThreadResult get_graph(
+ThreadResult build_worker(
     const std::vector<std::string>& assembly_paths,
     std::size_t kmerlen,
     std::size_t windowsize,
@@ -171,6 +172,7 @@ BuildResult build_impl(
     std::vector<std::thread> threads;
     threads.reserve(n_workers);
     std::exception_ptr thread_error = nullptr;
+    std::mutex error_mutex;
 
     // Divide assemblies into n_workers chunks for multithreading
     const std::size_t base = n_assemblies / n_workers;
@@ -181,7 +183,7 @@ BuildResult build_impl(
         const auto end = start + chunk_size;
         threads.emplace_back([&, i, start, end]() {
             try {
-                results[i] = get_graph(
+                results[i] = build_worker(
                 assembly_paths,
                 kmerlen,
                 windowsize,
@@ -191,6 +193,7 @@ BuildResult build_impl(
                 end
                 );
             } catch (...) {
+                std::lock_guard<std::mutex> lock(error_mutex);
                 if (!thread_error) {
                     thread_error = std::current_exception();
                 }
@@ -213,14 +216,9 @@ BuildResult build_impl(
     // Merge results from all threads
     std::size_t total_kmer_bytes = 0;
     std::size_t total_edge_entries = 0;
-    std::vector<std::vector<std::string>> all_idx_to_id(n_assemblies);
     for (std::size_t i = 0; i < results.size(); ++i) {
         total_kmer_bytes += results[i].kmers.size();
         total_edge_entries += results[i].edge_map.size();
-        // Merge record IDs
-        for (std::size_t local_i = 0; local_i < results[i].ids_by_assembly.size(); ++local_i) {
-            all_idx_to_id[results[i].start_assembly + local_i] = std::move(results[i].ids_by_assembly[local_i]);
-        }
     }
 
     // Merge kmers
@@ -229,12 +227,28 @@ BuildResult build_impl(
         kmers = std::move(results[0].kmers);
 
         if (results.size() > 1) {
-            kmers.reserve(total_kmer_bytes);
-
+            std::vector<std::size_t> offsets(results.size(), 0);
+            std::size_t cursor = kmers.size();
             for (std::size_t i = 1; i < results.size(); ++i) {
-                auto& src = results[i].kmers;
-                kmers.insert(kmers.end(), src.begin(), src.end());
-                std::vector<std::uint8_t>().swap(src);
+                offsets[i] = cursor;
+                cursor += results[i].kmers.size();
+            }
+
+            kmers.resize(total_kmer_bytes);
+            std::vector<std::thread> threads;
+            threads.reserve(results.size() - 1);
+            for (std::size_t i = 1; i < results.size(); ++i) {
+                threads.emplace_back([&, i]() {
+                    auto& local_kmers = results[i].kmers;
+                    const auto size = local_kmers.size();
+                    if (size != 0) {
+                        std::memcpy(kmers.data() + offsets[i], local_kmers.data(), size);
+                    }
+                    std::vector<std::uint8_t>().swap(local_kmers);
+                });
+            }
+            for (auto& t : threads) {
+                t.join();
             }
         }
     }
@@ -267,6 +281,21 @@ BuildResult build_impl(
         edges.push_back(key.first);
         edges.push_back(key.second);
         edges.push_back(state.weight);
+    }
+
+    // Merge record IDs
+    std::vector<std::vector<std::string>> all_idx_to_id;
+    if (!results.empty()) {
+        all_idx_to_id = std::move(results[0].ids_by_assembly);
+
+        if (results.size() > 1) {
+            all_idx_to_id.resize(n_assemblies);
+            for (std::size_t i = 1; i < results.size(); ++i) {
+                for (std::size_t j = 0; j < results[i].ids_by_assembly.size(); ++j) {
+                    all_idx_to_id[results[i].start_assembly + j] = std::move(results[i].ids_by_assembly[j]);
+                }
+            }
+        }
     }
 
     return {std::move(kmers), std::move(edges), std::move(all_idx_to_id)};
