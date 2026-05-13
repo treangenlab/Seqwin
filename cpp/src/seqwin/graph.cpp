@@ -21,6 +21,12 @@ namespace {
 
 constexpr std::size_t serialized_record_size = 17;
 
+struct NodeState {
+    std::uint64_t n_tar;
+    std::uint64_t n_neg;
+    std::size_t last_seen_assembly;
+};
+
 using EdgeKey = std::pair<std::uint64_t, std::uint64_t>;
 
 struct EdgeKeyHash {
@@ -76,7 +82,8 @@ ThreadResult build_worker(
         ) * serialized_record_size
     );
     result.ids_by_assembly.reserve(end_assembly - start_assembly);
-    // Reserving for edge_map will actually allocate physical memory
+    // Reserving for unordered_map will actually allocate physical memory
+    std::unordered_map<std::uint64_t, NodeState> node_map;
     std::unordered_map<EdgeKey, EdgeState, EdgeKeyHash> edge_map;
 
     for (std::size_t assembly_i = start_assembly; assembly_i < end_assembly; ++assembly_i) {
@@ -114,6 +121,23 @@ ThreadResult build_worker(
                     record_idx16,
                     assembly_idx16,
                     is_target_u8);
+
+                auto [node_it, node_inserted] = node_map.try_emplace(
+                    m.out_hash,
+                    NodeState{
+                        is_target_u8 == 1 ? std::uint64_t{1} : std::uint64_t{0},
+                        is_target_u8 == 0 ? std::uint64_t{1} : std::uint64_t{0},
+                        assembly_i
+                    }
+                );
+                if (!node_inserted && node_it->second.last_seen_assembly != assembly_i) {
+                    if (is_target_u8 == 1) {
+                        ++(node_it->second.n_tar);
+                    } else {
+                        ++(node_it->second.n_neg);
+                    }
+                    node_it->second.last_seen_assembly = assembly_i;
+                }
             }
 
             if (mins.size() < 2) {
@@ -127,16 +151,23 @@ ThreadResult build_worker(
                     std::swap(u, v);
                 }
                 const EdgeKey key{u, v};
-                auto [it, inserted] = edge_map.try_emplace(
+                auto [edge_it, edge_inserted] = edge_map.try_emplace(
                     key,
                     EdgeState{1, assembly_i}
                 );
-                if (!inserted && it->second.last_seen_assembly != assembly_i) {
-                    ++(it->second.weight);
-                    it->second.last_seen_assembly = assembly_i;
+                if (!edge_inserted && edge_it->second.last_seen_assembly != assembly_i) {
+                    ++(edge_it->second.weight);
+                    edge_it->second.last_seen_assembly = assembly_i;
                 }
             }
         }
+    }
+
+    result.nodes.reserve(node_map.size() * 3);
+    for (const auto& [hash, state] : node_map) {
+        result.nodes.push_back(hash);
+        result.nodes.push_back(state.n_tar);
+        result.nodes.push_back(state.n_neg);
     }
 
     result.edges.reserve(edge_map.size() * 3);
@@ -214,14 +245,6 @@ BuildResult build_impl(
     std::sort(results.begin(), results.end(), [](const ThreadResult& a, const ThreadResult& b) {
         return a.start_assembly < b.start_assembly;
     });
-
-    if (results.size() == 1) {
-        return {
-            std::move(results[0].kmers),
-            std::move(results[0].edges),
-            std::move(results[0].ids_by_assembly)
-        };
-    }
 
     return merge_thread_results(results, n_assemblies, n_workers);
 }
