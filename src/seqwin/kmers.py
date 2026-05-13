@@ -148,7 +148,7 @@ class KmerGraph(object):
         logger.info(f'Generating minimizer sketches from {n_assemblies} assemblies...')
         tik = time()
 
-        kmers, edges, record_ids = build(
+        kmers, _nodes, edges, record_ids = build(
             assemblies.path, 
             kmerlen, 
             windowsize, 

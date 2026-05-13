@@ -3,22 +3,29 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
-#include <limits>
-#include <stdexcept>
 #include <exception>
+#include <limits>
 #include <mutex>
+#include <stdexcept>
 #include <thread>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
-#include "seqwin/fasta_reader.hpp"
 #include "btllib/minimizer.hpp"
+#include "seqwin/fasta_reader.hpp"
+#include "seqwin/helpers.hpp"
 
 namespace seqwin {
 namespace {
 
 constexpr std::size_t serialized_record_size = 17;
+
+struct NodeState {
+    std::uint64_t n_tar;
+    std::uint64_t n_neg;
+    std::size_t last_seen_assembly;
+};
 
 using EdgeKey = std::pair<std::uint64_t, std::uint64_t>;
 
@@ -33,13 +40,6 @@ struct EdgeKeyHash {
 struct EdgeState {
     std::uint64_t weight;
     std::size_t last_seen_assembly;
-};
-
-struct ThreadResult {
-    std::vector<std::uint8_t> kmers;
-    std::unordered_map<EdgeKey, EdgeState, EdgeKeyHash> edge_map;
-    std::vector<std::vector<std::string>> ids_by_assembly;
-    std::size_t start_assembly;
 };
 
 void append_record(
@@ -82,6 +82,9 @@ ThreadResult build_worker(
         ) * serialized_record_size
     );
     result.ids_by_assembly.reserve(end_assembly - start_assembly);
+    // Reserving for unordered_map will actually allocate physical memory
+    std::unordered_map<std::uint64_t, NodeState> node_map;
+    std::unordered_map<EdgeKey, EdgeState, EdgeKeyHash> edge_map;
 
     for (std::size_t assembly_i = start_assembly; assembly_i < end_assembly; ++assembly_i) {
         const auto assembly_idx = assembly_indices[assembly_i];
@@ -118,6 +121,23 @@ ThreadResult build_worker(
                     record_idx16,
                     assembly_idx16,
                     is_target_u8);
+
+                auto [node_it, node_inserted] = node_map.try_emplace(
+                    m.out_hash,
+                    NodeState{
+                        is_target_u8 == 1 ? std::uint64_t{1} : std::uint64_t{0},
+                        is_target_u8 == 0 ? std::uint64_t{1} : std::uint64_t{0},
+                        assembly_i
+                    }
+                );
+                if (!node_inserted && node_it->second.last_seen_assembly != assembly_i) {
+                    if (is_target_u8 == 1) {
+                        ++(node_it->second.n_tar);
+                    } else {
+                        ++(node_it->second.n_neg);
+                    }
+                    node_it->second.last_seen_assembly = assembly_i;
+                }
             }
 
             if (mins.size() < 2) {
@@ -131,16 +151,30 @@ ThreadResult build_worker(
                     std::swap(u, v);
                 }
                 const EdgeKey key{u, v};
-                auto [it, inserted] = result.edge_map.try_emplace(
+                auto [edge_it, edge_inserted] = edge_map.try_emplace(
                     key,
                     EdgeState{1, assembly_i}
                 );
-                if (!inserted && it->second.last_seen_assembly != assembly_i) {
-                    ++(it->second.weight);
-                    it->second.last_seen_assembly = assembly_i;
+                if (!edge_inserted && edge_it->second.last_seen_assembly != assembly_i) {
+                    ++(edge_it->second.weight);
+                    edge_it->second.last_seen_assembly = assembly_i;
                 }
             }
         }
+    }
+
+    result.nodes.reserve(node_map.size() * 3);
+    for (const auto& [hash, state] : node_map) {
+        result.nodes.push_back(hash);
+        result.nodes.push_back(state.n_tar);
+        result.nodes.push_back(state.n_neg);
+    }
+
+    result.edges.reserve(edge_map.size() * 3);
+    for (const auto& [key, state] : edge_map) {
+        result.edges.push_back(key.first);
+        result.edges.push_back(key.second);
+        result.edges.push_back(state.weight);
     }
 
     return result;
@@ -174,7 +208,6 @@ BuildResult build_impl(
     std::exception_ptr thread_error = nullptr;
     std::mutex error_mutex;
 
-    // Divide assemblies into n_workers chunks for multithreading
     const std::size_t base = n_assemblies / n_workers;
     const std::size_t rem = n_assemblies % n_workers;
     std::size_t start = 0;
@@ -184,13 +217,13 @@ BuildResult build_impl(
         threads.emplace_back([&, i, start, end]() {
             try {
                 results[i] = build_worker(
-                assembly_paths,
-                kmerlen,
-                windowsize,
-                assembly_indices,
-                is_targets,
-                start,
-                end
+                    assembly_paths,
+                    kmerlen,
+                    windowsize,
+                    assembly_indices,
+                    is_targets,
+                    start,
+                    end
                 );
             } catch (...) {
                 std::lock_guard<std::mutex> lock(error_mutex);
@@ -213,92 +246,7 @@ BuildResult build_impl(
         return a.start_assembly < b.start_assembly;
     });
 
-    // Merge results from all threads
-    std::size_t total_kmer_bytes = 0;
-    std::size_t total_edge_entries = 0;
-    for (std::size_t i = 0; i < results.size(); ++i) {
-        total_kmer_bytes += results[i].kmers.size();
-        total_edge_entries += results[i].edge_map.size();
-    }
-
-    // Merge kmers
-    std::vector<std::uint8_t> kmers;
-    if (!results.empty()) {
-        kmers = std::move(results[0].kmers);
-
-        if (results.size() > 1) {
-            std::vector<std::size_t> offsets(results.size(), 0);
-            std::size_t cursor = kmers.size();
-            for (std::size_t i = 1; i < results.size(); ++i) {
-                offsets[i] = cursor;
-                cursor += results[i].kmers.size();
-            }
-
-            kmers.resize(total_kmer_bytes);
-            std::vector<std::thread> threads;
-            threads.reserve(results.size() - 1);
-            for (std::size_t i = 1; i < results.size(); ++i) {
-                threads.emplace_back([&, i]() {
-                    auto& local_kmers = results[i].kmers;
-                    const auto size = local_kmers.size();
-                    if (size != 0) {
-                        std::memcpy(kmers.data() + offsets[i], local_kmers.data(), size);
-                    }
-                    std::vector<std::uint8_t>().swap(local_kmers);
-                });
-            }
-            for (auto& t : threads) {
-                t.join();
-            }
-        }
-    }
-
-    // Merge edges
-    std::unordered_map<EdgeKey, EdgeState, EdgeKeyHash> edge_map;
-    if (!results.empty()) {
-        edge_map = std::move(results[0].edge_map);
-        edge_map.reserve(total_edge_entries);
-    }
-
-    for (std::size_t i = 1; i < results.size(); ++i) {
-        auto& src = results[i].edge_map;
-        for (auto it = src.begin(); it != src.end();) {
-            auto dst = edge_map.find(it->first);
-            if (dst != edge_map.end()) {
-                dst->second.weight += it->second.weight;
-                it = src.erase(it);
-            } else {
-                auto nh = src.extract(it++);
-                edge_map.insert(std::move(nh));
-            }
-        }
-        std::unordered_map<EdgeKey, EdgeState, EdgeKeyHash>().swap(src);
-    }
-
-    std::vector<std::uint64_t> edges;
-    edges.reserve(edge_map.size() * 3);
-    for (const auto& [key, state] : edge_map) {
-        edges.push_back(key.first);
-        edges.push_back(key.second);
-        edges.push_back(state.weight);
-    }
-
-    // Merge record IDs
-    std::vector<std::vector<std::string>> all_idx_to_id;
-    if (!results.empty()) {
-        all_idx_to_id = std::move(results[0].ids_by_assembly);
-
-        if (results.size() > 1) {
-            all_idx_to_id.resize(n_assemblies);
-            for (std::size_t i = 1; i < results.size(); ++i) {
-                for (std::size_t j = 0; j < results[i].ids_by_assembly.size(); ++j) {
-                    all_idx_to_id[results[i].start_assembly + j] = std::move(results[i].ids_by_assembly[j]);
-                }
-            }
-        }
-    }
-
-    return {std::move(kmers), std::move(edges), std::move(all_idx_to_id)};
+    return merge_thread_results(results, n_assemblies, n_workers);
 }
 
 } // namespace seqwin
