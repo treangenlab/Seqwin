@@ -25,10 +25,9 @@ Dependencies:
 - networkx
 - pydantic
 - typer
-- mash
-- blast
-- ncbi-datasets-cli
-- scipy (optional)
+- mash (optional)
+- blast (optional)
+- ncbi-datasets-cli (optional)
 
 Packages:
 --------
@@ -43,7 +42,6 @@ Modules:
 - helpers
 - ncbi
 - mash
-- graph
 - utils
 - config
 """

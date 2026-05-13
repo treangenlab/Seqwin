@@ -81,11 +81,11 @@ class Config(BaseModel):
         neg_paths (Path | None): Text file containing paths to non-target genome FASTA files, one path per line. [None]
         tar_dir (Path | None): Directory containing target genome FASTA files. [None]
         neg_dir (Path | None): Directory containing non-target genome FASTA files. [None]
-        
+
         prefix (Path): Parent path where the output directory will be created. Use the current working directory by default. [cwd]
         title (str): Name of the output directory created under `prefix`. ['seqwin-out']
         overwrite (bool): If True, overwrite existing output files. [False]
-        
+
         kmerlen (int): K-mer length. [21]
         windowsize (int): Window size for minimizer sketch. [200]
         penalty_th (float | None): Node penalty threshold, from 0 to 1. If None, Seqwin computes it automatically (capped by `penalty_th_cap`). [None]
@@ -94,17 +94,16 @@ class Config(BaseModel):
         min_len (int): Minimum length of output signatures. [200]
         max_len (int | None): Estimated maximum length of output signatures. If None, no explicit limit is applied (capped by `max_nodes_cap`). [None]
         run_blast (bool): If True, evaluate signature sequences with BLAST. [True]
-        blast_neg_only (bool): If True, only include non-target assemblies in the BLAST database. [False]
-        
+        blast_neg_only (bool, deprecated): If True, only include non-target assemblies in the BLAST database. [False]
+
         no_filter (bool): If True, skip filtering k-mers (debug only). [False]
         penalty_th_cap (float): If `penalty_th` is None, penalty threshold cannot be higher than this value. [0.2]
         edge_w_th_mul (float): Multiplier for determining the threshold for low-weight edges. [0.3]
         min_nodes_floor (int): Lowest possible value for `min_nodes` (see `RunState`), regardless of `min_len`. [3]
         max_nodes_cap (int | None): If `max_len` is None, `max_nodes` (see `RunState`) cannot be higher than this value. None for no limit. [100]
-        
+
         sketchsize (int): Sketch size for Mash (MinHash) sketch. [1000]
-        get_dist (bool): If True, calculate assembly distance with minimizer sketches (slow). [False]
-        
+
         level (Level): NCBI download option. Limit to genomes ≥ this assembly level ('contig' < 'scaffold' < 'chromosome' < 'complete'). ['contig']
         source (Source): NCBI download option. Genome source ('genbank' or 'refseq'). ['genbank']
         annotated (bool): NCBI download option. If True, limit to GenBank (submitter) or RefSeq annotated genomes, based on the selection of source. [False]
@@ -112,7 +111,7 @@ class Config(BaseModel):
         gzip (bool): NCBI download option. If True, download genome sequences in gzip format. [True]
         api_key (SecretStr | None): NCBI API key passed to the Datasets command-line tools. [None]
         download_only (bool): If True, only download genome sequences without running Seqwin. [False]
-        
+
         seed (int): Random seed for reproducibility. [42]
         n_cpu (int): Number of parallel processes or threads to use. [4]
         version (str): Seqwin version. 
@@ -148,9 +147,8 @@ class Config(BaseModel):
     min_nodes_floor: int = 3
     max_nodes_cap: int | None = 100
 
-    # Mash and assembly distance estimation (not included in CLI)
+    # Mash parameters (not included in CLI)
     sketchsize: int = 1000
-    get_dist: bool = False
 
     # NCBI download options
     level: Level = Level.contig
