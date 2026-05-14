@@ -39,7 +39,7 @@ from numpy.typing import NDArray
 from numba import set_num_threads
 
 from .assemblies import Assemblies
-from .helpers import sort_by_hash, agg_by_hash, get_subgraphs, filter_kmers, NODE_DTYPE
+from .helpers import sort_by_hash, get_subgraphs, filter_kmers
 from .graph import build
 from .utils import print_time_delta, log_and_raise
 from .config import Config, RunState, HAS_MASH, WORKINGDIR, EDGE_W, NODE_P
@@ -51,9 +51,9 @@ class KmerGraph(object):
     2. Extract low-penalty subgraphs from the k-mer graph with `self.filter()`. 
 
     Attributes:
-        kmers (NDArray): A 1-D Numpy structured array of k-mers from all assemblies, with dtype `KMER_DTYPE` defined in `minimizer.py`. 
+        kmers (NDArray): A 1-D Numpy structured array of k-mers from all assemblies, with dtype `KMER_DTYPE` defined in `seqwin.graph`. 
         idx (NDArray | None): The original indices assigned when k-mers are generated (k-mers with consecutive indices are adjacent in the genome). 
-        nodes (NDArray): A 1-D Numpy structured array of k-mer nodes, with dtype `NODE_DTYPE` defined in `helpers.py`. 
+        nodes (NDArray): A 1-D Numpy structured array of k-mer nodes, with dtype `NODE_DTYPE` defined in `seqwin.graph`. 
         edges (NDArray): A 3-column Numpy array of weighted, undirected edges (u, v, w). 
             Edge weight is the number of assemblies where the two k-mers are adjacent. 
         graph (nx.Graph): The graph instance built from filtered nodes and edges. 
@@ -86,7 +86,7 @@ class KmerGraph(object):
         logger.info(f'Building minimizer graph from {n_assemblies} assemblies...')
         tik = time()
 
-        kmers, _native_idx, nodes, edges, record_ids = build(
+        kmers, idx, nodes, edges, record_ids = build(
             assemblies.path, 
             kmerlen, 
             windowsize, 
@@ -94,16 +94,23 @@ class KmerGraph(object):
             assemblies.is_target, 
             n_cpu=n_cpu, 
         )
+        # calculate penalty for each node
+        n_tar = sum(assemblies.is_target)
+        n_neg = n_assemblies - n_tar
+        nodes['penalty'] = _frac_to_penalty(
+            nodes['n_tar'] / n_tar, 
+            nodes['n_neg'] / n_neg
+        )
         assemblies.record_ids = record_ids
 
         logger.info(f' - Found {len(kmers)} minimizers')
         logger.info(f' - Found {len(nodes)} nodes (unique minimizers)')
         logger.info(f' - Found {len(edges)} weighted edges')
-        print_time_delta(time()-tik)
 
-        # generate k-mer nodes and calculate penalty scores by grouping kmers
-        # kmers is sorted in-place by hash values, idx is the sorted original indices
-        idx, nodes = KmerGraph.__get_nodes(kmers, assemblies)
+        logger.info(' - Sorting k-mers by hash values...')
+        _ = sort_by_hash(kmers)
+
+        print_time_delta(time()-tik)
 
         self.kmers = kmers
         self.idx = idx
@@ -112,60 +119,6 @@ class KmerGraph(object):
         self.graph = None # create graph after filtering nodes and edges
         self.subgraphs = None
         self._filtered_flag = False
-
-    @staticmethod
-    def __get_nodes(kmers: NDArray, assemblies: Assemblies) -> tuple[NDArray, NDArray]:
-        """Generate k-mer nodes and calculate penalty scores. 
-        1. Sort k-mers by hash values (in-place). 
-        2. Aggregate each k-mer group to calculate penalty. 
-        - Sorting k-mers here can also make removing unused k-mers faster (see `filter_kmers()` in `helpers.py`). 
-
-        Args:
-            kmers (NDArray): See `KmerGraph.kmers`. 
-            assemblies (Assemblies): See `Assemblies` in `assemblies.py`. 
-
-        Returns:
-            tuple: A tuple containing
-                1. NDArray: See `KmerGraph.idx`. 
-                2. NDArray: See `KmerGraph.nodes`. 
-        """
-        logger.info(f'Generating k-mer nodes and penalty scores...')
-        tik = time()
-
-        n_assemblies = len(assemblies)
-        n_tar = sum(assemblies.is_target)
-        n_neg = n_assemblies - n_tar
-
-        logger.info(' - Sorting k-mers by hash values...')
-        # stable sort in-place (preserve assembly order), and return the sorted indices
-        # here we don't sort with the built-in numpy functions, because argsort (or lexsort) 
-        # creates a c-contiguous copy of the strided kmers['hash'], and it uses int64 for indices; 
-        # reordering a struct array with kmers[:] = kmer[idx] also needs a large buffer; 
-        # all these would increase peak RAM by a lot. 
-        # to solve this, we could 
-        # 1) structure kmers as a tuple of contiguous arrays (f-contiguous), and use numpy sorting; 
-        # 2) write a custom sorting function that works on a strided array. 
-        # option 1) involves rewriting a lot of functions, and numpy still uses in64 for indexing
-        # option 2) is easier to implement and equally fast
-        idx = sort_by_hash(kmers)
-
-        logger.info(' - Aggregating k-mer groups...')
-        # better pass individual fields to a numba function, since hashes = kmers['hash'] is not supported
-        nodes = agg_by_hash(
-            kmers['hash'], 
-            kmers['assembly_idx'], 
-            kmers['is_target']
-        )
-
-        # calculate penalty for each node
-        nodes['penalty'] = _frac_to_penalty(
-            nodes['n_tar'] / n_tar, 
-            nodes['n_neg'] / n_neg
-        )
-
-        logger.info(f' - {len(nodes)} k-mer nodes')
-        print_time_delta(time()-tik)
-        return idx, nodes
 
     def filter(
         self, penalty_th: float, edge_weight_th: float, min_nodes: int, max_nodes: int | None, rng: Random
@@ -234,7 +187,7 @@ class KmerGraph(object):
                 3. nx.Graph: See `KmerGraph.graph`. 
         """
         logger.info(' - Filtering graph edges and nodes...')
-        n_nodes, n_edges = len(nodes),len(edges)
+        n_nodes, n_edges = len(nodes), len(edges)
 
         # remove low-weight edges
         th = np.uint64(edge_weight_th) # for faster comparison
