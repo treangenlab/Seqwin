@@ -69,15 +69,15 @@ static void append_full_node(
     std::vector<std::uint8_t>& out,
     std::uint64_t hash,
     std::uint64_t n_tar,
-    std::uint64_t n_neg
+    std::uint64_t n_neg,
+    std::uint64_t start,
+    std::uint64_t stop
 ) {
     const auto old_size = out.size();
     out.resize(old_size + serialized_node_size);
     auto* dst = out.data() + old_size;
 
     constexpr double penalty = 0.0;
-    constexpr std::uint64_t start = 0;
-    constexpr std::uint64_t stop = 0;
 
     const auto n_tar16 = static_cast<std::uint16_t>(n_tar);
     const auto n_neg16 = static_cast<std::uint16_t>(n_neg);
@@ -90,11 +90,16 @@ static void append_full_node(
     std::memcpy(dst + 28, &stop, sizeof(stop));
 }
 
+// 1. Parallel LSD radix sort based on hash (stable)
+// 2. Merge nodes with the same hash
+// 3. Build the idx array
 static std::vector<std::uint8_t> merge_nodes(
     std::vector<std::uint64_t>& compact_nodes,
+    std::vector<std::vector<std::uint64_t>>& all_idx_global,
+    std::vector<std::uint64_t>& final_idx,
     std::size_t n_workers
 ) {
-    const std::size_t n_nodes = compact_nodes.size() / 3;
+    const std::size_t n_nodes = compact_nodes.size() / 4;
     if (n_nodes == 0) {
         return {};
     }
@@ -117,7 +122,7 @@ static std::vector<std::uint8_t> merge_nodes(
             threads.emplace_back([&, t, start, end, shift]() {
                 auto* local_counts = counts.data() + t * 65536;
                 for (std::size_t i = start; i < end; ++i) {
-                    const auto bucket = ((*src)[3 * i + 0] >> shift) & 0xFFFFULL;
+                    const auto bucket = ((*src)[4 * i + 0] >> shift) & 0xFFFFULL;
                     ++local_counts[static_cast<std::size_t>(bucket)];
                 }
             });
@@ -143,11 +148,12 @@ static std::vector<std::uint8_t> merge_nodes(
             threads.emplace_back([&, t, start, end, shift]() {
                 auto* local_offsets = counts.data() + t * 65536;
                 for (std::size_t i = start; i < end; ++i) {
-                    const auto bucket = ((*src)[3 * i + 0] >> shift) & 0xFFFFULL;
+                    const auto bucket = ((*src)[4 * i + 0] >> shift) & 0xFFFFULL;
                     const auto pos = local_offsets[static_cast<std::size_t>(bucket)]++;
-                    (*dst)[3 * pos + 0] = (*src)[3 * i + 0];
-                    (*dst)[3 * pos + 1] = (*src)[3 * i + 1];
-                    (*dst)[3 * pos + 2] = (*src)[3 * i + 2];
+                    (*dst)[4 * pos + 0] = (*src)[4 * i + 0];
+                    (*dst)[4 * pos + 1] = (*src)[4 * i + 1];
+                    (*dst)[4 * pos + 2] = (*src)[4 * i + 2];
+                    (*dst)[4 * pos + 3] = (*src)[4 * i + 3];
                 }
             });
         }
@@ -160,24 +166,29 @@ static std::vector<std::uint8_t> merge_nodes(
 
     std::vector<std::uint8_t> out;
     out.reserve(n_nodes * serialized_node_size);
-    std::uint64_t hash = (*src)[0];
-    std::uint64_t n_tar = (*src)[1];
-    std::uint64_t n_neg = (*src)[2];
-    for (std::size_t i = 1; i < n_nodes; ++i) {
-        const auto next_hash = (*src)[3 * i + 0];
-        const auto next_n_tar = (*src)[3 * i + 1];
-        const auto next_n_neg = (*src)[3 * i + 2];
-        if (next_hash == hash) {
-            n_tar += next_n_tar;
-            n_neg += next_n_neg;
-            continue;
+
+    std::size_t i = 0;
+    while (i < n_nodes) {
+        const auto hash = (*src)[4 * i + 0];
+        std::uint64_t n_tar = 0;
+        std::uint64_t n_neg = 0;
+        const auto start = static_cast<std::uint64_t>(final_idx.size());
+
+        while (i < n_nodes && (*src)[4 * i + 0] == hash) {
+            n_tar += (*src)[4 * i + 1];
+            n_neg += (*src)[4 * i + 2];
+
+            const auto idx_ptr = static_cast<std::size_t>((*src)[4 * i + 3]);
+            auto& src_idx = all_idx_global[idx_ptr];
+            final_idx.insert(final_idx.end(), src_idx.begin(), src_idx.end());
+            std::vector<std::uint64_t>().swap(src_idx);
+            ++i;
         }
-        append_full_node(out, hash, n_tar, n_neg);
-        hash = next_hash;
-        n_tar = next_n_tar;
-        n_neg = next_n_neg;
+
+        const auto stop = static_cast<std::uint64_t>(final_idx.size());
+        append_full_node(out, hash, n_tar, n_neg, start, stop);
     }
-    append_full_node(out, hash, n_tar, n_neg);
+
     return out;
 }
 
@@ -291,19 +302,55 @@ BuildResult merge_thread_results(
 ) {
     if (results.size() == 1) {
         auto& result = results[0];
-        auto nodes = merge_nodes(result.nodes, n_workers);
 
+        std::vector<std::uint64_t> idx;
+        idx.reserve(static_cast<std::size_t>(result.n_kmers));
+        auto nodes = merge_nodes(result.nodes, result.all_idx, idx, n_workers);
         return {
             std::move(result.kmers),
+            std::move(idx),
             std::move(nodes),
             std::move(result.edges),
             std::move(result.ids_by_assembly)
         };
     }
 
+    // Update local k-mer indices in each thread to global indices
+    // Concat all_idx from all threads, and update idx pointers (4th column of result.nodes)
+    std::uint64_t kmer_offset = results[0].n_kmers;
+    std::uint64_t all_idx_offset = static_cast<std::uint64_t>(results[0].all_idx.size());
+    for (std::size_t r = 1; r < results.size(); ++r) {
+        auto& result = results[r];
+
+        for (auto& local_idx : result.all_idx) {
+            for (auto& idx : local_idx) {
+                idx += kmer_offset;
+            }
+        }
+        const std::size_t n_rows = result.nodes.size() / 4;
+        for (std::size_t row = 0; row < n_rows; ++row) {
+            result.nodes[4 * row + 3] += all_idx_offset;
+        }
+        kmer_offset += result.n_kmers;
+        all_idx_offset += static_cast<std::uint64_t>(result.all_idx.size());
+    }
+
+    std::vector<std::vector<std::uint64_t>> all_idx_global;
+    all_idx_global.reserve(static_cast<std::size_t>(all_idx_offset));
+    for (auto& result : results) {
+        for (auto& idx_vec : result.all_idx) {
+            all_idx_global.emplace_back(std::move(idx_vec));
+        }
+        std::vector<std::vector<std::uint64_t>>().swap(result.all_idx);
+    }
+
     auto kmers = concat_kmers(results);
+    std::vector<std::uint64_t> idx;
+    idx.reserve(static_cast<std::size_t>(kmer_offset));
+
     auto compact_nodes = concat_nodes(results);
-    auto nodes = merge_nodes(compact_nodes, n_workers);
+    auto nodes = merge_nodes(compact_nodes, all_idx_global, idx, n_workers);
+
     auto edges = concat_edges(results);
     merge_weighted_edges(edges, n_workers);
 
@@ -314,7 +361,13 @@ BuildResult merge_thread_results(
         }
     }
 
-    return {std::move(kmers), std::move(nodes), std::move(edges), std::move(ids_by_assembly)};
+    return {
+        std::move(kmers),
+        std::move(idx),
+        std::move(nodes),
+        std::move(edges),
+        std::move(ids_by_assembly)
+    };
 }
 
 } // namespace seqwin

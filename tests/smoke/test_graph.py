@@ -8,6 +8,16 @@ def _sorted_edges(edges: np.ndarray) -> np.ndarray:
     return edges[idx]
 
 
+def _assert_idx_invariants(kmers: np.ndarray, idx: np.ndarray, nodes: np.ndarray) -> None:
+    assert idx.dtype == np.uint64
+    assert len(idx) == len(kmers)
+    assert np.array_equal(np.sort(idx), np.arange(len(kmers), dtype=np.uint64))
+    for node in nodes:
+        node_idx = idx[node['start']:node['stop']]
+        assert len(node_idx) > 0
+        assert np.all(kmers[node_idx]['hash'] == node['hash'])
+
+
 def test_indexlr_threading_equivalence(targets_dir, non_targets_dir) -> None:
     assembly_paths = [
         targets_dir / 'target-1.fasta',
@@ -18,7 +28,7 @@ def test_indexlr_threading_equivalence(targets_dir, non_targets_dir) -> None:
     assembly_idx = [0, 1, 2, 3]
     is_target = [True, True, False, False]
 
-    kmers_1, _nodes_1, edges_1, record_ids_1 = build(
+    kmers_1, idx_1, nodes_1, edges_1, record_ids_1 = build(
         assembly_paths,
         kmerlen=7,
         windowsize=10,
@@ -26,7 +36,7 @@ def test_indexlr_threading_equivalence(targets_dir, non_targets_dir) -> None:
         is_target=is_target,
         n_cpu=1,
     )
-    kmers_2, _nodes_2, edges_2, record_ids_2 = build(
+    kmers_2, idx_2, nodes_2, edges_2, record_ids_2 = build(
         assembly_paths,
         kmerlen=7,
         windowsize=10,
@@ -34,7 +44,7 @@ def test_indexlr_threading_equivalence(targets_dir, non_targets_dir) -> None:
         is_target=is_target,
         n_cpu=2,
     )
-    kmers_many, _nodes_many, edges_many, record_ids_many = build(
+    kmers_many, idx_many, nodes_many, edges_many, record_ids_many = build(
         assembly_paths,
         kmerlen=7,
         windowsize=10,
@@ -45,8 +55,17 @@ def test_indexlr_threading_equivalence(targets_dir, non_targets_dir) -> None:
 
     assert edges_1.shape[1] == 3
     assert edges_1.dtype == np.uint64
+
+    _assert_idx_invariants(kmers_1, idx_1, nodes_1)
+    _assert_idx_invariants(kmers_2, idx_2, nodes_2)
+    _assert_idx_invariants(kmers_many, idx_many, nodes_many)
+
     assert np.array_equal(kmers_1, kmers_2)
     assert np.array_equal(kmers_1, kmers_many)
+    assert np.array_equal(idx_1, idx_2)
+    assert np.array_equal(idx_1, idx_many)
+    assert np.array_equal(nodes_1, nodes_2)
+    assert np.array_equal(nodes_1, nodes_many)
 
     assert record_ids_1 == record_ids_2
     assert record_ids_1 == record_ids_many

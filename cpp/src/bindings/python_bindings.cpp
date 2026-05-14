@@ -48,6 +48,12 @@ PYBIND11_MODULE(_core, m) {
                 owner->kmers.data(),
                 capsule
             );
+            auto idx = py::array_t<std::uint64_t>(
+                {static_cast<py::ssize_t>(owner->idx.size())},
+                {static_cast<py::ssize_t>(sizeof(std::uint64_t))},
+                owner->idx.data(),
+                capsule
+            );
             auto nodes = py::array_t<std::uint8_t>(
                 {static_cast<py::ssize_t>(owner->nodes.size())},
                 {static_cast<py::ssize_t>(sizeof(std::uint8_t))},
@@ -71,7 +77,7 @@ PYBIND11_MODULE(_core, m) {
                 all_idx_to_id.append(idx_to_id);
             }
 
-            return py::make_tuple(kmers, nodes, edges, all_idx_to_id);
+            return py::make_tuple(kmers, idx, nodes, edges, all_idx_to_id);
         },
         py::arg("assembly_paths"),
         py::arg("kmerlen"),

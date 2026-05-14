@@ -25,6 +25,7 @@ struct NodeState {
     std::uint64_t n_tar;
     std::uint64_t n_neg;
     std::size_t last_seen_assembly;
+    std::uint64_t idx_ptr;
 };
 
 using EdgeKey = std::pair<std::uint64_t, std::uint64_t>;
@@ -120,14 +121,15 @@ ThreadResult build_worker(
                     static_cast<std::uint32_t>(m.pos),
                     record_idx16,
                     assembly_idx16,
-                    is_target_u8);
+                    is_target_u8
+                );
 
                 auto [node_it, node_inserted] = node_map.try_emplace(
                     m.out_hash,
                     NodeState{
                         is_target_u8 == 1 ? std::uint64_t{1} : std::uint64_t{0},
                         is_target_u8 == 0 ? std::uint64_t{1} : std::uint64_t{0},
-                        assembly_i
+                        assembly_i, 0
                     }
                 );
                 if (!node_inserted && node_it->second.last_seen_assembly != assembly_i) {
@@ -138,6 +140,13 @@ ThreadResult build_worker(
                     }
                     node_it->second.last_seen_assembly = assembly_i;
                 }
+                if (node_inserted) {
+                    result.all_idx.emplace_back();
+                    node_it->second.idx_ptr = static_cast<std::uint64_t>(result.all_idx.size() - 1);
+                }
+                result.all_idx[node_it->second.idx_ptr].push_back(result.n_kmers);
+
+                ++result.n_kmers;
             }
 
             if (mins.size() < 2) {
@@ -163,11 +172,12 @@ ThreadResult build_worker(
         }
     }
 
-    result.nodes.reserve(node_map.size() * 3);
+    result.nodes.reserve(node_map.size() * 4);
     for (const auto& [hash, state] : node_map) {
         result.nodes.push_back(hash);
         result.nodes.push_back(state.n_tar);
         result.nodes.push_back(state.n_neg);
+        result.nodes.push_back(state.idx_ptr);
     }
 
     result.edges.reserve(edge_map.size() * 3);

@@ -9,7 +9,7 @@ Usage:
 ```python
 >>> from pathlib import Path
 >>> from seqwin.graph import build
->>> kmers, nodes, edges, record_ids = build(
+>>> kmers, idx, nodes, edges, record_ids = build(
 >>>     assembly_paths=[Path('example1.fa'), Path('example2.fa.gz')], 
 >>>     kmerlen=21, 
 >>>     windowsize=200, 
@@ -53,7 +53,7 @@ KMER_DTYPE = np.dtype([
     ('is_target', np.bool_), 
 ])
 
-_NODE_DTYPE = np.dtype([
+NODE_DTYPE = np.dtype([
     ('hash', np.uint64), 
     ('n_tar', np.uint16), 
     ('n_neg', np.uint16), 
@@ -72,12 +72,19 @@ def build(
     n_cpu: int = 1
 ) -> tuple[
     NDArray[np.void], 
+    NDArray[np.uint64], 
     NDArray[np.void], 
     NDArray[np.uint64], 
     list[tuple[str, ...]]
 ]:
     """Build a Seqwin minimizer graph. 
-    `assembly_paths`, `assembly_idx`, and `is_target` are parallel lists. 
+    - `assembly_paths`, `assembly_idx`, and `is_target` are parallel lists. 
+    - In the returned arrays, `idx` maps `nodes` back to rows in the `kmers` array.
+    - For every node:
+    ```python
+    >>> kmer_indices = idx[node["start"]:node["stop"]]
+    >>> kmers[kmer_indices]["hash"] == node["hash"]
+    ```
 
     Args:
         assembly_paths (Iterable[Path]): Path to each assembly file in FASTA format (gzip supported). 
@@ -96,16 +103,17 @@ def build(
                 - 'record_idx' (uint16): 0-based index of the sequence records, in the same order as they appear in the FASTA file. 
                 - 'assembly_idx' (uint16): Assembly index. 
                 - 'is_target' (bool): True for target assemblies. 
-            2. NDArray[np.void]: A 1-D Numpy structured array of k-mer nodes. 
-            3. NDArray[np.uint64]: A 3-column Numpy array of weighted, undirected edges (u, v, w). 
-            4. list[tuple[str, ...]]: FASTA record IDs of each assembly. 
+            2. NDArray[np.uint64]: A 1-D Numpy uint64 array mapping node slices to rows in `kmers`. 
+            3. NDArray[np.void]: A 1-D Numpy structured array of k-mer nodes, with dtype `NODE_DTYPE`. 
+            4. NDArray[np.uint64]: A 3-column Numpy array of weighted, undirected edges (u, v, w). 
+            5. list[tuple[str, ...]]: FASTA record IDs of each assembly. 
     """
-    kmers, nodes, edges, idx_to_id = _build_native(
+    kmers, idx, nodes, edges, idx_to_id = _build_native(
         list(str(p) for p in assembly_paths), 
         int(kmerlen), 
         int(windowsize), 
         list(int(idx) for idx in assembly_idx), 
-        list(bool(target) for target in is_target),
+        list(bool(target) for target in is_target), 
         int(n_cpu)
     )
-    return kmers.view(KMER_DTYPE), nodes.view(_NODE_DTYPE), edges, idx_to_id
+    return kmers.view(KMER_DTYPE), idx, nodes.view(NODE_DTYPE), edges, idx_to_id
