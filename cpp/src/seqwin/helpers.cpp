@@ -69,15 +69,15 @@ static void append_full_node(
     std::vector<std::uint8_t>& out,
     std::uint64_t hash,
     std::uint64_t n_tar,
-    std::uint64_t n_neg
+    std::uint64_t n_neg,
+    std::uint64_t start,
+    std::uint64_t stop
 ) {
     const auto old_size = out.size();
     out.resize(old_size + serialized_node_size);
     auto* dst = out.data() + old_size;
 
     constexpr double penalty = 0.0;
-    constexpr std::uint64_t start = 0;
-    constexpr std::uint64_t stop = 0;
 
     const auto n_tar16 = static_cast<std::uint16_t>(n_tar);
     const auto n_neg16 = static_cast<std::uint16_t>(n_neg);
@@ -90,17 +90,25 @@ static void append_full_node(
     std::memcpy(dst + 28, &stop, sizeof(stop));
 }
 
+// 1. Parallel LSD radix sort based on hash (stable)
+// 2. Merge nodes with the same hash
+// 3. Build the idx array
+// 4. Return serialized nodes
 static std::vector<std::uint8_t> merge_nodes(
-    std::vector<std::uint64_t>& compact_nodes,
+    std::vector<std::uint64_t>& nodes,
+    std::vector<ThreadResult>& results,
+    const std::vector<std::uint64_t>& kmer_offsets,
+    std::vector<std::uint64_t>& idx,
     std::size_t n_workers
 ) {
-    const std::size_t n_nodes = compact_nodes.size() / 3;
+    constexpr std::size_t node_width = 6;
+    const std::size_t n_nodes = nodes.size() / node_width;
     if (n_nodes == 0) {
         return {};
     }
 
-    std::vector<std::uint64_t> buf(compact_nodes.size());
-    auto* src = &compact_nodes;
+    std::vector<std::uint64_t> buf(nodes.size());
+    auto* src = &nodes;
     auto* dst = &buf;
     std::vector<std::uint64_t> counts(n_workers * 65536);
     const std::size_t chunk_size = (n_nodes + n_workers - 1) / n_workers;
@@ -117,7 +125,7 @@ static std::vector<std::uint8_t> merge_nodes(
             threads.emplace_back([&, t, start, end, shift]() {
                 auto* local_counts = counts.data() + t * 65536;
                 for (std::size_t i = start; i < end; ++i) {
-                    const auto bucket = ((*src)[3 * i + 0] >> shift) & 0xFFFFULL;
+                    const auto bucket = ((*src)[node_width * i + 0] >> shift) & 0xFFFFULL;
                     ++local_counts[static_cast<std::size_t>(bucket)];
                 }
             });
@@ -143,11 +151,11 @@ static std::vector<std::uint8_t> merge_nodes(
             threads.emplace_back([&, t, start, end, shift]() {
                 auto* local_offsets = counts.data() + t * 65536;
                 for (std::size_t i = start; i < end; ++i) {
-                    const auto bucket = ((*src)[3 * i + 0] >> shift) & 0xFFFFULL;
+                    const auto bucket = ((*src)[node_width * i + 0] >> shift) & 0xFFFFULL;
                     const auto pos = local_offsets[static_cast<std::size_t>(bucket)]++;
-                    (*dst)[3 * pos + 0] = (*src)[3 * i + 0];
-                    (*dst)[3 * pos + 1] = (*src)[3 * i + 1];
-                    (*dst)[3 * pos + 2] = (*src)[3 * i + 2];
+                    for (std::size_t col = 0; col < node_width; ++col) {
+                        (*dst)[node_width * pos + col] = (*src)[node_width * i + col];
+                    }
                 }
             });
         }
@@ -160,24 +168,34 @@ static std::vector<std::uint8_t> merge_nodes(
 
     std::vector<std::uint8_t> out;
     out.reserve(n_nodes * serialized_node_size);
-    std::uint64_t hash = (*src)[0];
-    std::uint64_t n_tar = (*src)[1];
-    std::uint64_t n_neg = (*src)[2];
-    for (std::size_t i = 1; i < n_nodes; ++i) {
-        const auto next_hash = (*src)[3 * i + 0];
-        const auto next_n_tar = (*src)[3 * i + 1];
-        const auto next_n_neg = (*src)[3 * i + 2];
-        if (next_hash == hash) {
-            n_tar += next_n_tar;
-            n_neg += next_n_neg;
-            continue;
+
+    std::size_t i = 0;
+    while (i < n_nodes) {
+        const auto hash = (*src)[node_width * i + 0];
+        std::uint64_t n_tar = 0;
+        std::uint64_t n_neg = 0;
+        const auto start = static_cast<std::uint64_t>(idx.size());
+
+        while (i < n_nodes && (*src)[node_width * i + 0] == hash) {
+            n_tar += (*src)[node_width * i + 1];
+            n_neg += (*src)[node_width * i + 2];
+
+            const auto thread_id = static_cast<std::size_t>((*src)[node_width * i + 3]);
+            const auto local_start = static_cast<std::size_t>((*src)[node_width * i + 4]);
+            const auto local_stop = static_cast<std::size_t>((*src)[node_width * i + 5]);
+            const auto offset = kmer_offsets[thread_id];
+            const auto& local_idx = results[thread_id].idx;
+
+            for (std::size_t j = local_start; j < local_stop; ++j) {
+                idx.push_back(local_idx[j] + offset);
+            }
+            ++i;
         }
-        append_full_node(out, hash, n_tar, n_neg);
-        hash = next_hash;
-        n_tar = next_n_tar;
-        n_neg = next_n_neg;
+
+        const auto stop = static_cast<std::uint64_t>(idx.size());
+        append_full_node(out, hash, n_tar, n_neg, start, stop);
     }
-    append_full_node(out, hash, n_tar, n_neg);
+
     return out;
 }
 
@@ -251,7 +269,7 @@ static void merge_weighted_edges(std::vector<std::uint64_t>& edges, std::size_t 
         }
     }
 
-    std::size_t write_idx = 0;
+    std::size_t write_i = 0;
     std::uint64_t u = (*src)[0];
     std::uint64_t v = (*src)[1];
     std::uint64_t w = (*src)[2];
@@ -265,21 +283,21 @@ static void merge_weighted_edges(std::vector<std::uint64_t>& edges, std::size_t 
             continue;
         }
 
-        edges[3 * write_idx + 0] = u;
-        edges[3 * write_idx + 1] = v;
-        edges[3 * write_idx + 2] = w;
-        ++write_idx;
+        edges[3 * write_i + 0] = u;
+        edges[3 * write_i + 1] = v;
+        edges[3 * write_i + 2] = w;
+        ++write_i;
 
         u = next_u;
         v = next_v;
         w = next_w;
     }
 
-    edges[3 * write_idx + 0] = u;
-    edges[3 * write_idx + 1] = v;
-    edges[3 * write_idx + 2] = w;
-    ++write_idx;
-    edges.resize(write_idx * 3);
+    edges[3 * write_i + 0] = u;
+    edges[3 * write_i + 1] = v;
+    edges[3 * write_i + 2] = w;
+    ++write_i;
+    edges.resize(write_i * 3);
 }
 
 } // namespace
@@ -291,19 +309,35 @@ BuildResult merge_thread_results(
 ) {
     if (results.size() == 1) {
         auto& result = results[0];
-        auto nodes = merge_nodes(result.nodes, n_workers);
 
+        std::vector<std::uint64_t> idx;
+        idx.reserve(static_cast<std::size_t>(result.n_kmers));
+
+        std::vector<std::uint64_t> kmer_offsets{0};
+        auto nodes = merge_nodes(result.nodes, results, kmer_offsets, idx, n_workers);
         return {
             std::move(result.kmers),
+            std::move(idx),
             std::move(nodes),
             std::move(result.edges),
             std::move(result.ids_by_assembly)
         };
     }
 
+    std::vector<std::uint64_t> kmer_offsets(results.size());
+    std::uint64_t total_kmers = 0;
+    for (std::size_t r = 0; r < results.size(); ++r) {
+        kmer_offsets[r] = total_kmers;
+        total_kmers += results[r].n_kmers;
+    }
+
     auto kmers = concat_kmers(results);
-    auto compact_nodes = concat_nodes(results);
-    auto nodes = merge_nodes(compact_nodes, n_workers);
+    std::vector<std::uint64_t> idx;
+    idx.reserve(static_cast<std::size_t>(total_kmers));
+
+    auto nodes_raw = concat_nodes(results);
+    auto nodes = merge_nodes(nodes_raw, results, kmer_offsets, idx, n_workers);
+
     auto edges = concat_edges(results);
     merge_weighted_edges(edges, n_workers);
 
@@ -314,7 +348,13 @@ BuildResult merge_thread_results(
         }
     }
 
-    return {std::move(kmers), std::move(nodes), std::move(edges), std::move(ids_by_assembly)};
+    return {
+        std::move(kmers),
+        std::move(idx),
+        std::move(nodes),
+        std::move(edges),
+        std::move(ids_by_assembly)
+    };
 }
 
 } // namespace seqwin
