@@ -25,7 +25,9 @@ struct NodeState {
     std::uint64_t n_tar;
     std::uint64_t n_neg;
     std::size_t last_seen_assembly;
-    std::uint64_t idx_ptr;
+    std::uint64_t start = 0;
+    std::uint64_t count = 0;
+    std::uint64_t cursor = 0;
 };
 
 using EdgeKey = std::pair<std::uint64_t, std::uint64_t>;
@@ -69,7 +71,8 @@ ThreadResult build_worker(
     const std::vector<std::size_t>& assembly_indices,
     const std::vector<bool>& is_targets,
     std::size_t start_assembly,
-    std::size_t end_assembly
+    std::size_t end_assembly,
+    std::size_t thread_id
 ) {
     ThreadResult result;
     result.start_assembly = start_assembly;
@@ -129,7 +132,7 @@ ThreadResult build_worker(
                     NodeState{
                         is_target_u8 == 1 ? std::uint64_t{1} : std::uint64_t{0},
                         is_target_u8 == 0 ? std::uint64_t{1} : std::uint64_t{0},
-                        assembly_i, 0
+                        assembly_i, 0, 0, 0
                     }
                 );
                 if (!node_inserted && node_it->second.last_seen_assembly != assembly_i) {
@@ -140,12 +143,7 @@ ThreadResult build_worker(
                     }
                     node_it->second.last_seen_assembly = assembly_i;
                 }
-                if (node_inserted) {
-                    result.all_idx.emplace_back();
-                    node_it->second.idx_ptr = static_cast<std::uint64_t>(result.all_idx.size() - 1);
-                }
-                result.all_idx[node_it->second.idx_ptr].push_back(result.n_kmers);
-
+                ++(node_it->second.count);
                 ++result.n_kmers;
             }
 
@@ -172,12 +170,33 @@ ThreadResult build_worker(
         }
     }
 
-    result.nodes.reserve(node_map.size() * 4);
+
+    result.idx.resize(static_cast<std::size_t>(result.n_kmers));
+    std::uint64_t cursor = 0;
+    for (auto& [hash, state] : node_map) {
+        (void)hash;
+        state.start = cursor;
+        state.cursor = cursor;
+        cursor += state.count;
+    }
+
+    for (std::size_t i = 0; i < result.n_kmers; ++i) {
+        const auto* record = result.kmers.data() + i * serialized_record_size;
+        std::uint64_t hash;
+        std::memcpy(&hash, record, sizeof(hash));
+        auto node_it = node_map.find(hash);
+        result.idx[node_it->second.cursor++] = static_cast<std::uint64_t>(i);
+    }
+
+    result.nodes.reserve(node_map.size() * 6);
     for (const auto& [hash, state] : node_map) {
+        const auto stop = state.start + state.count;
         result.nodes.push_back(hash);
         result.nodes.push_back(state.n_tar);
         result.nodes.push_back(state.n_neg);
-        result.nodes.push_back(state.idx_ptr);
+        result.nodes.push_back(static_cast<std::uint64_t>(thread_id));
+        result.nodes.push_back(state.start);
+        result.nodes.push_back(stop);
     }
 
     result.edges.reserve(edge_map.size() * 3);
@@ -204,6 +223,11 @@ BuildResult build_impl(
         assembly_paths.size() != is_targets.size()) {
         throw std::runtime_error(
             "assembly_paths, assembly_idx, and is_target must have the same length");
+    }
+    for (std::size_t i = 0; i < assembly_indices.size(); ++i) {
+        if (assembly_indices[i] != i) {
+            throw std::runtime_error("assembly_indices must be strictly incremental from 0 to N-1");
+        }
     }
 
     const auto n_assemblies = assembly_paths.size();
@@ -233,7 +257,8 @@ BuildResult build_impl(
                     assembly_indices,
                     is_targets,
                     start,
-                    end
+                    end,
+                    i
                 );
             } catch (...) {
                 std::lock_guard<std::mutex> lock(error_mutex);
@@ -251,10 +276,6 @@ BuildResult build_impl(
     if (thread_error) {
         std::rethrow_exception(thread_error);
     }
-
-    std::sort(results.begin(), results.end(), [](const ThreadResult& a, const ThreadResult& b) {
-        return a.start_assembly < b.start_assembly;
-    });
 
     return merge_thread_results(results, n_assemblies, n_workers);
 }
