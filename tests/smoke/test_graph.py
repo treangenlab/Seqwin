@@ -13,12 +13,17 @@ def _assert_idx_invariants(kmers: np.ndarray, idx: np.ndarray, nodes: np.ndarray
     assert len(idx) == len(kmers)
     assert np.array_equal(np.sort(idx), np.arange(len(kmers), dtype=np.uint64))
     for node in nodes:
-        node_idx = idx[node['start']:node['stop']]
-        assert len(node_idx) > 0
-        assert np.all(kmers[node_idx]['hash'] == node['hash'])
+        start = int(node['start'])
+        stop = int(node['stop'])
+        assert stop > start
+        block = kmers[start:stop]
+        assert np.all(block['hash'] == node['hash'])
+        node_idx = idx[start:stop]
+        assert len(node_idx) == len(block)
+        assert not np.array_equal(node_idx, np.arange(start, stop, dtype=np.uint64))
 
 
-def test_indexlr_threading_equivalence(targets_dir, non_targets_dir) -> None:
+def test_build_threading_equivalence(targets_dir, non_targets_dir) -> None:
     assembly_paths = [
         targets_dir / 'target-1.fasta',
         targets_dir / 'target-2.fasta',

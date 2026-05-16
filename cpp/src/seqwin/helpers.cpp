@@ -7,6 +7,10 @@
 #include <thread>
 #include <vector>
 
+#include <pybind11/pybind11.h>
+
+namespace py = pybind11;
+
 namespace seqwin {
 namespace {
 
@@ -64,6 +68,135 @@ std::vector<std::uint64_t> concat_edges(std::vector<ThreadResult>& results)
 }
 
 constexpr std::size_t serialized_node_size = 36;
+constexpr std::size_t serialized_kmer_size = 17;
+
+static void reorder_kmers_by_idx(
+    std::vector<std::uint8_t>& kmers,
+    const std::vector<std::uint64_t>& idx,
+    std::size_t n_workers
+) {
+    const std::size_t n = idx.size();
+    if (n == 0) {
+        return;
+    }
+
+    std::vector<std::uint64_t> buf(n);
+    const std::size_t workers = std::max<std::size_t>(1, n_workers);
+    const std::size_t chunk_size = (n + workers - 1) / workers;
+    std::vector<std::thread> threads;
+    threads.reserve(workers);
+
+    // hash: uint64 at offset 0
+    for (std::size_t t = 0; t < workers; ++t) {
+        const std::size_t start = t * chunk_size;
+        if (start >= n) {
+            break;
+        }
+        const std::size_t end = std::min(start + chunk_size, n);
+        threads.emplace_back([&, start, end]() {
+            for (std::size_t i = start; i < end; ++i) {
+                std::uint64_t value = 0;
+                std::memcpy(&value, kmers.data() + serialized_kmer_size * idx[i] + 0, sizeof(value));
+                buf[i] = value;
+            }
+        });
+    }
+    for (auto& thread : threads) {
+        thread.join();
+    }
+
+    threads.clear();
+    for (std::size_t t = 0; t < workers; ++t) {
+        const std::size_t start = t * chunk_size;
+        if (start >= n) {
+            break;
+        }
+        const std::size_t end = std::min(start + chunk_size, n);
+        threads.emplace_back([&, start, end]() {
+            for (std::size_t i = start; i < end; ++i) {
+                const auto value = buf[i];
+                std::memcpy(kmers.data() + serialized_kmer_size * i + 0, &value, sizeof(value));
+            }
+        });
+    }
+    for (auto& thread : threads) {
+        thread.join();
+    }
+
+    // pos + record_idx + assembly_idx packed into uint64 from offsets 8..15
+    threads.clear();
+    for (std::size_t t = 0; t < workers; ++t) {
+        const std::size_t start = t * chunk_size;
+        if (start >= n) {
+            break;
+        }
+        const std::size_t end = std::min(start + chunk_size, n);
+        threads.emplace_back([&, start, end]() {
+            for (std::size_t i = start; i < end; ++i) {
+                std::uint64_t packed = 0;
+                std::memcpy(&packed, kmers.data() + serialized_kmer_size * idx[i] + 8, sizeof(packed));
+                buf[i] = packed;
+            }
+        });
+    }
+    for (auto& thread : threads) {
+        thread.join();
+    }
+
+    threads.clear();
+    for (std::size_t t = 0; t < workers; ++t) {
+        const std::size_t start = t * chunk_size;
+        if (start >= n) {
+            break;
+        }
+        const std::size_t end = std::min(start + chunk_size, n);
+        threads.emplace_back([&, start, end]() {
+            for (std::size_t i = start; i < end; ++i) {
+                const auto packed = buf[i];
+                std::memcpy(kmers.data() + serialized_kmer_size * i + 8, &packed, sizeof(packed));
+            }
+        });
+    }
+    for (auto& thread : threads) {
+        thread.join();
+    }
+
+    // is_target: uint8 at offset 16, reuse first n bytes of buf storage
+    auto* byte_buf = reinterpret_cast<std::uint8_t*>(buf.data());
+    threads.clear();
+    for (std::size_t t = 0; t < workers; ++t) {
+        const std::size_t start = t * chunk_size;
+        if (start >= n) {
+            break;
+        }
+        const std::size_t end = std::min(start + chunk_size, n);
+        threads.emplace_back([&, start, end]() {
+            for (std::size_t i = start; i < end; ++i) {
+                byte_buf[i] = kmers[serialized_kmer_size * idx[i] + 16];
+            }
+        });
+    }
+    for (auto& thread : threads) {
+        thread.join();
+    }
+
+    threads.clear();
+    for (std::size_t t = 0; t < workers; ++t) {
+        const std::size_t start = t * chunk_size;
+        if (start >= n) {
+            break;
+        }
+        const std::size_t end = std::min(start + chunk_size, n);
+        threads.emplace_back([&, start, end]() {
+            for (std::size_t i = start; i < end; ++i) {
+                kmers[serialized_kmer_size * i + 16] = byte_buf[i];
+            }
+        });
+    }
+    for (auto& thread : threads) {
+        thread.join();
+    }
+}
 
 static void append_full_node(
     std::vector<std::uint8_t>& out,
@@ -196,6 +329,10 @@ static std::vector<std::uint8_t> merge_nodes(
         append_full_node(out, hash, n_tar, n_neg, start, stop);
     }
 
+    for (auto& result : results) {
+        std::vector<std::uint64_t>().swap(result.idx);
+    }
+
     return out;
 }
 
@@ -302,6 +439,28 @@ static void merge_weighted_edges(std::vector<std::uint64_t>& edges, std::size_t 
 
 } // namespace
 
+void log_python(const std::string& message, const std::string& level)
+{
+    py::gil_scoped_acquire acquire;
+
+    py::object logging = py::module_::import("logging");
+    py::object logger = logging.attr("getLogger")();
+
+    if (level == "debug") {
+        logger.attr("debug")(message);
+    } else if (level == "info") {
+        logger.attr("info")(message);
+    } else if (level == "warning" || level == "warn") {
+        logger.attr("warning")(message);
+    } else if (level == "error") {
+        logger.attr("error")(message);
+    } else if (level == "critical") {
+        logger.attr("critical")(message);
+    } else {
+        logger.attr("info")(message);
+    }
+}
+
 BuildResult merge_thread_results(
     std::vector<ThreadResult>& results,
     std::size_t n_assemblies,
@@ -315,6 +474,7 @@ BuildResult merge_thread_results(
 
         std::vector<std::uint64_t> kmer_offsets{0};
         auto nodes = merge_nodes(result.nodes, results, kmer_offsets, idx, n_workers);
+        reorder_kmers_by_idx(result.kmers, idx, n_workers);
         return {
             std::move(result.kmers),
             std::move(idx),
@@ -323,6 +483,8 @@ BuildResult merge_thread_results(
             std::move(result.ids_by_assembly)
         };
     }
+
+    log_python(" - Merging from " + std::to_string(n_workers) + " threads...");
 
     std::vector<std::uint64_t> kmer_offsets(results.size());
     std::uint64_t total_kmers = 0;
@@ -337,6 +499,7 @@ BuildResult merge_thread_results(
 
     auto nodes_raw = concat_nodes(results);
     auto nodes = merge_nodes(nodes_raw, results, kmer_offsets, idx, n_workers);
+    reorder_kmers_by_idx(kmers, idx, n_workers);
 
     auto edges = concat_edges(results);
     merge_weighted_edges(edges, n_workers);
