@@ -19,6 +19,11 @@ struct ThreadResult {
     std::size_t start_assembly = 0;
 };
 
+void log_python(
+    const std::string& message,
+    const std::string& level = "info"
+);
+
 BuildResult merge_thread_results(
     std::vector<ThreadResult>& results,
     std::size_t n_assemblies,

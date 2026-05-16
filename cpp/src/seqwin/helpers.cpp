@@ -7,6 +7,10 @@
 #include <thread>
 #include <vector>
 
+#include <pybind11/pybind11.h>
+
+namespace py = pybind11;
+
 namespace seqwin {
 namespace {
 
@@ -435,6 +439,28 @@ static void merge_weighted_edges(std::vector<std::uint64_t>& edges, std::size_t 
 
 } // namespace
 
+void log_python(const std::string& message, const std::string& level)
+{
+    py::gil_scoped_acquire acquire;
+
+    py::object logging = py::module_::import("logging");
+    py::object logger = logging.attr("getLogger")();
+
+    if (level == "debug") {
+        logger.attr("debug")(message);
+    } else if (level == "info") {
+        logger.attr("info")(message);
+    } else if (level == "warning" || level == "warn") {
+        logger.attr("warning")(message);
+    } else if (level == "error") {
+        logger.attr("error")(message);
+    } else if (level == "critical") {
+        logger.attr("critical")(message);
+    } else {
+        logger.attr("info")(message);
+    }
+}
+
 BuildResult merge_thread_results(
     std::vector<ThreadResult>& results,
     std::size_t n_assemblies,
@@ -457,6 +483,8 @@ BuildResult merge_thread_results(
             std::move(result.ids_by_assembly)
         };
     }
+
+    log_python(" - Merging from " + std::to_string(n_workers) + " threads...");
 
     std::vector<std::uint64_t> kmer_offsets(results.size());
     std::uint64_t total_kmers = 0;
