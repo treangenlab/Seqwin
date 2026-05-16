@@ -39,7 +39,7 @@ from numpy.typing import NDArray
 from numba import set_num_threads
 
 from .assemblies import Assemblies
-from .helpers import sort_by_hash, get_subgraphs, filter_kmers
+from .helpers import get_subgraphs, filter_kmers
 from .graph import build
 from .utils import print_time_delta, log_and_raise
 from .config import Config, RunState, HAS_MASH, WORKINGDIR, EDGE_W, NODE_P
@@ -106,9 +106,6 @@ class KmerGraph(object):
         logger.info(f' - Found {len(kmers)} minimizers')
         logger.info(f' - Found {len(nodes)} nodes (unique minimizers)')
         logger.info(f' - Found {len(edges)} weighted edges')
-
-        logger.info(' - Sorting k-mers by hash values...')
-        _ = sort_by_hash(kmers)
 
         print_time_delta(time()-tik)
 
