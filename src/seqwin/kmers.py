@@ -57,7 +57,7 @@ class KmerGraph(object):
         edges (NDArray): A 3-column Numpy array of weighted, undirected edges (u, v, w). 
             Edge weight is the number of assemblies where the two k-mers are adjacent. 
         graph (nx.Graph): The graph instance built from filtered nodes and edges. 
-        subgraphs (tuple[frozenset[int], ...] | None): Low-penalty subgraphs. Each subgraph is a set of k-mer hash values. 
+        subgraphs (tuple[frozenset[np.uint64], ...] | None): Low-penalty subgraphs. Each subgraph is a set of k-mer hash values. 
             Generated with `self.filter()`. 
     """
     __slots__ = (
@@ -68,7 +68,7 @@ class KmerGraph(object):
     nodes: NDArray
     edges: NDArray
     graph: nx.Graph
-    subgraphs: tuple[frozenset[int], ...] | None
+    subgraphs: tuple[frozenset[np.uint64], ...] | None
     _filtered_flag: bool # True if `self.filter()` is called
 
     def __init__(self, assemblies: Assemblies, kmerlen: int, windowsize: int, n_cpu: int) -> None:

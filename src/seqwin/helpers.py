@@ -35,197 +35,22 @@ logger = logging.getLogger(__name__)
 import numpy as np
 import networkx as nx
 from numpy.typing import NDArray
-from numba import prange, njit, get_num_threads
+from numba import njit
 
-from .graph import KMER_DTYPE
 from .utils import log_and_raise
 from .config import NODE_P
 
-# dtypes for numpy
-_HASH_NP_DT = KMER_DTYPE['hash'] # k-mer hash values
-NODE_DTYPE = np.dtype([ # k-mer nodes
-    ('hash', _HASH_NP_DT), 
-    ('n_tar', KMER_DTYPE['assembly_idx']), 
-    ('n_neg', KMER_DTYPE['assembly_idx']), 
-    ('penalty', np.float64), 
-    # store start/stop indices in the sorted KmerGraph.kmers, for faster access of each k-mer group
-    ('start', _HASH_NP_DT), 
-    ('stop', _HASH_NP_DT), 
-])
-
-
-@njit(nogil=True, parallel=True) # cannot be cached
-def sort_by_hash(kmers: NDArray) -> NDArray:
-    """Sort `kmers` by 'hash' in-place in a stable manner, and return the sorted indices. 
-    Use LSD (Least Significant Digit) radix sort. 
-    - Indices have the same dtype as `hash`. 
-    - A buffer is needed (same shape and dtype as the indices), so memory usage should be around `kmers + idx + buffer`. 
-    - Note that this function is hard coded for the k-mer dtype below. 
-    ```python
-    np.dtype([
-        ('hash', np.uint64), 
-        ('pos', np.uint32), 
-        ('record_idx', np.uint16), 
-        ('assembly_idx', np.uint16), 
-        ('is_target', np.bool_)
-    ])
-    ```
-
-    Args:
-        kmers (NDArray): See `KmerGraph.kmers`. 
-
-    Returns:
-        NDArray: See `KmerGraph.idx`. 
-    """
-    n = kmers.size
-    n_cpu = get_num_threads()
-
-    # create k-mer indices
-    idx = np.arange(n, dtype=_HASH_NP_DT) # use the same dtype as hash
-    # create a buffer, also use the same dtype as hash
-    buf = np.empty_like(idx)
-
-    # 1. sort idx by 'hash' using a stable algorithm (LSD radix sort on 64-bit keys)
-    # process 16 bits at a time (4 passes for 64-bit keys: 0-15, 16-31, 32-47, 48-63)
-    # allocate thread-local count array
-    counts = np.empty((n_cpu, 65536), dtype=np.int64)
-    # chunk size for each thread
-    chunk_size = (n + n_cpu - 1) // n_cpu
-    for shift in range(0, 64, 16):
-        counts[:] = 0
-
-        # --- parallel count ---
-        for t in prange(n_cpu):
-            start = t * chunk_size
-            end = min(start + chunk_size, n)
-            if start < end:
-                for i in range(start, end):
-                    # extract 16-bit key
-                    key = (kmers[idx[i]]['hash'] >> shift) & 0xFFFF
-                    counts[t, key] += 1
-
-        # --- global prefix sum (serial) ---
-        # we need to calculate where each thread should start writing each key
-        # convert counts to per-thread starting offsets in-place
-        current = 0
-        for key in range(65536):
-            for t in range(n_cpu):
-                c = counts[t, key]
-                counts[t, key] = current # global offset
-                current += c
-
-        # --- parallel scatter (move) ---
-        # use the calculated offsets to place indices into the correct sorted position
-        for t in prange(n_cpu):
-            start = t * chunk_size
-            end = min(start + chunk_size, n)
-            if start < end:
-                # cache local offsets to avoid repeated global array access
-                local_offsets = counts[t]
-
-                for i in range(start, end):
-                    val_idx = idx[i]
-                    key = (kmers[val_idx]['hash'] >> shift) & 0xFFFF
-
-                    pos = local_offsets[key]
-                    buf[pos] = val_idx
-                    local_offsets[key] += 1 # increment for the next item with same key
-
-        # swap buffers
-        idx, buf = buf, idx
-
-    # 2. reorder kmers in-place using the sorted indices 
-    # use buf as the buffer for column-wise gather (lower peak mem than a full copy of kmers)
-    # hash (same dtype as buf)
-    for i in prange(n):
-        buf[i] = kmers[idx[i]]['hash']
-    for i in prange(n):
-        kmers[i]['hash'] = buf[i]
-
-    # pack pos (uint32), record_idx (uint16) and assembly_idx (uint16) into one uint64
-    for i in prange(n):
-        j = idx[i]
-        buf[i] = (
-            np.uint64(kmers[j]['pos']) | 
-            (np.uint64(kmers[j]['record_idx']) << 32) | 
-            (np.uint64(kmers[j]['assembly_idx']) << 48)
-        )
-    for i in prange(n):
-        v = buf[i]
-        kmers[i]['pos'] = np.uint32(v)
-        kmers[i]['record_idx'] = np.uint16(v >> 32)
-        kmers[i]['assembly_idx'] = np.uint16(v >> 48)
-
-    # is_target (single bit)
-    buf_u8 = buf.view(np.uint8) # reduce memory traffic
-    for i in prange(n):
-        buf_u8[i] = kmers[idx[i]]['is_target']
-    for i in prange(n):
-        kmers[i]['is_target'] = (buf_u8[i] != 0)
-
-    return idx
-
-
-@njit(nogil=True, cache=True)
-def agg_by_hash(hashes: NDArray, assembly_idx: NDArray, is_target: NDArray) -> NDArray:
-    """Count the number of target/non-target assemblies for each unique hash value. 
-
-    Args:
-        hashes (NDArray): Field of `KmerGraph.kmers`. 
-        assembly_idx (NDArray): Field of `KmerGraph.kmers`. 
-        is_target (NDArray): Field of `KmerGraph.kmers`. 
-
-    Returns:
-        NDArray: See `KmerGraph.nodes`. 
-    """
-    n = hashes.size
-    # pre-allocate output array (never larger than n)
-    nodes = np.empty(n, dtype=NODE_DTYPE) # define dtype outside the numba function
-
-    node_i = 0
-    i = 0
-    while i < n:
-        curr_hash = hashes[i]
-        start = i # start index of the current hash group
-
-        n_tar = n_neg = 0
-        # walk all rows having the same hash
-        while i < n and hashes[i] == curr_hash:
-            curr_a = assembly_idx[i]
-            curr_t = is_target[i]
-
-            # skip any further duplicates in the same assembly
-            j = i + 1
-            while (
-                j < n 
-                and hashes[j] == curr_hash
-                and assembly_idx[j] == curr_a
-            ):
-                j += 1
-
-            # count the current assembly
-            if curr_t:
-                n_tar += 1
-            else:
-                n_neg += 1
-            i = j # advance by the duplicates
-
-        # set individual values in numba, no fancy indexing
-        nodes[node_i]['hash'] = curr_hash
-        nodes[node_i]['n_tar'] = n_tar
-        nodes[node_i]['n_neg'] = n_neg
-        nodes[node_i]['penalty'] = .0 # placeholder for penalty
-        nodes[node_i]['start'] = start
-        nodes[node_i]['stop'] = i # stop index of the current hash group
-        node_i += 1
-
-    # trim the over-allocated buffers
-    return nodes[:node_i]
-
 
 def get_subgraphs(
-    graph: nx.Graph, penalty_th: float, min_nodes: int, max_nodes: int | None, rng: Random
-) -> tuple[tuple[frozenset[int], ...], frozenset[int]]:
+    graph: nx.Graph, 
+    penalty_th: float, 
+    min_nodes: int, 
+    max_nodes: int | None, 
+    rng: Random
+) -> tuple[
+    tuple[frozenset[np.uint64], ...], 
+    frozenset[np.uint64]
+]:
     """Find disjoint (no shared node) subgraphs whose average node-penalty ≤ `penalty_th` and size within `size_th`. 
     1. Remove low-weight edges and isolated nodes from `graph`. 
     2. Find nodes with penalty ≤ `penalty_th` as seeds of subgraphs. 
@@ -248,8 +73,8 @@ def get_subgraphs(
 
     Returns:
         tuple: A tuple containing
-            1. tuple[frozenset[int], ...]: See `KmerGraph.subgraphs`. 
-            2. frozenset[int]: Union of k-mer hash values in all subgraphs. 
+            1. tuple[frozenset[np.uint64], ...]: See `KmerGraph.subgraphs`. 
+            2. frozenset[np.uint64]: Union of k-mer hash values in all subgraphs. 
     """
     # a dict mapping node to penalty for faster lookup
     node_penalty: dict[int, float] = dict(
