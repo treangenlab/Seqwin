@@ -55,8 +55,8 @@ KMER_DTYPE = np.dtype([
 
 NODE_DTYPE = np.dtype([
     ('hash', np.uint64), 
-    ('n_tar', np.uint16), 
-    ('n_neg', np.uint16), 
+    ('n_tar', np.uint32), 
+    ('n_neg', np.uint32), 
     ('penalty', np.float64), 
     ('start', np.uint64), 
     ('stop', np.uint64), 
@@ -117,4 +117,4 @@ def build(
         list(bool(target) for target in is_target), 
         int(n_cpu)
     )
-    return kmers.view(KMER_DTYPE), idx, nodes.view(NODE_DTYPE), edges, idx_to_id
+    return kmers.view(KMER_DTYPE), idx, nodes, edges, idx_to_id

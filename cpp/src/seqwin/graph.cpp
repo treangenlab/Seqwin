@@ -22,8 +22,8 @@ namespace {
 constexpr std::size_t serialized_record_size = 17;
 
 struct NodeState {
-    std::uint64_t n_tar;
-    std::uint64_t n_neg;
+    std::uint32_t n_tar;
+    std::uint32_t n_neg;
     std::size_t last_seen_assembly;
     std::uint64_t start = 0;
     std::uint64_t count = 0;
@@ -130,8 +130,8 @@ ThreadResult build_worker(
                 auto [node_it, node_inserted] = node_map.try_emplace(
                     m.out_hash,
                     NodeState{
-                        is_target_u8 == 1 ? std::uint64_t{1} : std::uint64_t{0},
-                        is_target_u8 == 0 ? std::uint64_t{1} : std::uint64_t{0},
+                        is_target_u8 == 1 ? std::uint32_t{1} : std::uint32_t{0},
+                        is_target_u8 == 0 ? std::uint32_t{1} : std::uint32_t{0},
                         assembly_i, 0, 0, 0
                     }
                 );
@@ -188,15 +188,17 @@ ThreadResult build_worker(
         result.idx[node_it->second.cursor++] = static_cast<std::uint64_t>(i);
     }
 
-    result.nodes.reserve(node_map.size() * 6);
+    result.nodes.reserve(node_map.size());
     for (const auto& [hash, state] : node_map) {
         const auto stop = state.start + state.count;
-        result.nodes.push_back(hash);
-        result.nodes.push_back(state.n_tar);
-        result.nodes.push_back(state.n_neg);
-        result.nodes.push_back(static_cast<std::uint64_t>(thread_id));
-        result.nodes.push_back(state.start);
-        result.nodes.push_back(stop);
+        result.nodes.push_back(ThreadNode{
+            hash,
+            state.n_tar,
+            state.n_neg,
+            static_cast<std::uint64_t>(thread_id),
+            state.start,
+            stop
+        });
     }
 
     result.edges.reserve(edge_map.size() * 3);

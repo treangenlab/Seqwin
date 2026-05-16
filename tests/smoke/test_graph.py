@@ -1,6 +1,6 @@
 import numpy as np
 
-from seqwin.graph import build
+from seqwin.graph import NODE_DTYPE, build
 
 
 def _sorted_edges(edges: np.ndarray) -> np.ndarray:
@@ -21,6 +21,12 @@ def _assert_idx_invariants(kmers: np.ndarray, idx: np.ndarray, nodes: np.ndarray
         node_idx = idx[start:stop]
         assert len(node_idx) == len(block)
         assert not np.array_equal(node_idx, np.arange(start, stop, dtype=np.uint64))
+
+
+def test_node_dtype_layout() -> None:
+    assert NODE_DTYPE["n_tar"] == np.dtype(np.uint32)
+    assert NODE_DTYPE["n_neg"] == np.dtype(np.uint32)
+    assert NODE_DTYPE.itemsize == 40
 
 
 def test_build_threading_equivalence(targets_dir, non_targets_dir) -> None:
@@ -60,6 +66,7 @@ def test_build_threading_equivalence(targets_dir, non_targets_dir) -> None:
 
     assert edges_1.shape[1] == 3
     assert edges_1.dtype == np.uint64
+    assert nodes_1.dtype == NODE_DTYPE
 
     _assert_idx_invariants(kmers_1, idx_1, nodes_1)
     _assert_idx_invariants(kmers_2, idx_2, nodes_2)
