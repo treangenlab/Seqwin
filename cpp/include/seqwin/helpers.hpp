@@ -9,9 +9,18 @@
 
 namespace seqwin {
 
+struct ThreadNode {
+    std::uint64_t hash;
+    std::uint32_t n_tar;
+    std::uint32_t n_neg;
+    std::uint64_t thread_id;
+    std::uint64_t start;
+    std::uint64_t stop;
+};
+
 struct ThreadResult {
-    std::vector<std::uint8_t> kmers;
-    std::vector<std::uint64_t> nodes; // 6-column rows: {hash, n_tar, n_neg, thread_id, start, stop}
+    std::vector<Kmer> kmers;
+    std::vector<ThreadNode> nodes;
     std::vector<std::uint64_t> edges;
     std::vector<std::vector<std::string>> ids_by_assembly;
     std::vector<std::uint64_t> idx; // Flat local k-mer indices grouped by local node

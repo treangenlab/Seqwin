@@ -7,10 +7,25 @@
 
 namespace seqwin {
 
+struct Kmer {
+    std::uint32_t pos;
+    std::uint16_t record_idx;
+    std::uint16_t assembly_idx;
+};
+
+struct Node {
+    std::uint64_t hash;
+    std::uint32_t n_tar;
+    std::uint32_t n_neg;
+    double penalty;
+    std::uint64_t start;
+    std::uint64_t stop;
+};
+
 struct BuildResult {
-    std::vector<std::uint8_t> kmers;
+    std::vector<Kmer> kmers;
     std::vector<std::uint64_t> idx;
-    std::vector<std::uint8_t> nodes;
+    std::vector<Node> nodes;
     std::vector<std::uint64_t> edges;
     std::vector<std::vector<std::string>> ids_by_assembly;
 };

@@ -12,6 +12,9 @@
 namespace py = pybind11;
 
 PYBIND11_MODULE(_core, m) {
+    PYBIND11_NUMPY_DTYPE(seqwin::Kmer, pos, record_idx, assembly_idx);
+    PYBIND11_NUMPY_DTYPE(seqwin::Node, hash, n_tar, n_neg, penalty, start, stop);
+
     m.doc() = "Seqwin minimizer graph bindings";
 
     m.def("_build_native",
@@ -42,9 +45,9 @@ PYBIND11_MODULE(_core, m) {
                 }
             );
 
-            auto kmers = py::array_t<std::uint8_t>(
+            auto kmers = py::array_t<seqwin::Kmer>(
                 {static_cast<py::ssize_t>(owner->kmers.size())},
-                {static_cast<py::ssize_t>(sizeof(std::uint8_t))},
+                {static_cast<py::ssize_t>(sizeof(seqwin::Kmer))},
                 owner->kmers.data(),
                 capsule
             );
@@ -54,9 +57,9 @@ PYBIND11_MODULE(_core, m) {
                 owner->idx.data(),
                 capsule
             );
-            auto nodes = py::array_t<std::uint8_t>(
+            auto nodes = py::array_t<seqwin::Node>(
                 {static_cast<py::ssize_t>(owner->nodes.size())},
-                {static_cast<py::ssize_t>(sizeof(std::uint8_t))},
+                {static_cast<py::ssize_t>(sizeof(seqwin::Node))},
                 owner->nodes.data(),
                 capsule
             );

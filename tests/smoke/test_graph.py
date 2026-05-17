@@ -1,6 +1,6 @@
 import numpy as np
 
-from seqwin.graph import build
+from seqwin.graph import KMER_DTYPE, NODE_DTYPE, build
 
 
 def _sorted_edges(edges: np.ndarray) -> np.ndarray:
@@ -17,10 +17,20 @@ def _assert_idx_invariants(kmers: np.ndarray, idx: np.ndarray, nodes: np.ndarray
         stop = int(node['stop'])
         assert stop > start
         block = kmers[start:stop]
-        assert np.all(block['hash'] == node['hash'])
+        assert len(block) == (stop - start)
         node_idx = idx[start:stop]
         assert len(node_idx) == len(block)
         assert not np.array_equal(node_idx, np.arange(start, stop, dtype=np.uint64))
+
+
+def test_dtype_layouts() -> None:
+    assert KMER_DTYPE.itemsize == 8
+    assert KMER_DTYPE.names == ('pos', 'record_idx', 'assembly_idx')
+    assert KMER_DTYPE['assembly_idx'] == np.dtype(np.uint16)
+
+    assert NODE_DTYPE["n_tar"] == np.dtype(np.uint32)
+    assert NODE_DTYPE["n_neg"] == np.dtype(np.uint32)
+    assert NODE_DTYPE.itemsize == 40
 
 
 def test_build_threading_equivalence(targets_dir, non_targets_dir) -> None:
@@ -58,8 +68,21 @@ def test_build_threading_equivalence(targets_dir, non_targets_dir) -> None:
         n_cpu=99,
     )
 
+    assert kmers_1.dtype == KMER_DTYPE
+    assert kmers_1.dtype.itemsize == 8
+    assert kmers_1.dtype.names == ('pos', 'record_idx', 'assembly_idx')
+    for node in nodes_1:
+        start = int(node['start'])
+        stop = int(node['stop'])
+        assert stop > start
+        assert len(kmers_1[start:stop]) == (stop - start)
+
+    assert set(np.unique(kmers_1['assembly_idx']).tolist()) == {0, 1, 2, 3}
+    assert np.all(nodes_1['n_tar'] + nodes_1['n_neg'] > 0)
+
     assert edges_1.shape[1] == 3
     assert edges_1.dtype == np.uint64
+    assert nodes_1.dtype == NODE_DTYPE
 
     _assert_idx_invariants(kmers_1, idx_1, nodes_1)
     _assert_idx_invariants(kmers_2, idx_2, nodes_2)

@@ -486,14 +486,26 @@ class ConnectedKmers(object):
         return loc
 
 
-def _create_ck(graph: nx.Graph, kmers: pd.DataFrame, kmerlen: int) -> ConnectedKmers:
-    """Creates a ConnectedKmers instance (for multiprocessing). 
+def _create_ck(
+    graph: nx.Graph, nodes: tuple[np.uint64], kmers: tuple, idx: tuple, n_tar: int, kmerlen: int
+) -> ConnectedKmers:
+    """Creates a ConnectedKmers instance by taking the outputs of `_get_create_ck_args()`. 
     """
-    return ConnectedKmers(graph, kmers, kmerlen)
+    # add hash and idx to each group
+    kmers_df = list()
+    for h, kmer_group, idx_group in zip(nodes, kmers, idx):
+        df = pd.DataFrame(kmer_group, index=idx_group)
+        df['hash'] = h
+        df['is_target'] = df['assembly_idx'] < n_tar
+        kmers_df.append(df)
+
+    kmers_df = pd.concat(kmers_df, ignore_index=False)
+
+    return ConnectedKmers(graph, kmers_df, kmerlen)
 
 
 def _get_create_ck_args(
-    kmers: KmerGraph, kmerlen: int
+    kg: KmerGraph, kmerlen: int, n_tar: int
 ) -> Generator[tuple[nx.Graph, pd.DataFrame, int], None, None]:
     """Generates input arguments for `_create_ck()`. 
 
@@ -504,27 +516,34 @@ def _get_create_ck_args(
     Yields:
         tuple: Input arguments of `_create_ck()`. 
     """
+    kmers = kg.kmers
+    idx = kg.idx
+    nodes = kg.nodes
+    graph = kg.graph
+    subgraphs = kg.subgraphs
+
     # create a dict of hash -> k-mer group
-    kmer_groups = pd.DataFrame(kmers.kmers, index=kmers.idx, copy=False)
-    kmer_groups = {
-        # kmers and nodes are both sorted by 'hash'
-        node['hash']: kmer_groups.iloc[node['start']:node['stop']] 
-        for node in kmers.nodes
-    }
+    kmer_groups = dict()
+    idx_groups = dict()
+    for node in nodes:
+        h, start, stop = node['hash'], node['start'], node['stop']
+        kmer_groups[h] = kmers[start:stop]
+        idx_groups[h] = idx[start:stop]
 
     # yield function args
-    graph = kmers.graph
-    for subgraph in kmers.subgraphs:
+    for sg in subgraphs:
         # each subgraph is a set of nodes, so it's not ordered
-        arg_graph = graph.subgraph(subgraph).copy()
+        arg_graph = graph.subgraph(sg).copy()
 
-        # fetch the k-mer group of each node and keep k-mer indices
-        arg_kmers = pd.concat(
-            (kmer_groups.pop(node) for node in subgraph), 
-            ignore_index=False
+        arg_nodes = tuple(sg) # fixate node order
+        arg_kmers = tuple(
+            kmer_groups.pop(h) for h in arg_nodes
+        )
+        arg_idx = tuple(
+            idx_groups.pop(h) for h in arg_nodes
         )
 
-        yield arg_graph, arg_kmers, kmerlen
+        yield arg_graph, arg_nodes, arg_kmers, arg_idx, n_tar, kmerlen
 
 
 def _fetch_cks_seq(
@@ -601,7 +620,7 @@ def _get_cks(
     logger.info(' - Processing each subgraph...')
     all_cks: list[ConnectedKmers] = mp_wrapper(
         _create_ck, 
-        _get_create_ck_args(kmers, kmerlen), 
+        _get_create_ck_args(kmers, kmerlen, n_tar), 
         n_cpu=n_cpu, n_jobs=len(kmers.subgraphs)
     )
 
