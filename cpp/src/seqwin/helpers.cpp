@@ -134,6 +134,9 @@ static std::vector<Node> merge_nodes(
 
         std::swap(src, dst);
     }
+    // Release memory before building idx
+    std::vector<ThreadNode>().swap(buf);
+    std::vector<std::uint64_t>().swap(counts);
 
     std::vector<Node> out;
     out.reserve(n_nodes);
@@ -168,6 +171,7 @@ static std::vector<Node> merge_nodes(
     for (auto& result : results) {
         std::vector<std::uint64_t>().swap(result.idx);
     }
+    out.shrink_to_fit();
 
     return out;
 }
@@ -251,6 +255,7 @@ static void merge_weighted_edges(std::vector<std::uint64_t>& edges, ThreadPool& 
     edges[3 * write_i + 2] = w;
     ++write_i;
     edges.resize(write_i * 3);
+    edges.shrink_to_fit();
 }
 
 } // namespace
@@ -290,6 +295,7 @@ BuildResult merge_thread_results(
 
         std::vector<std::uint64_t> kmer_offsets{0};
         auto nodes = merge_nodes(result.nodes, results, kmer_offsets, idx, pool);
+        std::vector<ThreadNode>().swap(result.nodes);
         reorder_kmers_by_idx(result.kmers, idx, pool);
         return {
             std::move(result.kmers),
@@ -302,6 +308,10 @@ BuildResult merge_thread_results(
 
     log_python(" - Merging from " + std::to_string(results.size()) + " threads...");
 
+    // Merge edges and nodes first to reduce peak memory
+    auto edges = concat_edges(results, pool);
+    merge_weighted_edges(edges, pool);
+
     std::vector<std::uint64_t> kmer_offsets(results.size());
     std::uint64_t total_kmers = 0;
     for (std::size_t r = 0; r < results.size(); ++r) {
@@ -309,16 +319,14 @@ BuildResult merge_thread_results(
         total_kmers += results[r].n_kmers;
     }
 
-    auto kmers = concat_kmers(results, pool);
     std::vector<std::uint64_t> idx;
     idx.reserve(static_cast<std::size_t>(total_kmers));
 
     auto nodes_raw = concat_nodes(results, pool);
     auto nodes = merge_nodes(nodes_raw, results, kmer_offsets, idx, pool);
-    reorder_kmers_by_idx(kmers, idx, pool);
+    std::vector<ThreadNode>().swap(nodes_raw);
 
-    auto edges = concat_edges(results, pool);
-    merge_weighted_edges(edges, pool);
+    auto kmers = concat_kmers(results, pool);
 
     std::vector<std::vector<std::string>> ids_by_assembly(n_assemblies);
     for (auto& result : results) {
@@ -326,6 +334,9 @@ BuildResult merge_thread_results(
             ids_by_assembly[result.start_assembly + i] = std::move(result.ids_by_assembly[i]);
         }
     }
+
+    std::vector<ThreadResult>().swap(results);
+    reorder_kmers_by_idx(kmers, idx, pool);
 
     return {
         std::move(kmers),
