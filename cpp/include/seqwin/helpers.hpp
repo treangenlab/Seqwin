@@ -19,7 +19,7 @@ struct ThreadNode {
 };
 
 struct ThreadResult {
-    std::vector<std::uint8_t> kmers;
+    std::vector<Kmer> kmers;
     std::vector<ThreadNode> nodes;
     std::vector<std::uint64_t> edges;
     std::vector<std::vector<std::string>> ids_by_assembly;

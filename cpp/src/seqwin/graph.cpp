@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <cstring>
 #include <exception>
 #include <limits>
 #include <mutex>
@@ -18,8 +17,6 @@
 
 namespace seqwin {
 namespace {
-
-constexpr std::size_t serialized_record_size = 17;
 
 struct NodeState {
     std::uint32_t n_tar;
@@ -45,25 +42,6 @@ struct EdgeState {
     std::size_t last_seen_assembly;
 };
 
-void append_record(
-    std::vector<std::uint8_t>& out,
-    std::uint64_t out_hash,
-    std::uint32_t pos,
-    std::uint16_t record_idx,
-    std::uint16_t assembly_idx,
-    std::uint8_t is_target
-) {
-    const auto old_size = out.size();
-    out.resize(old_size + serialized_record_size);
-    auto* record = out.data() + old_size;
-
-    std::memcpy(record + 0, &out_hash, sizeof(out_hash));
-    std::memcpy(record + 8, &pos, sizeof(pos));
-    std::memcpy(record + 12, &record_idx, sizeof(record_idx));
-    std::memcpy(record + 14, &assembly_idx, sizeof(assembly_idx));
-    std::memcpy(record + 16, &is_target, sizeof(is_target));
-}
-
 ThreadResult build_worker(
     const std::vector<std::string>& assembly_paths,
     std::size_t kmerlen,
@@ -83,9 +61,10 @@ ThreadResult build_worker(
                 assembly_paths.begin() + static_cast<std::ptrdiff_t>(end_assembly)
             ),
             windowsize
-        ) * serialized_record_size
+        )
     );
     result.ids_by_assembly.reserve(end_assembly - start_assembly);
+    std::vector<std::uint64_t> hashes;
     // Reserving for unordered_map will actually allocate physical memory
     std::unordered_map<std::uint64_t, NodeState> node_map;
     std::unordered_map<EdgeKey, EdgeState, EdgeKeyHash> edge_map;
@@ -96,8 +75,7 @@ ThreadResult build_worker(
             throw std::runtime_error("assembly_idx must fit in uint16");
         }
         const auto assembly_idx16 = static_cast<std::uint16_t>(assembly_idx);
-        const std::uint8_t is_target_u8 =
-            is_targets[assembly_i] ? std::uint8_t{1} : std::uint8_t{0};
+        const bool is_target = is_targets[assembly_i];
 
         auto records = seqwin::read_fasta(assembly_paths[assembly_i]);
         auto& idx_to_id = result.ids_by_assembly.emplace_back();
@@ -118,25 +96,23 @@ ThreadResult build_worker(
                 if (m.pos > std::numeric_limits<std::uint32_t>::max()) {
                     throw std::runtime_error("minimizer position exceeds uint32 range");
                 }
-                append_record(
-                    result.kmers,
-                    m.out_hash,
+                result.kmers.push_back(Kmer{
                     static_cast<std::uint32_t>(m.pos),
                     record_idx16,
-                    assembly_idx16,
-                    is_target_u8
-                );
+                    assembly_idx16
+                });
+                hashes.push_back(m.out_hash);
 
                 auto [node_it, node_inserted] = node_map.try_emplace(
                     m.out_hash,
                     NodeState{
-                        is_target_u8 == 1 ? std::uint32_t{1} : std::uint32_t{0},
-                        is_target_u8 == 0 ? std::uint32_t{1} : std::uint32_t{0},
+                        is_target ? std::uint32_t{1} : std::uint32_t{0},
+                        is_target ? std::uint32_t{0} : std::uint32_t{1},
                         assembly_i, 0, 0, 0
                     }
                 );
                 if (!node_inserted && node_it->second.last_seen_assembly != assembly_i) {
-                    if (is_target_u8 == 1) {
+                    if (is_target) {
                         ++(node_it->second.n_tar);
                     } else {
                         ++(node_it->second.n_neg);
@@ -181,9 +157,7 @@ ThreadResult build_worker(
     }
 
     for (std::size_t i = 0; i < result.n_kmers; ++i) {
-        const auto* record = result.kmers.data() + i * serialized_record_size;
-        std::uint64_t hash;
-        std::memcpy(&hash, record, sizeof(hash));
+        const auto hash = hashes[i];
         auto node_it = node_map.find(hash);
         result.idx[node_it->second.cursor++] = static_cast<std::uint64_t>(i);
     }

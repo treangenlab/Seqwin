@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
 #include <thread>
 #include <vector>
 
@@ -37,10 +36,11 @@ std::vector<T> concat(std::vector<ThreadResult>& results, MemberPtr member)
             auto& local = results[i].*member;
             const auto local_size = local.size();
             if (local_size != 0) {
-                std::memcpy(
-                    out.data() + offsets[i],
-                    local.data(),
-                    local_size * sizeof(T));
+                std::copy(
+                    local.begin(),
+                    local.end(),
+                    out.begin() + static_cast<std::ptrdiff_t>(offsets[i])
+                );
             }
             std::vector<T>().swap(local);
         });
@@ -52,9 +52,9 @@ std::vector<T> concat(std::vector<ThreadResult>& results, MemberPtr member)
     return out;
 }
 
-std::vector<std::uint8_t> concat_kmers(std::vector<ThreadResult>& results)
+std::vector<Kmer> concat_kmers(std::vector<ThreadResult>& results)
 {
-    return concat<std::uint8_t>(results, &ThreadResult::kmers);
+    return concat<Kmer>(results, &ThreadResult::kmers);
 }
 
 std::vector<ThreadNode> concat_nodes(std::vector<ThreadResult>& results)
@@ -67,10 +67,8 @@ std::vector<std::uint64_t> concat_edges(std::vector<ThreadResult>& results)
     return concat<std::uint64_t>(results, &ThreadResult::edges);
 }
 
-constexpr std::size_t serialized_kmer_size = 17;
-
 static void reorder_kmers_by_idx(
-    std::vector<std::uint8_t>& kmers,
+    std::vector<Kmer>& kmers,
     const std::vector<std::uint64_t>& idx,
     std::size_t n_workers
 ) {
@@ -79,13 +77,12 @@ static void reorder_kmers_by_idx(
         return;
     }
 
-    std::vector<std::uint64_t> buf(n);
+    std::vector<Kmer> buf(n);
     const std::size_t workers = std::max<std::size_t>(1, n_workers);
     const std::size_t chunk_size = (n + workers - 1) / workers;
     std::vector<std::thread> threads;
     threads.reserve(workers);
 
-    // hash: uint64 at offset 0
     for (std::size_t t = 0; t < workers; ++t) {
         const std::size_t start = t * chunk_size;
         if (start >= n) {
@@ -94,9 +91,7 @@ static void reorder_kmers_by_idx(
         const std::size_t end = std::min(start + chunk_size, n);
         threads.emplace_back([&, start, end]() {
             for (std::size_t i = start; i < end; ++i) {
-                std::uint64_t value = 0;
-                std::memcpy(&value, kmers.data() + serialized_kmer_size * idx[i] + 0, sizeof(value));
-                buf[i] = value;
+                buf[i] = kmers[idx[i]];
             }
         });
     }
@@ -104,97 +99,7 @@ static void reorder_kmers_by_idx(
         thread.join();
     }
 
-    threads.clear();
-    for (std::size_t t = 0; t < workers; ++t) {
-        const std::size_t start = t * chunk_size;
-        if (start >= n) {
-            break;
-        }
-        const std::size_t end = std::min(start + chunk_size, n);
-        threads.emplace_back([&, start, end]() {
-            for (std::size_t i = start; i < end; ++i) {
-                const auto value = buf[i];
-                std::memcpy(kmers.data() + serialized_kmer_size * i + 0, &value, sizeof(value));
-            }
-        });
-    }
-    for (auto& thread : threads) {
-        thread.join();
-    }
-
-    // pos + record_idx + assembly_idx packed into uint64 from offsets 8..15
-    threads.clear();
-    for (std::size_t t = 0; t < workers; ++t) {
-        const std::size_t start = t * chunk_size;
-        if (start >= n) {
-            break;
-        }
-        const std::size_t end = std::min(start + chunk_size, n);
-        threads.emplace_back([&, start, end]() {
-            for (std::size_t i = start; i < end; ++i) {
-                std::uint64_t packed = 0;
-                std::memcpy(&packed, kmers.data() + serialized_kmer_size * idx[i] + 8, sizeof(packed));
-                buf[i] = packed;
-            }
-        });
-    }
-    for (auto& thread : threads) {
-        thread.join();
-    }
-
-    threads.clear();
-    for (std::size_t t = 0; t < workers; ++t) {
-        const std::size_t start = t * chunk_size;
-        if (start >= n) {
-            break;
-        }
-        const std::size_t end = std::min(start + chunk_size, n);
-        threads.emplace_back([&, start, end]() {
-            for (std::size_t i = start; i < end; ++i) {
-                const auto packed = buf[i];
-                std::memcpy(kmers.data() + serialized_kmer_size * i + 8, &packed, sizeof(packed));
-            }
-        });
-    }
-    for (auto& thread : threads) {
-        thread.join();
-    }
-
-    // is_target: uint8 at offset 16, reuse first n bytes of buf storage
-    auto* byte_buf = reinterpret_cast<std::uint8_t*>(buf.data());
-    threads.clear();
-    for (std::size_t t = 0; t < workers; ++t) {
-        const std::size_t start = t * chunk_size;
-        if (start >= n) {
-            break;
-        }
-        const std::size_t end = std::min(start + chunk_size, n);
-        threads.emplace_back([&, start, end]() {
-            for (std::size_t i = start; i < end; ++i) {
-                byte_buf[i] = kmers[serialized_kmer_size * idx[i] + 16];
-            }
-        });
-    }
-    for (auto& thread : threads) {
-        thread.join();
-    }
-
-    threads.clear();
-    for (std::size_t t = 0; t < workers; ++t) {
-        const std::size_t start = t * chunk_size;
-        if (start >= n) {
-            break;
-        }
-        const std::size_t end = std::min(start + chunk_size, n);
-        threads.emplace_back([&, start, end]() {
-            for (std::size_t i = start; i < end; ++i) {
-                kmers[serialized_kmer_size * i + 16] = byte_buf[i];
-            }
-        });
-    }
-    for (auto& thread : threads) {
-        thread.join();
-    }
+    kmers = std::move(buf);
 }
 
 // 1. Parallel LSD radix sort based on hash (stable)

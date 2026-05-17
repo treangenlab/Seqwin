@@ -46,11 +46,9 @@ from .utils import OrderedKmers
 
 
 KMER_DTYPE = np.dtype([
-    ('hash', np.uint64), 
     ('pos', np.uint32), 
     ('record_idx', np.uint16), 
     ('assembly_idx', np.uint16), 
-    ('is_target', np.bool_), 
 ])
 
 NODE_DTYPE = np.dtype([
@@ -83,7 +81,7 @@ def build(
     - For every node:
     ```python
     >>> kmer_group = kmers[node["start"]:node["stop"]]
-    >>> assert np.all(kmer_group["hash"] == node["hash"])
+    >>> group_hash = node["hash"]
     >>> original_indices = idx[node["start"]:node["stop"]] # strictly increasing
     ```
 
@@ -99,11 +97,9 @@ def build(
         tuple: A tuple containing
             1. NDArray[np.void]: A 1-D Numpy structured array of k-mers from all assemblies, with dtype `KMER_DTYPE`. 
                 Each element represents a minimizer, with fields, 
-                - 'hash' (uint64): Hash value of the minimizer. 
                 - 'pos' (uint32): Position of the first base of the minimizer. 
                 - 'record_idx' (uint16): 0-based index of the sequence records, in the same order as they appear in the FASTA file. 
                 - 'assembly_idx' (uint16): Assembly index. 
-                - 'is_target' (bool): True for target assemblies. 
             2. NDArray[np.uint64]: The original indices assigned when k-mers are generated (k-mers with consecutive indices are adjacent in the genome). 
             3. NDArray[np.void]: A 1-D Numpy structured array of k-mer nodes, with dtype `NODE_DTYPE`. 
             4. NDArray[np.uint64]: A 3-column Numpy array of weighted, undirected edges (u, v, w). 
@@ -117,4 +113,4 @@ def build(
         list(bool(target) for target in is_target), 
         int(n_cpu)
     )
-    return kmers.view(KMER_DTYPE), idx, nodes, edges, idx_to_id
+    return kmers, idx, nodes, edges, idx_to_id

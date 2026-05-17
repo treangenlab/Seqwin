@@ -487,7 +487,7 @@ class ConnectedKmers(object):
 
 
 def _create_ck(
-    graph: nx.Graph, nodes: tuple[np.uint64], kmers: tuple, idx: tuple, kmerlen: int
+    graph: nx.Graph, nodes: tuple[np.uint64], kmers: tuple, idx: tuple, n_tar: int, kmerlen: int
 ) -> ConnectedKmers:
     """Creates a ConnectedKmers instance by taking the outputs of `_get_create_ck_args()`. 
     """
@@ -496,6 +496,7 @@ def _create_ck(
     for h, kmer_group, idx_group in zip(nodes, kmers, idx):
         df = pd.DataFrame(kmer_group, index=idx_group)
         df['hash'] = h
+        df['is_target'] = df['assembly_idx'] < n_tar
         kmers_df.append(df)
 
     kmers_df = pd.concat(kmers_df, ignore_index=False)
@@ -504,7 +505,7 @@ def _create_ck(
 
 
 def _get_create_ck_args(
-    kg: KmerGraph, kmerlen: int
+    kg: KmerGraph, kmerlen: int, n_tar: int
 ) -> Generator[tuple[nx.Graph, pd.DataFrame, int], None, None]:
     """Generates input arguments for `_create_ck()`. 
 
@@ -542,7 +543,7 @@ def _get_create_ck_args(
             idx_groups.pop(h) for h in arg_nodes
         )
 
-        yield arg_graph, arg_nodes, arg_kmers, arg_idx, kmerlen
+        yield arg_graph, arg_nodes, arg_kmers, arg_idx, n_tar, kmerlen
 
 
 def _fetch_cks_seq(
@@ -619,7 +620,7 @@ def _get_cks(
     logger.info(' - Processing each subgraph...')
     all_cks: list[ConnectedKmers] = mp_wrapper(
         _create_ck, 
-        _get_create_ck_args(kmers, kmerlen), 
+        _get_create_ck_args(kmers, kmerlen, n_tar), 
         n_cpu=n_cpu, n_jobs=len(kmers.subgraphs)
     )
 
