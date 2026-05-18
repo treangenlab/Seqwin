@@ -4,9 +4,7 @@
 #include <cstdint>
 #include <exception>
 #include <limits>
-#include <mutex>
 #include <stdexcept>
-#include <thread>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -14,6 +12,7 @@
 #include "btllib/minimizer.hpp"
 #include "seqwin/fasta_reader.hpp"
 #include "seqwin/helpers.hpp"
+#include "seqwin/thread_pool.hpp"
 
 namespace seqwin {
 namespace {
@@ -146,7 +145,6 @@ ThreadResult build_worker(
         }
     }
 
-
     result.idx.resize(static_cast<std::size_t>(result.n_kmers));
     std::uint64_t cursor = 0;
     for (auto& [hash, state] : node_map) {
@@ -155,7 +153,6 @@ ThreadResult build_worker(
         state.cursor = cursor;
         cursor += state.count;
     }
-
     for (std::size_t i = 0; i < result.n_kmers; ++i) {
         const auto hash = hashes[i];
         auto node_it = node_map.find(hash);
@@ -212,48 +209,30 @@ BuildResult build_impl(
         n_workers = std::min(n_workers, n_assemblies);
     }
 
+    ThreadPool pool(n_workers);
     std::vector<ThreadResult> results(n_workers);
-    std::vector<std::thread> threads;
-    threads.reserve(n_workers);
-    std::exception_ptr thread_error = nullptr;
-    std::mutex error_mutex;
 
     const std::size_t base = n_assemblies / n_workers;
     const std::size_t rem = n_assemblies % n_workers;
-    std::size_t start = 0;
-    for (std::size_t i = 0; i < n_workers; ++i) {
-        const auto chunk_size = base + (i < rem ? 1 : 0);
-        const auto end = start + chunk_size;
-        threads.emplace_back([&, i, start, end]() {
-            try {
-                results[i] = build_worker(
-                    assembly_paths,
-                    kmerlen,
-                    windowsize,
-                    assembly_indices,
-                    is_targets,
-                    start,
-                    end,
-                    i
-                );
-            } catch (...) {
-                std::lock_guard<std::mutex> lock(error_mutex);
-                if (!thread_error) {
-                    thread_error = std::current_exception();
-                }
-            }
-        });
-        start = end;
-    }
 
-    for (auto& t : threads) {
-        t.join();
-    }
-    if (thread_error) {
-        std::rethrow_exception(thread_error);
-    }
+    pool.parallel_for(n_workers, [&](std::size_t start, std::size_t end, std::size_t) {
+        for (std::size_t i = start; i < end; ++i) {
+            std::size_t chunk_start = i * base + std::min(i, rem);
+            std::size_t chunk_end = chunk_start + base + (i < rem ? 1 : 0);
+            results[i] = build_worker(
+                assembly_paths,
+                kmerlen,
+                windowsize,
+                assembly_indices,
+                is_targets,
+                chunk_start,
+                chunk_end,
+                i
+            );
+        }
+    });
 
-    return merge_thread_results(results, n_assemblies, n_workers);
+    return merge_thread_results(results, n_assemblies, pool);
 }
 
 } // namespace seqwin
