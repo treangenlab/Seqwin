@@ -2,7 +2,7 @@
 Helpers
 =======
 
-Helper functions and dtypes for `kmers.py`. 
+Helper functions for `kmers.py`. 
 
 Dependencies:
 -------------
@@ -15,10 +15,6 @@ Dependencies:
 
 Functions:
 ----------
-- get_edges
-- merge_weighted_edges
-- sort_by_hash
-- agg_by_hash
 - get_subgraphs
 - filter_kmers
 """
@@ -60,7 +56,7 @@ def get_subgraphs(
     A heap frontier (nodes to be visited in BFS) is used to accelerate the expansion process. 
     The heap is implemented with the built-in Python `heapq` module, which is a min-heap. 
     E.g., when tuples of `(penalty, node)` are pushed to the heap, it will always pop the tuple with the smallest `penalty` first. 
-    This is faster than calling `min()` everytime to fetch the node with the lowest penalty. 
+    This is faster than calling `min()` every time to fetch the node with the lowest penalty. 
     When tested on the Salmonella dataset (576 genomes, no edge filtering), this implementation is more than 3x faster than the naive one. 
     However, the performance gain becomes less significant when more low-weight edges are removed. 
 

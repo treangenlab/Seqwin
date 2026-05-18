@@ -83,12 +83,12 @@ _START_METHOD = (
 
 @dataclass(slots=True, frozen=True)
 class SharedArr:
-    """Class for a Numpy array attached to a SharedMemory instance. 
+    """Class for a NumPy array attached to a SharedMemory instance. 
 
     Attributes:
         name (str): Name of the SharedMemory instance. 
-        shape (tuple): Shape of the Numpy array. 
-        dtype (DTypeLike): dtype of the Numpy array. 
+        shape (tuple): Shape of the NumPy array. 
+        dtype (DTypeLike): dtype of the NumPy array. 
     """
     name: str
     shape: tuple[int, ...]
@@ -102,10 +102,10 @@ def print_time_delta(seconds: float) -> None:
 
 
 def log_and_raise(
-    exception: type[Exception]=Exception, 
-    msg: str='', 
-    from_none: bool=False, 
-    from_e: BaseException | None=None
+    exception: type[Exception] = Exception, 
+    msg: str = '', 
+    from_none: bool = False, 
+    from_e: BaseException | None = None
 ) -> None:
     """Log and raise an error. 
 
@@ -188,8 +188,11 @@ def file_to_write(path: Path, overwrite: bool=False, verbose=False) -> None:
         log_and_raise(IsADirectoryError, f'Expected a file, but a directory is found: {path}')
 
 
-def list_dir(path: Path=Path.cwd(), mode: Literal['a', 'd', 'f']='a') -> list[Path]:
-    """Lists all subdirectories and/or files under a directory. 
+def list_dir(
+    path: Path = Path.cwd(), 
+    mode: Literal['a', 'd', 'f'] = 'a'
+) -> list[Path]:
+    """List all subdirectories and/or files under a directory. 
 
     Args:
         path (Path, optional): Path of the directory to list. ['./']
@@ -214,7 +217,11 @@ def list_dir(path: Path=Path.cwd(), mode: Literal['a', 'd', 'f']='a') -> list[Pa
     return sorted(entries, key=lambda p: p.name)
 
 
-def run_cmd(*args: str | Path, stdin: str | None=None, raise_error: bool=True) -> subprocess.CompletedProcess[str]:
+def run_cmd(
+    *args: str | Path, 
+    stdin: str | None = None, 
+    raise_error: bool = True
+) -> subprocess.CompletedProcess[str]:
     """Run a command using subprocess.run(). Example usage: run_cmd('ls', '-a'). 
 
     Args:
@@ -262,7 +269,7 @@ def mp_wrapper(
         unpack_output (bool, optional): If func has multiple output, return multiple lists instead of a single list of tuples. [False]
         n_jobs (int | None, optional): Number of elements in `all_args`. 
             Helps determine the `chunksize` option for `pool.map` and `pool.starmap`. None to let Python decide. [None]
-        start_method (str | None, optional): Set the start methods for multiprocessing ('fork', 'spawn', 'forkserver'). 
+        start_method (str | None, optional): Set the start method for multiprocessing ('fork', 'spawn', 'forkserver'). 
             By default, 'spawn' is used for Windows and 'fork' for other systems. Use None to let Python decide. 
 
     Returns:
@@ -305,7 +312,7 @@ def mp_wrapper(
 
 
 def get_chunks(ls: Sequence, n: int=1) -> Generator[Sequence, None, None]:
-    """Yield n roughly same size chunks of from a list. 
+    """Yield `n` roughly same size chunks of from a list. 
 
     Args:
         ls (Sequence): A list or list-alike. 
@@ -341,9 +348,9 @@ def get_dups(iterable: Iterable[Hashable]) -> set:
 
 
 def concat_to_shm(arrays: Sequence[NDArray]) -> SharedArr:
-    """Concat Numpy arrays along the first dimension into a shared memory block. 
+    """Concat NumPy arrays along the first dimension into a shared memory block. 
     - Each individual array is deleted during this process to save memory. 
-    - Arrays are copied as raw bytes to bypass overhead of Numpy assignment. 
+    - Arrays are copied as raw bytes to bypass overhead of NumPy assignment. 
 
     Args:
         arrays (Sequence[NDArray]): Arrays to be concatenated. 
@@ -395,7 +402,7 @@ def concat_to_shm(arrays: Sequence[NDArray]) -> SharedArr:
 
 
 def concat_from_shm(arrays: Sequence[SharedArr], n_cpu: int=1) -> NDArray:
-    """Concat SharedArr instances along the first dimension into a Numpy array. 
+    """Concat SharedArr instances along the first dimension into a NumPy array. 
     - Each SharedArr is unlinked during this process to save memory. 
     - Arrays are copied as raw bytes, in parallel. 
 
@@ -404,7 +411,7 @@ def concat_from_shm(arrays: Sequence[SharedArr], n_cpu: int=1) -> NDArray:
         n_cpu (int, optional): Number of threads to run in parallel. [1]
 
     Returns:
-        NDArray: The concatenated Numpy array. 
+        NDArray: The concatenated NumPy array. 
     """
     if not arrays:
         log_and_raise(ValueError, 'No array is provided')
@@ -462,20 +469,20 @@ def concat_from_shm(arrays: Sequence[SharedArr], n_cpu: int=1) -> NDArray:
 
 
 def revcomp(seq: str) -> str:
-    """Returns the reverse complement of a DNA sequence. 
+    """Return the reverse complement of a DNA sequence. 
     """
     return seq.translate(BASE_COMP)[::-1]
 
 
 def most_common(iterable: Iterable[Hashable]):
-    """Returns the most common element in an Iterable. 
+    """Return the most common element in an Iterable. 
     All elements should be Hashable. 
     """
     return Counter(iterable).most_common(1)[0][0]
 
 
 def most_common_weighted(iterable: Iterable):
-    """Returns the most common element in an Iterable, weighted by element length. 
+    """Return the most common element in an Iterable, weighted by element length. 
     Each element should be Hashable and Sized (e.g., tuple or str). 
     """
     c = Counter(iterable)

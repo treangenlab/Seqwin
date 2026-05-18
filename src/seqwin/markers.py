@@ -49,7 +49,7 @@ from .assemblies import Assemblies
 from .kmers import KmerGraph
 from .ncbi import blast
 from .graph import OrderedKmers
-from .utils import StartMethod, print_time_delta, log_and_raise, file_to_write, mp_wrapper, most_common, most_common_weighted
+from .utils import print_time_delta, log_and_raise, file_to_write, mp_wrapper, most_common, most_common_weighted
 from .config import Config, RunState, HAS_BLAST, WORKINGDIR, BLASTCONFIG, CONSEC_KMER_TH, LEN_TH_MUL
 
 # Set ConnectedKmers.is_bad as True if any of these warnings is present
@@ -69,14 +69,14 @@ class MarkerMetrics:
     Metrics default to None if BLAST is not run. 
 
     Attributes:
-        conservation (float| None): Average fraction of identical bases between the marker and target assemblies. 
-        f_tar_hits (float| None): Fraction of target assemblies with a BLAST hit. 
-        divergence (float| None): Average fraction of mismatches and gaps between the marker and non-target assemblies. 
-        f_neg_hits (float| None): Fraction of non-target assemblies with a BLAST hit. 
-        avg_repeats_tar (float| None): Average number of repeats of this marker in target assemblies. 
-        avg_pident_tar (float| None): Average percentage of identical bases of all repeats in target assemblies. 
-        avg_repeats_neg (float| None): Average number of repeats of this marker in non-target assemblies. 
-        avg_pident_neg (float| None): Average percentage of identical bases of all repeats in non-target assemblies. 
+        conservation (float | None): Average fraction of identical bases between the marker and target assemblies. 
+        f_tar_hits (float | None): Fraction of target assemblies with a BLAST hit. 
+        divergence (float | None): Average fraction of mismatches and gaps between the marker and non-target assemblies. 
+        f_neg_hits (float | None): Fraction of non-target assemblies with a BLAST hit. 
+        avg_repeats_tar (float | None): Average number of repeats of this marker in target assemblies. 
+        avg_pident_tar (float | None): Average percentage of identical bases of all repeats in target assemblies. 
+        avg_repeats_neg (float | None): Average number of repeats of this marker in non-target assemblies. 
+        avg_pident_neg (float | None): Average percentage of identical bases of all repeats in non-target assemblies. 
     """
     conservation: float | None = None
     f_tar_hits: float | None = None
@@ -302,7 +302,7 @@ class ConnectedKmers(object):
     def __get_graph_order(graph: nx.Graph, rep_order: OrderedKmers, warnings: set) -> OrderedKmers | None:
         """Determine k-mer order in the subgraph. 
         1. Check if the subgraph is linear. Return None if not linear. 
-        2. If linear, determine its k-mer ordering and check if it has the same orientation with `rep_order`. 
+        2. If linear, determine its k-mer ordering and check if it has the same orientation as `rep_order`. 
 
         Args:
             graph (nx.Graph): See `ConnectedKmers.__init__()`. 
@@ -489,7 +489,7 @@ class ConnectedKmers(object):
 def _create_ck(
     graph: nx.Graph, nodes: tuple[np.uint64], kmers: tuple, idx: tuple, n_tar: int, kmerlen: int
 ) -> ConnectedKmers:
-    """Creates a ConnectedKmers instance by taking the outputs of `_get_create_ck_args()`. 
+    """Create a ConnectedKmers instance by taking the outputs of `_get_create_ck_args()`. 
     """
     # add hash and idx to each group
     kmers_df = list()
@@ -507,11 +507,12 @@ def _create_ck(
 def _get_create_ck_args(
     kg: KmerGraph, kmerlen: int, n_tar: int
 ) -> Generator[tuple[nx.Graph, pd.DataFrame, int], None, None]:
-    """Generates input arguments for `_create_ck()`. 
+    """Generate input arguments for `_create_ck()`. 
 
     Args:
-        kmers (KmerGraph): See `KmerGraph` in `kmers.py`. 
+        kg (KmerGraph): See `KmerGraph` in `kmers.py`. 
         kmerlen (int): See `Config` in `config.py`. 
+        n_tar (int): See `RunState` in `config.py`. 
 
     Yields:
         tuple: Input arguments of `_create_ck()`. 
@@ -598,7 +599,7 @@ def _get_cks(
     """
     1. Create a ConnectedKmers instance for each low-penalty subgraph of the k-mer graph (`KmerGraph.subgraphs`). 
     2. Remove instances that are shorter than min_len or have defects (`ConnectedKmers.is_bad`). 
-    3. Fetch the representative sequence for each remaining instances. 
+    3. Fetch the representative sequence for each remaining instance. 
 
     Args:
         kmers (KmerGraph): See `KmerGraph` in `kmers.py`. 
@@ -654,7 +655,7 @@ def _get_avg_ident(blast_out: pd.DataFrame, query_len: int, n: int) -> float:
         n (int): The number of subjects that are expected to include the query sequence. 
 
     Returns:
-        float:
+        float: Conservation. 
     """
     return sum(blast_out['nident']) / query_len / n
 
@@ -672,7 +673,7 @@ def _get_avg_dist(blast_out: pd.DataFrame, query_len: int, n: int) -> float:
         n (int): The number of subjects that are expected to include the query sequence. 
 
     Returns:
-        float:
+        float: Divergence. 
     """
     return sum(blast_out['mismatch'] + blast_out['gaps']) / query_len / n
 
@@ -686,20 +687,20 @@ def _get_metrics(
 
     Args:
         blast_out (pd.DataFrame): Each row is the best BLAST hit of the marker in an assembly. 
-            Required columns: ['is_target', 'nident', 'mismatch', 'gaps']
+            Required columns: ['is_target', 'nident', 'mismatch', 'gaps', 'n_hits', 'avg_nident']
         marker_len (int): Marker length. 
         n_tar (int): Number of target assemblies. 
         n_neg (int): Number of non-target assemblies. 
 
     Returns:
-        MarkerMetrics:
+        MarkerMetrics: Marker metrics. 
     """
     if blast_out is None: # no blast hit in any assembly
         return _BASELINE_METRICS
 
     metrics = asdict(_BASELINE_METRICS)
 
-    # calculate conservation
+    # calculate sensitivity
     df_tar = blast_out[blast_out['is_target'] == True]
     if len(df_tar) > 0:
         metrics['conservation'] = _get_avg_ident(df_tar, marker_len, n_tar)
@@ -707,7 +708,7 @@ def _get_metrics(
         metrics['avg_repeats_tar'] = df_tar['n_hits'].mean()
         metrics['avg_pident_tar'] = df_tar['avg_nident'].mean() / marker_len
 
-    # calculate divergence
+    # calculate specificity
     df_neg = blast_out[blast_out['is_target'] == False]
     if len(df_neg) > 0:
         metrics['divergence'] = _get_avg_dist(df_neg, marker_len, n_neg)
@@ -721,11 +722,11 @@ def _get_metrics(
 def eval_markers(
     all_seqs: list[str], blastdb: Path, n_tar: int, n_neg: int, n_cpu: int=1
 ) -> tuple[list[pd.DataFrame], list[MarkerMetrics]]:
-    """BLAST check each marker sequence against all / non-target assemblies, and calculate the metrics of each marker. 
+    """BLAST check each marker (signature) sequence against all / non-target assemblies, and calculate the metrics of each marker. 
 
     Args:
         all_seqs (list[str]): A list of marker sequences. 
-        blastdb (Path): Path to the BLAST database. 
+        blastdb (Path): Path to a BLAST database generated by Seqwin (e.g., `seqwin-out/blastdb/`). 
         n_tar (int): Number of target assemblies. 
         n_neg (int): Number of non-target assemblies. 
         n_cpu (int, optional): Number of threads to use. [1]
@@ -844,7 +845,7 @@ def _eval_cks(
 def get_markers(
     kmers: KmerGraph, assemblies: Assemblies, config: Config, state: RunState
 ) -> list[ConnectedKmers]:
-    """Extract candidate markers from a k-mer graph, and save them to files. 
+    """Extract candidate markers (signatures) from a k-mer graph, and save them to files. 
 
     Args:
         kmers (KmerGraph): See `KmerGraph` in `kmers.py`. 

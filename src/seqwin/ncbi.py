@@ -160,16 +160,16 @@ def get_assembly_paths(package_dir: Path) -> list[Path]:
 
 def download_taxon(
     taxon: str, 
-    prefix: Path=Path.cwd(), 
-    format: Format=Format.fasta, 
-    level: Level=Level.contig, 
-    source: Source=Source.genbank, 
-    annotated: bool=True, 
-    exclude_mag: bool=False, 
-    gzip: bool=True, 
-    api_key: str | None=None, 
-    overwrite: bool=False, 
-    n_cpu: int=1
+    prefix: Path = Path.cwd(), 
+    format: Format = Format.fasta, 
+    level: Level = Level.contig, 
+    source: Source = Source.genbank, 
+    annotated: bool = True, 
+    exclude_mag: bool = False, 
+    gzip: bool = True, 
+    api_key: str | None = None, 
+    overwrite: bool = False, 
+    n_cpu: int = 1
 ) -> list[Path] | None:
     """Download genome assemblies under a taxon from NCBI Taxonomy. Internet connection is needed. 
     Atypical genomes and genomes from large multi-isolate projects are excluded. 
@@ -183,6 +183,7 @@ def download_taxon(
         annotated (bool, optional): If True, limit to GenBank (submitter) or RefSeq annotated genomes, based on the selection of source. [True]
         exclude_mag (bool, optional): If True, exclude metagenome-assembled genomes (MAGs). [False]
         gzip (bool, optional): If True, download genome sequences in gzip format. [True]
+        api_key (str | None, optional): NCBI API key. [None]
         overwrite (bool, optional): If True, overwrite the zipped genome package. [False]
         n_cpu (int, optional): Number of processes to run in parallel. [1]
 
@@ -382,12 +383,12 @@ def _blast_batch(
 def blast(
     seq_list: Sequence[str], 
     db: Path, 
-    task: Task=Task.blastn, 
-    columns: Sequence[str] | None=None, 
-    taxids: Sequence[int] | None=None, 
-    neg_taxids: Sequence[int] | None=None, 
-    n_cpu: int=1, 
-    batch_size: int=1000
+    task: Task = Task.blastn, 
+    columns: Sequence[str] | None = None, 
+    taxids: Sequence[int] | None = None, 
+    neg_taxids: Sequence[int] | None = None, 
+    n_cpu: int = 1, 
+    batch_size: int = 1000
 ) -> pd.DataFrame:
     """Run BLAST on a list of sequences and return a DataFrame of the tabular output. 
     - -max_hsps is set to 1000. 
