@@ -38,11 +38,11 @@ _DIST_COL = ('ref', 'query', 'dist', 'pval', 'jaccard') # output columns of `mas
 
 def sketch(
     assembly_path: Path | Iterable[Path], 
-    kmerlen: int=21, 
-    sketchsize: int=1000, 
-    out_path: Path | None=None, 
-    overwrite: bool=False, 
-    n_cpu: int=1
+    kmerlen: int = 21, 
+    sketchsize: int = 1000, 
+    out_path: Path | None = None, 
+    overwrite: bool = False, 
+    n_cpu: int = 1
 ) -> Path:
     """Create a Mash / MinHash sketch for a single assembly, or a merged sketch for multiple assemblies. 
 
@@ -52,7 +52,7 @@ def sketch(
         sketchsize (int, optional): Sketch size (number of non-redundant k-mers). [1000]
         out_path (Path | None, optional): Output path for the sketch file. 
             If None, output to `assembly_path + '.msh'` or `assembly_path[0] + '.msh'`. [None]
-        overwrite(bool, optional): If True, overwrite the existing Mash sketch file. [False]
+        overwrite (bool, optional): If True, overwrite the existing Mash sketch file. [False]
         n_cpu (int, optional): Number of processes to run in parallel. [1]
 
     Returns:
@@ -105,8 +105,8 @@ def sketch(
 
 def dist(
     ref_path: Path, 
-    query_path: Path | None=None, 
-    n_cpu: int=1
+    query_path: Path | None = None, 
+    n_cpu: int = 1
 ) -> pd.DataFrame:
     """Run `mash dist {ref_path} {query_path}` and parse the TSV output as a pandas DataFrame. 
     Note: high memory usage when the number of assemblies in the sketch file is large. 
@@ -139,9 +139,9 @@ def dist(
 
 def get_jaccard(
     ref_path: Path, 
-    query_path: Path | None=None, 
-    n_cpu: int=1, 
-    bufsize: int=1_000_000
+    query_path: Path | None = None, 
+    n_cpu: int = 1, 
+    bufsize: int = 1_000_000
 ) -> Generator[float, None, None]:
     """Estimate the pairwise Jaccard index between (each assembly sketch in the query) 
     and (each assembly sketch in the reference), with `mash dist`. Use a stream pipe to save memory. 

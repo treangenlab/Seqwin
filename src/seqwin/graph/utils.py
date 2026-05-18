@@ -84,7 +84,7 @@ class WeightedGraph(Counter):
         )
 
     def to_nxGraph(self) -> nx.Graph:
-        """Convert to networkx.Graph (a undirected graph), with edge weights set as edge attribute EDGE_W. 
+        """Convert to networkx.Graph (undirected), with edge weights set as edge attribute EDGE_W. 
         """
         return nx.Graph((*edge, {EDGE_W: weight}) for edge, weight in self.items())
 
@@ -272,8 +272,8 @@ if _HAS_MPL:
         font_size: int=8, 
         seed: int=0
     ) -> None:
-        """Draw a networkx graph with edge attribute 'weight'. 
-        Code adopted from `networkx doc<https://networkx.org/documentation/stable/auto_examples/drawing/plot_weighted_graph.html>`__.
+        """Draw a NetworkX graph with edge attribute 'weight'. 
+        Code adapted from `networkx doc<https://networkx.org/documentation/stable/auto_examples/drawing/plot_weighted_graph.html>`__.
 
         Args:
             graph (nx.Graph): A weighted, undirected graph. 

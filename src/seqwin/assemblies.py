@@ -354,10 +354,10 @@ def _stream_to_stdin(queue: mp.Queue, n_items: int, proc_stdin: BufferedWriter) 
 
 def _load_seq(
     paths: list[Path], 
-    parser: Callable[[Path], tuple[dict[str, str], int]]=load_fasta, 
-    n_cpu: int=1
+    parser: Callable[[Path], tuple[dict[str, str], int]] = load_fasta, 
+    n_cpu: int = 1
 ) -> list[dict[str, str]]:
-    """Load assemblies sequences from files. 
+    """Deprecated. Load assembly sequences from files. 
 
     Args:
         paths (list[Path]): A list of paths to the assembly files. 
@@ -431,7 +431,7 @@ def _get_paths_dl(taxa_list: list[str], prefix: Path, config: Config) -> list[Pa
 
 
 def _get_paths_txt(paths_txt: Path) -> list[Path]:
-    """Load assembly paths from txt. 
+    """Load assembly paths from a text file. 
 
     Args:
         paths_txt (Path): See `tar_paths` and `neg_paths` in `Config` in `config.py`. 
@@ -445,7 +445,14 @@ def _get_paths_txt(paths_txt: Path) -> list[Path]:
 
 
 def _get_paths_dir(input_dir: Path) -> list[Path]:
-    """Load assembly paths from a directory (non-recursive)."""
+    """Load assembly paths from a directory (non-recursive). 
+
+    Args:
+        input_dir (Path): See `tar_dir` and `neg_dir` in `Config` in `config.py`. 
+
+    Returns:
+        list[Path]: Paths to assembly files. 
+    """
     paths = list()
 
     for p in sorted(input_dir.iterdir(), key=lambda x: x.name):
@@ -466,13 +473,13 @@ def _download(config: Config, working_dir: Path) -> tuple[list[Path], list[Path]
     """Download assemblies and return file paths. Return empty lists if nothing to download. 
 
     Args:
-        config (Config): See `Seqwin` in `main.py`. 
+        config (Config): See `Config` in `config.py`. 
         working_dir (Path): See `RunState` in `config.py`. 
 
     Returns:
         tuple: A tuple containing
             1. list[Path]: Paths to downloaded target assemblies. 
-            1. list[Path]: Paths to downloaded non-target assemblies. 
+            2. list[Path]: Paths to downloaded non-target assemblies. 
     """
     tar_taxa = config.tar_taxa
     neg_taxa = config.neg_taxa
@@ -507,11 +514,12 @@ def _download(config: Config, working_dir: Path) -> tuple[list[Path], list[Path]
 
 
 def get_assemblies(config: Config, state: RunState) -> Assemblies:
-    """Load assembly paths and build a BLAST database. 
+    """Load assembly paths and package them in an Assemblies instance. 
+    If taxonomy names are provided, download the genome FASTA files from NCBI. 
 
     Args:
-        config (Config): See `Seqwin` in `main.py`. 
-        state (RunState): See `Seqwin` in `main.py`. 
+        config (Config): See `Config` in `config.py`. 
+        state (RunState): See `RunState` in `config.py`. 
 
     Returns:
         Assemblies: The Assemblies instance. 

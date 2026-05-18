@@ -2,12 +2,11 @@
 K-mer Graph
 ===========
 
-A core module of Seqwin. Create an k-mer graph from k-mers of all input genome assemblies. 
+A core module of Seqwin. Create a k-mer graph from k-mers of all input genome assemblies. 
 
 Dependencies:
 -------------
 - numpy
-- numba
 - networkx
 - .graph
 - .assemblies
@@ -36,11 +35,10 @@ logger = logging.getLogger(__name__)
 import numpy as np
 import networkx as nx
 from numpy.typing import NDArray
-from numba import set_num_threads
 
+from .graph import build
 from .assemblies import Assemblies
 from .helpers import get_subgraphs, filter_kmers
-from .graph import build
 from .utils import print_time_delta, log_and_raise
 from .config import Config, RunState, HAS_MASH, WORKINGDIR, EDGE_W, NODE_P
 
@@ -51,10 +49,13 @@ class KmerGraph(object):
     2. Extract low-penalty subgraphs from the k-mer graph with `self.filter()`. 
 
     Attributes:
-        kmers (NDArray): A 1-D Numpy structured array of k-mers from all assemblies, with dtype `KMER_DTYPE` defined in `seqwin.graph`. 
+        kmers (NDArray): A 1-D NumPy structured array of k-mers from all assemblies, with dtype `KMER_DTYPE` defined in `seqwin.graph`. 
+            Grouped and sorted by k-mer hashes. 
         idx (NDArray | None): The original indices assigned when k-mers are generated (k-mers with consecutive indices are adjacent in the genome). 
-        nodes (NDArray): A 1-D Numpy structured array of k-mer nodes, with dtype `NODE_DTYPE` defined in `seqwin.graph`. 
-        edges (NDArray): A 3-column Numpy array of weighted, undirected edges (u, v, w). 
+            Parallel to `kmers`. 
+        nodes (NDArray): A 1-D NumPy structured array of k-mer nodes, with dtype `NODE_DTYPE` defined in `seqwin.graph`. 
+            For each node, `kmers[node['start']:node['stop']]` is the k-mer group with `node['hash']`. 
+        edges (NDArray): A 3-column NumPy array of weighted, undirected edges (u, v, w). 
             Edge weight is the number of assemblies where the two k-mers are adjacent. 
         graph (nx.Graph): The graph instance built from filtered nodes and edges. 
         subgraphs (tuple[frozenset[np.uint64], ...] | None): Low-penalty subgraphs. Each subgraph is a set of k-mer hash values. 
@@ -264,8 +265,6 @@ def get_kmers(
     rng = state.rng
     n_tar = state.n_tar
     n_neg = state.n_neg
-
-    set_num_threads(n_cpu) # limit the number of threads to use for numba
 
     kmers = KmerGraph(assemblies, kmerlen, windowsize, n_cpu)
 
