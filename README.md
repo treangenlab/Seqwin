@@ -92,7 +92,7 @@ python run_example.py
 
 Expected runtime (with `--threads 8` or `-p 8`): 
 - ~5 min and 2.5 GB peak RAM for ~500 bacterial genomes with default settings. 
-- ~5 min and 23 GB peak RAM for ~15k bacterial genomes with `--no-blast` and `--no-mash`. 
+- ~4.5 min and 17.5 GB peak RAM for ~15k bacterial genomes with `--no-blast` and `--no-mash`. 
 
 Run `seqwin --help` or `seqwin -h` to see the full command line interface. 
 
