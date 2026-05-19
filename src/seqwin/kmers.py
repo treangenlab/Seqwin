@@ -36,9 +36,9 @@ import numpy as np
 import networkx as nx
 from numpy.typing import NDArray
 
-from .graph import build
+from .graph import build, _filter_kmers
 from .assemblies import Assemblies
-from .helpers import get_subgraphs, filter_kmers
+from .helpers import get_subgraphs
 from .utils import print_time_delta, log_and_raise
 from .config import Config, RunState, HAS_MASH, WORKINGDIR, EDGE_W, NODE_P
 
@@ -155,10 +155,12 @@ class KmerGraph(object):
         nodes, edges, graph = KmerGraph.__filter_graph(nodes, edges, edge_weight_th)
 
         # get low-penalty subgraphs
-        subgraphs, used = get_subgraphs(graph, penalty_th, min_nodes, max_nodes, rng)
+        subgraphs, used_hashes = get_subgraphs(graph, penalty_th, min_nodes, max_nodes, rng)
 
         # remove unused k-mers
-        kmers, idx, nodes = filter_kmers(kmers, idx, nodes, used)
+        logger.info(' - Removing k-mers not included in any of the subgraphs...')
+        kmers, idx, nodes = _filter_kmers(kmers, idx, nodes, used_hashes)
+        logger.info(f' - {len(kmers)} k-mers left')
 
         print_time_delta(time()-tik)
         self.kmers = kmers

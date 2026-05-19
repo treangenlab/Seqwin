@@ -1,6 +1,6 @@
 import numpy as np
 
-from seqwin.graph import KMER_DTYPE, NODE_DTYPE, build
+from seqwin.graph import KMER_DTYPE, NODE_DTYPE, build, _filter_kmers
 
 
 def _sorted_edges(edges: np.ndarray) -> np.ndarray:
@@ -101,3 +101,38 @@ def test_build_threading_equivalence(targets_dir, non_targets_dir) -> None:
 
     assert np.array_equal(_sorted_edges(edges_1), _sorted_edges(edges_2))
     assert np.array_equal(_sorted_edges(edges_1), _sorted_edges(edges_many))
+
+
+def test_filter_kmers() -> None:
+    kmers = np.array([
+        (10, 0, 0),
+        (11, 0, 0),
+        (20, 0, 1),
+        (30, 1, 1),
+        (31, 1, 1),
+        (32, 1, 1),
+    ], dtype=KMER_DTYPE)
+    idx = np.array([100, 101, 200, 300, 301, 302], dtype=np.uint64)
+    nodes = np.array([
+        (10, 1, 0, 0.1, 0, 2),
+        (20, 1, 0, 0.2, 2, 3),
+        (30, 1, 1, 0.3, 3, 6),
+    ], dtype=NODE_DTYPE)
+
+    kmers_new, idx_new, nodes_new = _filter_kmers(kmers, idx, nodes, {30, 10})
+
+    assert np.array_equal(nodes_new['hash'], np.array([10, 30], dtype=np.uint64))
+    assert np.array_equal(nodes_new['start'], np.array([0, 2], dtype=np.uint64))
+    assert np.array_equal(nodes_new['stop'], np.array([2, 5], dtype=np.uint64))
+
+    expected_kmers = np.array([
+        (10, 0, 0),
+        (11, 0, 0),
+        (30, 1, 1),
+        (31, 1, 1),
+        (32, 1, 1),
+    ], dtype=KMER_DTYPE)
+    expected_idx = np.array([100, 101, 300, 301, 302], dtype=np.uint64)
+
+    assert np.array_equal(kmers_new, expected_kmers)
+    assert np.array_equal(idx_new, expected_idx)

@@ -40,7 +40,7 @@ from collections.abc import Iterable
 import numpy as np
 from numpy.typing import NDArray
 
-from ._core import _build_native
+from ._core import _build_native, _filter_kmers_native
 
 from .utils import OrderedKmers
 
@@ -48,7 +48,7 @@ from .utils import OrderedKmers
 KMER_DTYPE = np.dtype([
     ('pos', np.uint32), 
     ('record_idx', np.uint16), 
-    ('assembly_idx', np.uint16), 
+    ('assembly_idx', np.uint16)
 ])
 
 NODE_DTYPE = np.dtype([
@@ -57,7 +57,7 @@ NODE_DTYPE = np.dtype([
     ('n_neg', np.uint32), 
     ('penalty', np.float64), 
     ('start', np.uint64), 
-    ('stop', np.uint64), 
+    ('stop', np.uint64)
 ])
 
 
@@ -114,3 +114,32 @@ def build(
         int(n_cpu)
     )
     return kmers, idx, nodes, edges, idx_to_id
+
+
+def _filter_kmers(
+    kmers: NDArray[np.void], 
+    idx: NDArray[np.uint64], 
+    nodes: NDArray[np.void], 
+    used_hashes: frozenset[np.uint64]
+) -> tuple[
+    NDArray[np.void], 
+    NDArray[np.uint64], 
+    NDArray[np.void]
+]:
+    """
+    1. Remove k-mers (`kmers`, `idx` and `nodes`) not included in `used_hashes`. 
+    2. Update 'start' and 'stop' in nodes. 
+
+    Args:
+        kmers (NDArray): See `KmerGraph.kmers` (already sorted by 'hash'). 
+        idx (NDArray): See `KmerGraph.idx`. 
+        nodes (NDArray): See `KmerGraph.nodes` (sorted by 'hash'). 
+        used_hashes (frozenset[np.uint64]): K-mers and nodes with these hash values are kept. 
+
+    Returns:
+        tuple: A tuple containing
+            1. NDArray: See `KmerGraph.kmers`. 
+            2. NDArray: See `KmerGraph.idx`. 
+            3. NDArray: See `KmerGraph.nodes`. 
+    """
+    return _filter_kmers_native(kmers, idx, nodes, used_hashes)
