@@ -491,6 +491,7 @@ def most_common_weighted(iterable: Iterable):
 
 def load_paths_txt(paths_txt: Path) -> list[Path]:
     """Load file paths from a text file, with one path per line. 
+    Relative paths are resolved relative to the directory containing `paths_txt`. 
 
     Args:
         paths_txt (Path): A text file with one path per line. 
@@ -498,15 +499,26 @@ def load_paths_txt(paths_txt: Path) -> list[Path]:
     Returns:
         list[Path]: A list of valid and resolved file paths. 
     """
+    paths_txt = paths_txt.resolve(strict=True)
+    base_dir = paths_txt.parent
+
     paths_list = list()
     for path in paths_txt.read_text().splitlines():
-        path = Path(path.strip())
+        path = path.strip()
+        if not path:
+            continue
+
+        path = Path(path)
+        if not path.is_absolute():
+            path = base_dir / path
+
         if path.is_file():
             paths_list.append(path.resolve(strict=True))
         elif path.is_dir():
             logger.error(f' - This is a directory, skipped: {path}')
         else:
             logger.error(f' - File not found, skipped: {path}')
+
     return paths_list
 
 
