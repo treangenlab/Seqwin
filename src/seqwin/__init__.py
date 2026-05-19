@@ -20,7 +20,6 @@ Dependencies:
 -------------
 - python >=3.10
 - numpy >=2
-- numba
 - pandas >=2
 - networkx
 - pydantic

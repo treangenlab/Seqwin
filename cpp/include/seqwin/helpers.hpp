@@ -35,6 +35,12 @@ struct ThreadResult {
     std::size_t start_assembly = 0;
 };
 
+struct FilterResult {
+    std::vector<Kmer> kmers;
+    std::vector<std::uint64_t> idx;
+    std::vector<Node> nodes;
+};
+
 void log_python(
     const std::string& message,
     const std::string& level = "info"
@@ -44,6 +50,14 @@ BuildResult merge_thread_results(
     std::vector<ThreadResult>& results,
     std::size_t n_assemblies,
     ThreadPool& pool
+);
+
+FilterResult filter_kmers(
+    const Kmer* kmers,
+    const std::uint64_t* idx,
+    const Node* nodes,
+    std::size_t n_nodes,
+    std::vector<std::uint64_t> used_hashes
 );
 
 } // namespace seqwin

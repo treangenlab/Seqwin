@@ -347,4 +347,54 @@ BuildResult merge_thread_results(
     };
 }
 
+FilterResult filter_kmers(
+    const Kmer* kmers,
+    const std::uint64_t* idx,
+    const Node* nodes,
+    std::size_t n_nodes,
+    std::vector<std::uint64_t> used_hashes
+) {
+    std::sort(used_hashes.begin(), used_hashes.end());
+
+    FilterResult result;
+    result.nodes.reserve(used_hashes.size());
+
+    std::size_t node_i = 0;
+    std::size_t used_i = 0;
+    std::uint64_t new_start = 0;
+
+    while (node_i < n_nodes && used_i < used_hashes.size()) {
+        const auto node_hash = nodes[node_i].hash;
+        const auto used_hash = used_hashes[used_i];
+
+        if (node_hash < used_hash) {
+            ++node_i;
+            continue;
+        }
+        if (used_hash < node_hash) {
+            ++used_i;
+            continue;
+        }
+
+        const Node& old_node = nodes[node_i];
+        const auto old_start = old_node.start;
+        const auto old_stop = old_node.stop;
+        const auto size = old_stop - old_start;
+
+        Node new_node = old_node;
+        new_node.start = new_start;
+        new_node.stop = new_start + size;
+        result.nodes.push_back(new_node);
+
+        result.kmers.insert(result.kmers.end(), kmers + old_start, kmers + old_stop);
+        result.idx.insert(result.idx.end(), idx + old_start, idx + old_stop);
+
+        new_start += size;
+        ++node_i;
+        ++used_i;
+    }
+
+    return result;
+}
+
 } // namespace seqwin
