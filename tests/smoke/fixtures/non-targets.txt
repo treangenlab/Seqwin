@@ -1,2 +1,2 @@
-tests/smoke/fixtures/non-targets/non-target-1.fasta
-tests/smoke/fixtures/non-targets/non-target-2.fasta
+non-targets/non-target-1.fasta
+non-targets/non-target-2.fasta
