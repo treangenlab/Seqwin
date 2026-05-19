@@ -98,6 +98,8 @@ jobs:
             runner: macos-15
           - name: windows-x64
             runner: windows-2025
+          - name: windows-arm64
+            runner: windows-11-arm
 
     steps:
       - uses: actions/checkout@v5
@@ -113,7 +115,7 @@ jobs:
         env:
           CIBW_BUILD: 'cp310-* cp311-* cp312-* cp313-* cp314-*'
           CIBW_SKIP: 'cp3??t-* *-musllinux_*'
-          CIBW_ARCHS_WINDOWS: AMD64
+          CIBW_ARCHS_WINDOWS: auto64
           CIBW_ENVIRONMENT_MACOS: MACOSX_DEPLOYMENT_TARGET=10.15
           CIBW_TEST_REQUIRES: pytest
           CIBW_TEST_COMMAND: >

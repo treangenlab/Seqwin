@@ -45,7 +45,7 @@ seqwin --help
 ```
 
 ### PyPI
-Works on Windows (x64), Linux (x64 / arm64), and macOS (Intel / Apple Silicon). Requires Python 3.10+. 
+Works on Windows (x64 / arm64), Linux (x64 / arm64), and macOS (Intel / Apple Silicon). Requires Python 3.10+. 
 
 **1. Install Seqwin from PyPI**
 ```bash
