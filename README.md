@@ -50,7 +50,7 @@ Works on Windows (x64), Linux (x64 / arm64), and macOS (Intel / Apple Silicon). 
 **1. Install Seqwin from PyPI**
 ```bash
 python -m pip install --upgrade pip
-python -m pip install --prefer-binary seqwin
+python -m pip install seqwin
 seqwin --help
 ```
 

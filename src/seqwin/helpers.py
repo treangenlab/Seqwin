@@ -7,16 +7,13 @@ Helper functions for `kmers.py`.
 Dependencies:
 -------------
 - numpy
-- numba
 - networkx
-- .graph
 - .utils
 - .config
 
 Functions:
 ----------
 - get_subgraphs
-- filter_kmers
 """
 
 __author__ = 'Michael X. Wang'
@@ -30,8 +27,6 @@ logger = logging.getLogger(__name__)
 
 import numpy as np
 import networkx as nx
-from numpy.typing import NDArray
-from numba import njit
 
 from .utils import log_and_raise
 from .config import NODE_P
@@ -174,73 +169,3 @@ def get_subgraphs(
     rng.shuffle(subgraphs)
 
     return tuple(frozenset(sg) for sg in subgraphs), frozenset(used)
-
-
-@njit(nogil=True, cache=True)
-def _copy_blocks(arr_old: NDArray, arr_new: NDArray, starts: NDArray, sizes: NDArray) -> None:
-    """Copy contiguous blocks from an old array to a new array. 
-
-    Args:
-        arr_old (NDArray): The old array. 
-        arr_new (NDArray): The new array. 
-        starts (NDArray): Start position of each block in the old array. 
-        sizes (NDArray): Size of each block. 
-    """
-    ptr_new = 0
-    for i in range(len(starts)):
-        # iterate through each block
-        ptr_old = starts[i]
-        s = sizes[i]
-        arr_new[ptr_new : ptr_new + s] = arr_old[ptr_old : ptr_old + s]
-        ptr_new += s
-
-
-def filter_kmers(
-    kmers: NDArray, idx: NDArray, nodes: NDArray, used: frozenset[int]
-) -> tuple[NDArray, NDArray, NDArray]:
-    """
-    1. Remove k-mers (`kmers`, `idx` and `nodes`) not included in `used`. 
-    2. Update 'start' and 'stop' in nodes. 
-
-    Args:
-        kmers (NDArray): See `KmerGraph.kmers` (already sorted by 'hash'). 
-        idx (NDArray): See `KmerGraph.idx`. 
-        nodes (NDArray): See `KmerGraph.nodes` (sorted by 'hash'). 
-        used (frozenset[int]): Output of `get_subgraphs()`. 
-
-    Returns:
-        tuple: A tuple containing
-            1. NDArray: See `KmerGraph.kmers`. 
-            2. NDArray: See `KmerGraph.idx`. 
-            3. NDArray: See `KmerGraph.nodes`. 
-    """
-    logger.info(' - Removing k-mers not included in any of the subgraphs...')
-    hashes = nodes['hash']
-
-    # select used nodes
-    used_arr = np.fromiter(used, dtype=hashes.dtype, count=len(used))
-    used_arr.sort()
-    nodes = nodes[
-        # used_arr is sorted to preserve node order
-        np.searchsorted(hashes, used_arr)
-    ]
-    starts_old = nodes['start'].copy()
-
-    # update start and stop in nodes
-    sizes = nodes['stop'] - nodes['start'] # group size
-    starts = np.empty(len(nodes), dtype=hashes.dtype)
-    starts[0] = 0
-    if len(nodes) > 1:
-        starts[1:] = np.cumsum(sizes)[:-1]
-    nodes['start'] = starts
-    nodes['stop'] = starts + sizes
-
-    # copy used k-mers
-    total = nodes['stop'][-1]
-    kmers_new = np.empty(total, dtype=kmers.dtype)
-    _copy_blocks(kmers, kmers_new, starts_old, sizes)
-    idx_new = np.empty(total, dtype=idx.dtype)
-    _copy_blocks(idx, idx_new, starts_old, sizes)
-
-    logger.info(f' - {len(kmers_new)} k-mers left')
-    return kmers_new, idx_new, nodes
