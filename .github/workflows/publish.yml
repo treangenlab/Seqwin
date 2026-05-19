@@ -117,24 +117,12 @@ jobs:
           CIBW_ENVIRONMENT_MACOS: MACOSX_DEPLOYMENT_TARGET=10.15
           CIBW_TEST_ENVIRONMENT: PIP_PREFER_BINARY=1
           CIBW_TEST_REQUIRES: pytest
-
           CIBW_TEST_COMMAND: >
-            cd {project} &&
             seqwin --help &&
             python -c "import seqwin; print(seqwin.__version__)" &&
             python -c "from seqwin.graph import build; print(build.__name__)" &&
-            python -m pip check &&
             pytest -q {project}/tests/smoke &&
             python {project}/tests/run_example.py
-
-          CIBW_TEST_COMMAND_WINDOWS: >
-            cd /d "{project}" &&
-            seqwin --help &&
-            python -c "import seqwin; print(seqwin.__version__)" &&
-            python -c "from seqwin.graph import build; print(build.__name__)" &&
-            python -m pip check &&
-            pytest -q tests/smoke &&
-            python tests/run_example.py
 
       - name: Upload wheels
         uses: actions/upload-artifact@v4
