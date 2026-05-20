@@ -138,35 +138,68 @@ static std::vector<Node> merge_nodes(
     std::vector<ThreadNode>().swap(buf);
     std::vector<std::uint64_t>().swap(counts);
 
+    // Aggregate nodes and keep idx ranges
     std::vector<Node> out;
     out.reserve(n_nodes);
 
+    struct IdxSegment {
+        std::size_t thread_id;
+        std::size_t local_start;
+        std::size_t out_start;
+        std::size_t length;
+    };
+    std::vector<IdxSegment> idx_segments;
+    idx_segments.reserve(n_nodes);
+
+    std::uint64_t n_kmers = 0;
     std::size_t i = 0;
     while (i < n_nodes) {
         const auto hash = (*src)[i].hash;
         std::uint32_t n_tar = 0;
         std::uint32_t n_neg = 0;
-        const auto start = static_cast<std::uint64_t>(idx.size());
+        const auto start = n_kmers;
 
         while (i < n_nodes && (*src)[i].hash == hash) {
             n_tar += (*src)[i].n_tar;
             n_neg += (*src)[i].n_neg;
 
-            const auto thread_id = static_cast<std::size_t>((*src)[i].thread_id);
-            const auto local_start = static_cast<std::size_t>((*src)[i].start);
-            const auto local_stop = static_cast<std::size_t>((*src)[i].stop);
-            const auto offset = kmer_offsets[thread_id];
-            const auto& local_idx = results[thread_id].idx;
+            const auto local_start = (*src)[i].start;
+            const auto local_stop = (*src)[i].stop;
+            const auto length = local_stop - local_start;
 
-            for (std::size_t j = local_start; j < local_stop; ++j) {
-                idx.push_back(local_idx[j] + offset);
+            if (length != 0) {
+                idx_segments.push_back(IdxSegment{
+                    static_cast<std::size_t>((*src)[i].thread_id),
+                    static_cast<std::size_t>(local_start),
+                    static_cast<std::size_t>(n_kmers),
+                    static_cast<std::size_t>(length)
+                });
+                n_kmers += length;
             }
             ++i;
         }
 
-        const auto stop = static_cast<std::uint64_t>(idx.size());
+        const auto stop = n_kmers;
         out.push_back(Node{hash, n_tar, n_neg, 0.0, start, stop});
     }
+
+    // Build the final idx array in parallel
+    idx.resize(static_cast<std::size_t>(n_kmers));
+    pool.parallel_for(idx_segments.size(), [&](std::size_t start, std::size_t end, std::size_t) {
+        for (std::size_t s = start; s < end; ++s) {
+            const auto& segment = idx_segments[s];
+            const auto offset = kmer_offsets[segment.thread_id];
+            const auto& local_idx = results[segment.thread_id].idx;
+
+            const auto local_start = segment.local_start;
+            const auto out_start = segment.out_start;
+            const auto length = segment.length;
+
+            for (std::size_t k = 0; k < length; ++k) {
+                idx[out_start + k] = local_idx[local_start + k] + offset;
+            }
+        }
+    });
 
     for (auto& result : results) {
         std::vector<std::uint64_t>().swap(result.idx);
