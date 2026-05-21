@@ -31,7 +31,7 @@ struct ThreadResult {
     std::vector<ThreadNode> nodes; // Unsorted; start and stop point to k-mer groups in idx
     std::vector<std::uint64_t> edges;
     std::vector<std::vector<std::string>> ids_by_assembly;
-    std::uint64_t n_kmers = 0;
+    std::size_t n_kmers = 0;
     std::size_t start_assembly = 0;
 };
 

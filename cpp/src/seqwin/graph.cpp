@@ -148,7 +148,7 @@ ThreadResult build_worker(
         }
     }
 
-    result.idx.resize(static_cast<std::size_t>(result.n_kmers));
+    result.idx.resize(result.n_kmers);
     std::uint64_t cursor = 0;
     for (auto& [hash, state] : node_map) {
         (void)hash;
