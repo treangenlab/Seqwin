@@ -54,9 +54,9 @@ std::vector<T> concat(std::vector<ThreadResult>& results, MemberPtr member, Thre
     return out;
 }
 
-std::vector<ThreadNode> concat_nodes(std::vector<ThreadResult>& results, ThreadPool& pool)
+std::vector<Node> concat_nodes(std::vector<ThreadResult>& results, ThreadPool& pool)
 {
-    return concat<ThreadNode>(results, &ThreadResult::nodes, pool);
+    return concat<Node>(results, &ThreadResult::nodes, pool);
 }
 
 std::vector<std::uint64_t> concat_edges(std::vector<ThreadResult>& results, ThreadPool& pool)
@@ -68,7 +68,7 @@ std::vector<std::uint64_t> concat_edges(std::vector<ThreadResult>& results, Thre
 // 2. Merge nodes with the same hash
 // 3. Build segment metadata for final materialization
 static std::pair<std::vector<Node>, std::vector<IdxSegment>> merge_nodes(
-    std::vector<ThreadNode>& nodes,
+    std::vector<Node>& nodes,
     ThreadPool& pool
 ) {
     const std::size_t n_nodes = nodes.size();
@@ -76,7 +76,7 @@ static std::pair<std::vector<Node>, std::vector<IdxSegment>> merge_nodes(
         return {{}, {}};
     }
 
-    std::vector<ThreadNode> buf(nodes.size());
+    std::vector<Node> buf(nodes.size());
     auto* src = &nodes;
     auto* dst = &buf;
     std::vector<std::uint64_t> counts(pool.size() * 65536);
@@ -115,12 +115,11 @@ static std::pair<std::vector<Node>, std::vector<IdxSegment>> merge_nodes(
     }
 
     // Aggregate nodes and keep idx ranges
-    std::vector<Node> out;
-    out.reserve(n_nodes);
     std::vector<IdxSegment> idx_segments;
     idx_segments.reserve(n_nodes);
 
     std::uint64_t n_kmers = 0;
+    std::size_t write_i = 0;
     std::size_t i = 0;
     while (i < n_nodes) {
         const auto hash = (*src)[i].hash;
@@ -138,7 +137,7 @@ static std::pair<std::vector<Node>, std::vector<IdxSegment>> merge_nodes(
 
             if (length != 0) {
                 idx_segments.push_back(IdxSegment{
-                    static_cast<std::size_t>((*src)[i].thread_id),
+                    static_cast<std::size_t>((*src)[i].penalty), // thread_id
                     static_cast<std::size_t>(local_start),
                     static_cast<std::size_t>(n_kmers),
                     static_cast<std::size_t>(length)
@@ -149,10 +148,10 @@ static std::pair<std::vector<Node>, std::vector<IdxSegment>> merge_nodes(
         }
 
         const auto stop = n_kmers;
-        out.push_back(Node{hash, n_tar, n_neg, 0.0, start, stop});
+        nodes[write_i++] = Node{hash, start, stop, n_tar, n_neg, 0.0};
     }
-
-    return {std::move(out), std::move(idx_segments)};
+    nodes.resize(write_i);
+    return {std::move(nodes), std::move(idx_segments)};
 }
 
 static std::vector<Kmer> merge_kmers(
@@ -315,7 +314,7 @@ BuildResult merge_thread_results(
         auto& result = results[0];
 
         auto [nodes, idx_segments] = merge_nodes(result.nodes, pool);
-        std::vector<ThreadNode>().swap(result.nodes);
+        std::vector<Node>().swap(result.nodes);
 
         auto kmers = merge_kmers(
             idx_segments,
@@ -352,7 +351,7 @@ BuildResult merge_thread_results(
 
     auto nodes_raw = concat_nodes(results, pool);
     auto [nodes, idx_segments] = merge_nodes(nodes_raw, pool);
-    std::vector<ThreadNode>().swap(nodes_raw);
+    std::vector<Node>().swap(nodes_raw);
 
     std::vector<std::uint64_t> kmer_offsets(results.size());
     std::uint64_t total_kmers = 0;

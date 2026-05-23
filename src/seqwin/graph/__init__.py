@@ -44,7 +44,6 @@ from ._core import _build_native, _filter_kmers_native
 
 from .utils import OrderedKmers
 
-
 KMER_DTYPE = np.dtype([
     ('pos', np.uint32), 
     ('record_idx', np.uint16), 
@@ -53,16 +52,16 @@ KMER_DTYPE = np.dtype([
 
 NODE_DTYPE = np.dtype([
     ('hash', np.uint64), 
+    ('start', np.uint64), 
+    ('stop', np.uint64), 
     ('n_tar', np.uint32), 
     ('n_neg', np.uint32), 
-    ('penalty', np.float64), 
-    ('start', np.uint64), 
-    ('stop', np.uint64)
+    ('penalty', np.float64)
 ])
 
 
 def build(
-    assembly_paths: Iterable[Path],  
+    assembly_paths: Iterable[Path], 
     kmerlen: int, 
     windowsize: int, 
     assembly_idx: Iterable[int], 

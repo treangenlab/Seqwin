@@ -15,11 +15,11 @@ struct Kmer {
 
 struct Node {
     std::uint64_t hash;
-    std::uint32_t n_tar;
-    std::uint32_t n_neg;
-    double penalty;
     std::uint64_t start;
     std::uint64_t stop;
+    std::uint32_t n_tar;
+    std::uint32_t n_neg;
+    double penalty; // Used as thread_id before merging from different threads
 };
 
 struct BuildResult {

@@ -18,12 +18,12 @@ namespace seqwin {
 namespace {
 
 struct NodeState {
-    std::uint32_t n_tar;
-    std::uint32_t n_neg;
-    std::size_t last_seen_assembly;
-    std::uint64_t start = 0;
     std::uint64_t count = 0;
+    std::uint64_t start = 0;
     std::uint64_t cursor = 0;
+    std::uint32_t n_tar = 0;
+    std::uint32_t n_neg = 0;
+    std::size_t last_seen_assembly = std::numeric_limits<std::size_t>::max();
 };
 
 using EdgeKey = std::pair<std::uint64_t, std::uint64_t>;
@@ -105,15 +105,9 @@ ThreadResult build_worker(
                 });
                 hashes.push_back(m.out_hash);
 
-                auto [node_it, node_inserted] = node_map.try_emplace(
-                    m.out_hash,
-                    NodeState{
-                        is_target ? std::uint32_t{1} : std::uint32_t{0},
-                        is_target ? std::uint32_t{0} : std::uint32_t{1},
-                        assembly_i, 0, 0, 0
-                    }
-                );
-                if (!node_inserted && node_it->second.last_seen_assembly != assembly_i) {
+                auto [node_it, node_inserted] = node_map.try_emplace(m.out_hash);
+                ++(node_it->second.count);
+                if (node_inserted || node_it->second.last_seen_assembly != assembly_i) {
                     if (is_target) {
                         ++(node_it->second.n_tar);
                     } else {
@@ -121,7 +115,6 @@ ThreadResult build_worker(
                     }
                     node_it->second.last_seen_assembly = assembly_i;
                 }
-                ++(node_it->second.count);
                 ++result.n_kmers;
             }
 
@@ -166,13 +159,13 @@ ThreadResult build_worker(
     std::size_t node_i = 0;
     for (const auto& [hash, state] : node_map) {
         const auto stop = state.start + state.count;
-        result.nodes[node_i++] = ThreadNode{
+        result.nodes[node_i++] = Node{
             hash,
+            state.start,
+            stop,
             state.n_tar,
             state.n_neg,
-            static_cast<std::uint64_t>(thread_id),
-            state.start,
-            stop
+            static_cast<double>(thread_id) // Use the penalty field to store thread_id
         };
     }
 

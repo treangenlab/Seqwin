@@ -16,19 +16,10 @@ namespace seqwin {
  */
 class ThreadPool;
 
-struct ThreadNode {
-    std::uint64_t hash;
-    std::uint32_t n_tar;
-    std::uint32_t n_neg;
-    std::uint64_t thread_id;
-    std::uint64_t start;
-    std::uint64_t stop;
-};
-
 struct ThreadResult {
     std::vector<Kmer> kmers; // Ordered by genomic positions (the original order)
     std::vector<std::uint64_t> idx; // Original k-mer indices, grouped by hash
-    std::vector<ThreadNode> nodes; // Unsorted; start and stop point to k-mer groups in idx
+    std::vector<Node> nodes; // Unsorted; start and stop point to k-mer groups in idx
     std::vector<std::uint64_t> edges;
     std::vector<std::vector<std::string>> ids_by_assembly;
     std::size_t n_kmers = 0;

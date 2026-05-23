@@ -28,6 +28,7 @@ def test_dtype_layouts() -> None:
     assert KMER_DTYPE.names == ('pos', 'record_idx', 'assembly_idx')
     assert KMER_DTYPE['assembly_idx'] == np.dtype(np.uint16)
 
+    assert NODE_DTYPE.names == ('hash', 'start', 'stop', 'n_tar', 'n_neg', 'penalty')
     assert NODE_DTYPE["n_tar"] == np.dtype(np.uint32)
     assert NODE_DTYPE["n_neg"] == np.dtype(np.uint32)
     assert NODE_DTYPE.itemsize == 40
@@ -114,9 +115,9 @@ def test_filter_kmers() -> None:
     ], dtype=KMER_DTYPE)
     idx = np.array([100, 101, 200, 300, 301, 302], dtype=np.uint64)
     nodes = np.array([
-        (10, 1, 0, 0.1, 0, 2),
-        (20, 1, 0, 0.2, 2, 3),
-        (30, 1, 1, 0.3, 3, 6),
+        (10, 0, 2, 1, 0, 0.1),
+        (20, 2, 3, 1, 0, 0.2),
+        (30, 3, 6, 1, 1, 0.3),
     ], dtype=NODE_DTYPE)
 
     kmers_new, idx_new, nodes_new = _filter_kmers(kmers, idx, nodes, {30, 10})

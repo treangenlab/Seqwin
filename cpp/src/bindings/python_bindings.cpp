@@ -14,7 +14,7 @@ namespace py = pybind11;
 
 PYBIND11_MODULE(_core, m) {
     PYBIND11_NUMPY_DTYPE(seqwin::Kmer, pos, record_idx, assembly_idx);
-    PYBIND11_NUMPY_DTYPE(seqwin::Node, hash, n_tar, n_neg, penalty, start, stop);
+    PYBIND11_NUMPY_DTYPE(seqwin::Node, hash, start, stop, n_tar, n_neg, penalty);
 
     m.doc() = "Seqwin minimizer graph bindings";
 
