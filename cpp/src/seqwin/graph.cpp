@@ -51,19 +51,22 @@ ThreadResult build_worker(
     std::size_t end_assembly,
     std::size_t thread_id
 ) {
-    ThreadResult result;
-    result.start_assembly = start_assembly;
-    result.kmers.reserve(
-        seqwin::est_kmer_number(
-            std::vector<std::string>(
-                assembly_paths.begin() + static_cast<std::ptrdiff_t>(start_assembly),
-                assembly_paths.begin() + static_cast<std::ptrdiff_t>(end_assembly)
-            ),
-            windowsize
-        )
+    const auto n_kmers_est = seqwin::est_kmer_number(
+        std::vector<std::string>(
+            assembly_paths.begin() + static_cast<std::ptrdiff_t>(start_assembly),
+            assembly_paths.begin() + static_cast<std::ptrdiff_t>(end_assembly)
+        ),
+        windowsize
     );
-    result.ids_by_assembly.reserve(end_assembly - start_assembly);
+
+    ThreadResult result;
+    result.kmers.reserve(n_kmers_est);
+    result.ids_by_assembly.resize(end_assembly - start_assembly);
+    result.start_assembly = start_assembly;
+
     std::vector<std::uint64_t> hashes;
+    hashes.reserve(n_kmers_est);
+
     // Reserving for unordered_map will actually allocate physical memory
     std::unordered_map<std::uint64_t, NodeState> node_map;
     std::unordered_map<EdgeKey, EdgeState, EdgeKeyHash> edge_map;
@@ -77,8 +80,8 @@ ThreadResult build_worker(
         const bool is_target = is_targets[assembly_i];
 
         auto records = seqwin::read_fasta(assembly_paths[assembly_i]);
-        auto& idx_to_id = result.ids_by_assembly.emplace_back();
-        idx_to_id.reserve(records.size());
+        auto& record_IDs = result.ids_by_assembly[assembly_i - start_assembly];
+        record_IDs.resize(records.size());
 
         for (std::size_t record_idx = 0; record_idx < records.size(); ++record_idx) {
             if (record_idx > std::numeric_limits<std::uint16_t>::max()) {
@@ -87,7 +90,7 @@ ThreadResult build_worker(
             const auto record_idx16 = static_cast<std::uint16_t>(record_idx);
 
             auto& record = records[record_idx];
-            idx_to_id.push_back(std::move(record.id));
+            record_IDs[record_idx] = std::move(record.id);
 
             const auto mins = btllib::minimize_sequence(record.sequence, kmerlen, windowsize);
 
@@ -145,7 +148,7 @@ ThreadResult build_worker(
         }
     }
 
-    result.idx.resize(static_cast<std::size_t>(result.n_kmers));
+    result.idx.resize(result.n_kmers);
     std::uint64_t cursor = 0;
     for (auto& [hash, state] : node_map) {
         (void)hash;
@@ -159,24 +162,26 @@ ThreadResult build_worker(
         result.idx[node_it->second.cursor++] = static_cast<std::uint64_t>(i);
     }
 
-    result.nodes.reserve(node_map.size());
+    result.nodes.resize(node_map.size());
+    std::size_t node_i = 0;
     for (const auto& [hash, state] : node_map) {
         const auto stop = state.start + state.count;
-        result.nodes.push_back(ThreadNode{
+        result.nodes[node_i++] = ThreadNode{
             hash,
             state.n_tar,
             state.n_neg,
             static_cast<std::uint64_t>(thread_id),
             state.start,
             stop
-        });
+        };
     }
 
-    result.edges.reserve(edge_map.size() * 3);
+    result.edges.resize(edge_map.size() * 3);
+    std::size_t edge_i = 0;
     for (const auto& [key, state] : edge_map) {
-        result.edges.push_back(key.first);
-        result.edges.push_back(key.second);
-        result.edges.push_back(state.weight);
+        result.edges[edge_i++] = key.first;
+        result.edges[edge_i++] = key.second;
+        result.edges[edge_i++] = state.weight;
     }
 
     return result;
