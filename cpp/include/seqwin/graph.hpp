@@ -22,11 +22,17 @@ struct Node {
     double penalty; // Used as thread_id before merging from different threads
 };
 
+struct Edge {
+    std::uint64_t first;
+    std::uint64_t second;
+    std::uint64_t weight;
+};
+
 struct BuildResult {
     std::vector<Kmer> kmers;
     std::vector<std::uint64_t> idx;
     std::vector<Node> nodes;
-    std::vector<std::uint64_t> edges;
+    std::vector<Edge> edges;
     std::vector<std::vector<std::string>> ids_by_assembly;
 };
 

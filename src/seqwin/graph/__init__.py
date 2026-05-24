@@ -59,6 +59,12 @@ NODE_DTYPE = np.dtype([
     ('penalty', np.float64)
 ])
 
+EDGE_DTYPE = np.dtype([
+    ("first", np.uint64),
+    ("second", np.uint64),
+    ("weight", np.uint64),
+])
+
 
 def build(
     assembly_paths: Iterable[Path], 
@@ -71,7 +77,7 @@ def build(
     NDArray[np.void], 
     NDArray[np.uint64], 
     NDArray[np.void], 
-    NDArray[np.uint64], 
+    NDArray[np.void], 
     list[tuple[str, ...]]
 ]:
     """Build a Seqwin minimizer graph. 
@@ -99,9 +105,9 @@ def build(
                 - 'pos' (uint32): Position of the first base of the minimizer. 
                 - 'record_idx' (uint16): 0-based index of the sequence records, in the same order as they appear in the FASTA file. 
                 - 'assembly_idx' (uint16): Assembly index. 
-            2. NDArray[np.uint64]: The original indices assigned when k-mers are generated (k-mers with consecutive indices are adjacent in the genome). 
+            2. NDArray[np.uint64]: The original indices assigned when k-mers are generated (ordered by genomic positions). 
             3. NDArray[np.void]: A 1-D NumPy structured array of k-mer nodes, with dtype `NODE_DTYPE`. 
-            4. NDArray[np.uint64]: A 3-column NumPy array of weighted, undirected edges (u, v, w). 
+            4. NDArray[np.void]: A 1-D NumPy structured array of weighted, undirected edges, with dtype `EDGE_DTYPE`. 
             5. list[tuple[str, ...]]: FASTA record IDs of each assembly. 
     """
     kmers, idx, nodes, edges, idx_to_id = _build_native(

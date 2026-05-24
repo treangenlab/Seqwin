@@ -49,13 +49,13 @@ class KmerGraph(object):
     2. Extract low-penalty subgraphs from the k-mer graph with `self.filter()`. 
 
     Attributes:
-        kmers (NDArray): A 1-D NumPy structured array of k-mers from all assemblies, with dtype `KMER_DTYPE` defined in `seqwin.graph`. 
+        kmers (NDArray[np.void]): A 1-D NumPy structured array of k-mers from all assemblies, with dtype `KMER_DTYPE` defined in `seqwin.graph`. 
             Grouped and sorted by k-mer hashes. 
-        idx (NDArray | None): The original indices assigned when k-mers are generated (k-mers with consecutive indices are adjacent in the genome). 
+        idx (NDArray[np.uint64] | None): The original indices assigned when k-mers are generated (ordered by genomic positions). 
             Parallel to `kmers`. 
-        nodes (NDArray): A 1-D NumPy structured array of k-mer nodes, with dtype `NODE_DTYPE` defined in `seqwin.graph`. 
+        nodes (NDArray[np.void]): A 1-D NumPy structured array of k-mer nodes, with dtype `NODE_DTYPE` defined in `seqwin.graph`. 
             For each node, `kmers[node['start']:node['stop']]` is the k-mer group with `node['hash']`. 
-        edges (NDArray): A 3-column NumPy array of weighted, undirected edges (u, v, w). 
+        edges (NDArray[np.void]): A 1-D NumPy structured array of weighted, undirected edges, with dtype `EDGE_DTYPE` defined in `seqwin.graph`. 
             Edge weight is the number of assemblies where the two k-mers are adjacent. 
         graph (nx.Graph): The graph instance built from filtered nodes and edges. 
         subgraphs (tuple[frozenset[np.uint64], ...] | None): Low-penalty subgraphs. Each subgraph is a set of k-mer hash values. 
@@ -64,10 +64,10 @@ class KmerGraph(object):
     __slots__ = (
         'kmers', 'idx', 'nodes', 'edges', 'graph', 'subgraphs', '_filtered_flag'
     )
-    kmers: NDArray
-    idx: NDArray
-    nodes: NDArray
-    edges: NDArray
+    kmers: NDArray[np.void]
+    idx: NDArray[np.uint64]
+    nodes: NDArray[np.void]
+    edges: NDArray[np.void]
     graph: nx.Graph
     subgraphs: tuple[frozenset[np.uint64], ...] | None
     _filtered_flag: bool # True if `self.filter()` is called
@@ -191,11 +191,12 @@ class KmerGraph(object):
 
         # remove low-weight edges
         th = np.uint64(edge_weight_th) # for faster comparison
-        edges = edges[edges[:, 2] > th]
+        edges = edges[edges['weight'] > th]
+        edge_values = edges.view(np.uint64).reshape(-1, 3)
         logger.info(f' - Removed {n_edges - len(edges)} edges with weight<{edge_weight_th:.3f}, {len(edges)} edges left')
 
         # remove isolated nodes
-        nodes_to_keep = np.unique(edges[:, :2])
+        nodes_to_keep = np.unique(edge_values[:, :2])
         nodes = nodes[
             np.searchsorted(nodes['hash'], nodes_to_keep)
         ]
@@ -203,7 +204,7 @@ class KmerGraph(object):
 
         logger.info(' - Building graph...')
         graph = nx.Graph()
-        graph.add_weighted_edges_from(edges, weight=EDGE_W)
+        graph.add_weighted_edges_from(edge_values, weight=EDGE_W)
         nx.set_node_attributes(
             graph, 
             values=dict(zip(nodes['hash'], nodes['penalty'])), 

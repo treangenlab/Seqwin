@@ -15,6 +15,7 @@ namespace py = pybind11;
 PYBIND11_MODULE(_core, m) {
     PYBIND11_NUMPY_DTYPE(seqwin::Kmer, pos, record_idx, assembly_idx);
     PYBIND11_NUMPY_DTYPE(seqwin::Node, hash, start, stop, n_tar, n_neg, penalty);
+    PYBIND11_NUMPY_DTYPE(seqwin::Edge, first, second, weight);
 
     m.doc() = "Seqwin minimizer graph bindings";
 
@@ -64,11 +65,9 @@ PYBIND11_MODULE(_core, m) {
                 owner->nodes.data(),
                 capsule
             );
-            const auto n_edges = static_cast<py::ssize_t>(owner->edges.size() / 3);
-            auto edges = py::array_t<std::uint64_t>(
-                {n_edges, static_cast<py::ssize_t>(3)},
-                {static_cast<py::ssize_t>(3 * sizeof(std::uint64_t)),
-                 static_cast<py::ssize_t>(sizeof(std::uint64_t))},
+            auto edges = py::array_t<seqwin::Edge>(
+                {static_cast<py::ssize_t>(owner->edges.size())},
+                {static_cast<py::ssize_t>(sizeof(seqwin::Edge))},
                 owner->edges.data(),
                 capsule
             );

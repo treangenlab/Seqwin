@@ -20,7 +20,7 @@ struct ThreadResult {
     std::vector<Kmer> kmers; // Ordered by genomic positions (the original order)
     std::vector<std::uint64_t> idx; // Original k-mer indices, grouped by hash
     std::vector<Node> nodes; // Unsorted; start and stop point to k-mer groups in idx
-    std::vector<std::uint64_t> edges;
+    std::vector<Edge> edges;
     std::vector<std::vector<std::string>> ids_by_assembly;
     std::size_t n_kmers = 0;
     std::size_t start_assembly = 0;

@@ -59,9 +59,9 @@ std::vector<Node> concat_nodes(std::vector<ThreadResult>& results, ThreadPool& p
     return concat<Node>(results, &ThreadResult::nodes, pool);
 }
 
-std::vector<std::uint64_t> concat_edges(std::vector<ThreadResult>& results, ThreadPool& pool)
+std::vector<Edge> concat_edges(std::vector<ThreadResult>& results, ThreadPool& pool)
 {
-    return concat<std::uint64_t>(results, &ThreadResult::edges, pool);
+    return concat<Edge>(results, &ThreadResult::edges, pool);
 }
 
 // 1. Parallel LSD radix sort based on hash (stable)
@@ -200,27 +200,27 @@ static std::vector<std::uint64_t> merge_idx(
     return idx;
 }
 
-static void merge_weighted_edges(std::vector<std::uint64_t>& edges, ThreadPool& pool)
+static void merge_edges(std::vector<Edge>& edges, ThreadPool& pool)
 {
-    const std::size_t n_edges = edges.size() / 3;
+    const std::size_t n_edges = edges.size();
     if (n_edges == 0) {
         edges.clear();
         return;
     }
 
-    std::vector<std::uint64_t> buf(edges.size());
+    std::vector<Edge> buf(edges.size());
     auto* src = &edges;
     auto* dst = &buf;
     std::vector<std::uint64_t> counts(pool.size() * 65536);
 
-    for (std::size_t column : {std::size_t{1}, std::size_t{0}}) {
+    for (auto key : {&Edge::second, &Edge::first}) {
         for (std::size_t shift = 0; shift < 64; shift += 16) {
             std::fill(counts.begin(), counts.end(), 0);
 
             pool.parallel_for(n_edges, [&](std::size_t start, std::size_t end, std::size_t t) {
                 auto* local_counts = counts.data() + t * 65536;
                 for (std::size_t i = start; i < end; ++i) {
-                    const auto bucket = ((*src)[3 * i + column] >> shift) & 0xFFFFULL;
+                    const auto bucket = (((*src)[i].*key) >> shift) & 0xFFFFULL;
                     ++local_counts[static_cast<std::size_t>(bucket)];
                 }
             });
@@ -238,11 +238,9 @@ static void merge_weighted_edges(std::vector<std::uint64_t>& edges, ThreadPool& 
             pool.parallel_for(n_edges, [&](std::size_t start, std::size_t end, std::size_t t) {
                 auto* local_offsets = counts.data() + t * 65536;
                 for (std::size_t i = start; i < end; ++i) {
-                    const auto bucket = ((*src)[3 * i + column] >> shift) & 0xFFFFULL;
+                    const auto bucket = (((*src)[i].*key) >> shift) & 0xFFFFULL;
                     const auto pos = local_offsets[static_cast<std::size_t>(bucket)]++;
-                    (*dst)[3 * pos + 0] = (*src)[3 * i + 0];
-                    (*dst)[3 * pos + 1] = (*src)[3 * i + 1];
-                    (*dst)[3 * pos + 2] = (*src)[3 * i + 2];
+                    (*dst)[pos] = (*src)[i];
                 }
             });
 
@@ -251,34 +249,20 @@ static void merge_weighted_edges(std::vector<std::uint64_t>& edges, ThreadPool& 
     }
 
     std::size_t write_i = 0;
-    std::uint64_t u = (*src)[0];
-    std::uint64_t v = (*src)[1];
-    std::uint64_t w = (*src)[2];
+    std::size_t i = 0;
+    while (i < n_edges) {
+        const auto first = (*src)[i].first;
+        const auto second = (*src)[i].second;
+        std::uint64_t weight = 0;
 
-    for (std::size_t i = 1; i < n_edges; ++i) {
-        const auto next_u = (*src)[3 * i + 0];
-        const auto next_v = (*src)[3 * i + 1];
-        const auto next_w = (*src)[3 * i + 2];
-        if (next_u == u && next_v == v) {
-            w += next_w;
-            continue;
+        while (i < n_edges && (*src)[i].first == first && (*src)[i].second == second) {
+            weight += (*src)[i].weight;
+            ++i;
         }
 
-        edges[3 * write_i + 0] = u;
-        edges[3 * write_i + 1] = v;
-        edges[3 * write_i + 2] = w;
-        ++write_i;
-
-        u = next_u;
-        v = next_v;
-        w = next_w;
+        edges[write_i++] = Edge{first, second, weight};
     }
-
-    edges[3 * write_i + 0] = u;
-    edges[3 * write_i + 1] = v;
-    edges[3 * write_i + 2] = w;
-    ++write_i;
-    edges.resize(write_i * 3);
+    edges.resize(write_i);
 }
 
 } // namespace
@@ -347,7 +331,7 @@ BuildResult merge_thread_results(
 
     // Merge edges and nodes first to reduce peak memory
     auto edges = concat_edges(results, pool);
-    merge_weighted_edges(edges, pool);
+    merge_edges(edges, pool);
 
     auto nodes_raw = concat_nodes(results, pool);
     auto [nodes, idx_segments] = merge_nodes(nodes_raw, pool);

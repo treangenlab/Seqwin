@@ -37,8 +37,8 @@ struct EdgeKeyHash {
 };
 
 struct EdgeState {
-    std::uint64_t weight;
-    std::size_t last_seen_assembly;
+    std::uint64_t weight = 0;
+    std::size_t last_seen_assembly = std::numeric_limits<std::size_t>::max();
 };
 
 ThreadResult build_worker(
@@ -129,11 +129,8 @@ ThreadResult build_worker(
                     std::swap(u, v);
                 }
                 const EdgeKey key{u, v};
-                auto [edge_it, edge_inserted] = edge_map.try_emplace(
-                    key,
-                    EdgeState{1, assembly_i}
-                );
-                if (!edge_inserted && edge_it->second.last_seen_assembly != assembly_i) {
+                auto edge_it = edge_map.try_emplace(key).first;
+                if (edge_it->second.last_seen_assembly != assembly_i) {
                     ++(edge_it->second.weight);
                     edge_it->second.last_seen_assembly = assembly_i;
                 }
@@ -169,12 +166,10 @@ ThreadResult build_worker(
         };
     }
 
-    result.edges.resize(edge_map.size() * 3);
+    result.edges.resize(edge_map.size());
     std::size_t edge_i = 0;
     for (const auto& [key, state] : edge_map) {
-        result.edges[edge_i++] = key.first;
-        result.edges[edge_i++] = key.second;
-        result.edges[edge_i++] = state.weight;
+        result.edges[edge_i++] = Edge{key.first, key.second, state.weight};
     }
 
     return result;
