@@ -15,22 +15,30 @@ struct Kmer {
 
 struct Node {
     std::uint64_t hash;
-    std::uint32_t n_tar;
-    std::uint32_t n_neg;
-    double penalty;
     std::uint64_t start;
     std::uint64_t stop;
+    std::uint32_t n_tar;
+    std::uint32_t n_neg;
+    double penalty; // Used as thread_id before merging from different threads
 };
 
-struct BuildResult {
+struct Edge {
+    std::uint64_t first;
+    std::uint64_t second;
+    std::uint64_t weight;
+};
+
+struct Graph {
     std::vector<Kmer> kmers;
     std::vector<std::uint64_t> idx;
     std::vector<Node> nodes;
-    std::vector<std::uint64_t> edges;
+    std::vector<Edge> edges;
     std::vector<std::vector<std::string>> ids_by_assembly;
+    std::size_t n_kmers = 0;
+    std::size_t start_assembly = 0;
 };
 
-BuildResult build_impl(
+Graph build(
     const std::vector<std::string>& assembly_paths,
     std::size_t kmerlen,
     std::size_t windowsize,

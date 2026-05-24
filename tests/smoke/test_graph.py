@@ -1,11 +1,12 @@
 import numpy as np
 
-from seqwin.graph import KMER_DTYPE, NODE_DTYPE, build, _filter_kmers
+from seqwin.graph import KMER_DTYPE, NODE_DTYPE, EDGE_DTYPE, build, _filter_kmers
 
 
 def _sorted_edges(edges: np.ndarray) -> np.ndarray:
-    idx = np.lexsort((edges[:, 2], edges[:, 1], edges[:, 0]))
-    return edges[idx]
+    edge_values = edges.view(np.uint64).reshape(-1, 3)
+    idx = np.lexsort((edge_values[:, 2], edge_values[:, 1], edge_values[:, 0]))
+    return edge_values[idx]
 
 
 def _assert_idx_invariants(kmers: np.ndarray, idx: np.ndarray, nodes: np.ndarray) -> None:
@@ -28,9 +29,16 @@ def test_dtype_layouts() -> None:
     assert KMER_DTYPE.names == ('pos', 'record_idx', 'assembly_idx')
     assert KMER_DTYPE['assembly_idx'] == np.dtype(np.uint16)
 
+    assert NODE_DTYPE.names == ('hash', 'start', 'stop', 'n_tar', 'n_neg', 'penalty')
     assert NODE_DTYPE["n_tar"] == np.dtype(np.uint32)
     assert NODE_DTYPE["n_neg"] == np.dtype(np.uint32)
     assert NODE_DTYPE.itemsize == 40
+
+    assert EDGE_DTYPE.names == ("first", "second", "weight")
+    assert EDGE_DTYPE.itemsize == 24
+    assert EDGE_DTYPE.fields["first"][1] == 0
+    assert EDGE_DTYPE.fields["second"][1] == 8
+    assert EDGE_DTYPE.fields["weight"][1] == 16
 
 
 def test_build_threading_equivalence(targets_dir, non_targets_dir) -> None:
@@ -80,8 +88,12 @@ def test_build_threading_equivalence(targets_dir, non_targets_dir) -> None:
     assert set(np.unique(kmers_1['assembly_idx']).tolist()) == {0, 1, 2, 3}
     assert np.all(nodes_1['n_tar'] + nodes_1['n_neg'] > 0)
 
-    assert edges_1.shape[1] == 3
-    assert edges_1.dtype == np.uint64
+    assert edges_1.ndim == 1
+    assert edges_1.dtype == EDGE_DTYPE
+    edge_values_1 = edges_1.view(np.uint64).reshape(-1, 3)
+    assert np.array_equal(edge_values_1[:, 0], edges_1["first"])
+    assert np.array_equal(edge_values_1[:, 1], edges_1["second"])
+    assert np.array_equal(edge_values_1[:, 2], edges_1["weight"])
     assert nodes_1.dtype == NODE_DTYPE
 
     _assert_idx_invariants(kmers_1, idx_1, nodes_1)
@@ -114,9 +126,9 @@ def test_filter_kmers() -> None:
     ], dtype=KMER_DTYPE)
     idx = np.array([100, 101, 200, 300, 301, 302], dtype=np.uint64)
     nodes = np.array([
-        (10, 1, 0, 0.1, 0, 2),
-        (20, 1, 0, 0.2, 2, 3),
-        (30, 1, 1, 0.3, 3, 6),
+        (10, 0, 2, 1, 0, 0.1),
+        (20, 2, 3, 1, 0, 0.2),
+        (30, 3, 6, 1, 1, 0.3),
     ], dtype=NODE_DTYPE)
 
     kmers_new, idx_new, nodes_new = _filter_kmers(kmers, idx, nodes, {30, 10})

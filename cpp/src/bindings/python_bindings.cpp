@@ -14,7 +14,8 @@ namespace py = pybind11;
 
 PYBIND11_MODULE(_core, m) {
     PYBIND11_NUMPY_DTYPE(seqwin::Kmer, pos, record_idx, assembly_idx);
-    PYBIND11_NUMPY_DTYPE(seqwin::Node, hash, n_tar, n_neg, penalty, start, stop);
+    PYBIND11_NUMPY_DTYPE(seqwin::Node, hash, start, stop, n_tar, n_neg, penalty);
+    PYBIND11_NUMPY_DTYPE(seqwin::Edge, first, second, weight);
 
     m.doc() = "Seqwin minimizer graph bindings";
 
@@ -26,10 +27,10 @@ PYBIND11_MODULE(_core, m) {
            const std::vector<bool>& is_targets,
            std::size_t n_cpu
         ) {
-            seqwin::BuildResult result;
+            seqwin::Graph graph;
             {
                 py::gil_scoped_release release;
-                result = seqwin::build_impl(
+                graph = seqwin::build(
                     assembly_paths,
                     kmerlen,
                     windowsize,
@@ -38,11 +39,11 @@ PYBIND11_MODULE(_core, m) {
                     n_cpu
                 );
             }
-            auto owner = std::make_shared<seqwin::BuildResult>(std::move(result));
+            auto owner = std::make_shared<seqwin::Graph>(std::move(graph));
             auto capsule = py::capsule(
-                new std::shared_ptr<seqwin::BuildResult>(owner),
+                new std::shared_ptr<seqwin::Graph>(owner),
                 [](void* ptr) {
-                    delete static_cast<std::shared_ptr<seqwin::BuildResult>*>(ptr);
+                    delete static_cast<std::shared_ptr<seqwin::Graph>*>(ptr);
                 }
             );
 
@@ -64,11 +65,9 @@ PYBIND11_MODULE(_core, m) {
                 owner->nodes.data(),
                 capsule
             );
-            const auto n_edges = static_cast<py::ssize_t>(owner->edges.size() / 3);
-            auto edges = py::array_t<std::uint64_t>(
-                {n_edges, static_cast<py::ssize_t>(3)},
-                {static_cast<py::ssize_t>(3 * sizeof(std::uint64_t)),
-                 static_cast<py::ssize_t>(sizeof(std::uint64_t))},
+            auto edges = py::array_t<seqwin::Edge>(
+                {static_cast<py::ssize_t>(owner->edges.size())},
+                {static_cast<py::ssize_t>(sizeof(seqwin::Edge))},
                 owner->edges.data(),
                 capsule
             );
@@ -106,10 +105,10 @@ PYBIND11_MODULE(_core, m) {
             const auto* nodes_ptr = static_cast<const seqwin::Node*>(nodes_buf.ptr);
             const auto n_nodes = static_cast<std::size_t>(nodes_buf.shape[0]);
 
-            seqwin::FilterResult result;
+            seqwin::Graph graph;
             {
                 py::gil_scoped_release release;
-                result = seqwin::filter_kmers(
+                graph = seqwin::filter_kmers(
                     kmers_ptr,
                     idx_ptr,
                     nodes_ptr,
@@ -117,11 +116,11 @@ PYBIND11_MODULE(_core, m) {
                     used_hashes
                 );
             }
-            auto owner = std::make_shared<seqwin::FilterResult>(std::move(result));
+            auto owner = std::make_shared<seqwin::Graph>(std::move(graph));
             auto capsule = py::capsule(
-                new std::shared_ptr<seqwin::FilterResult>(owner),
+                new std::shared_ptr<seqwin::Graph>(owner),
                 [](void* ptr) {
-                    delete static_cast<std::shared_ptr<seqwin::FilterResult>*>(ptr);
+                    delete static_cast<std::shared_ptr<seqwin::Graph>*>(ptr);
                 }
             );
 
