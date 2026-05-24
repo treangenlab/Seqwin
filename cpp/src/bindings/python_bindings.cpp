@@ -27,10 +27,10 @@ PYBIND11_MODULE(_core, m) {
            const std::vector<bool>& is_targets,
            std::size_t n_cpu
         ) {
-            seqwin::BuildResult result;
+            seqwin::Graph graph;
             {
                 py::gil_scoped_release release;
-                result = seqwin::build(
+                graph = seqwin::build(
                     assembly_paths,
                     kmerlen,
                     windowsize,
@@ -39,11 +39,11 @@ PYBIND11_MODULE(_core, m) {
                     n_cpu
                 );
             }
-            auto owner = std::make_shared<seqwin::BuildResult>(std::move(result));
+            auto owner = std::make_shared<seqwin::Graph>(std::move(graph));
             auto capsule = py::capsule(
-                new std::shared_ptr<seqwin::BuildResult>(owner),
+                new std::shared_ptr<seqwin::Graph>(owner),
                 [](void* ptr) {
-                    delete static_cast<std::shared_ptr<seqwin::BuildResult>*>(ptr);
+                    delete static_cast<std::shared_ptr<seqwin::Graph>*>(ptr);
                 }
             );
 
@@ -105,10 +105,10 @@ PYBIND11_MODULE(_core, m) {
             const auto* nodes_ptr = static_cast<const seqwin::Node*>(nodes_buf.ptr);
             const auto n_nodes = static_cast<std::size_t>(nodes_buf.shape[0]);
 
-            seqwin::FilterResult result;
+            seqwin::Graph graph;
             {
                 py::gil_scoped_release release;
-                result = seqwin::filter_kmers(
+                graph = seqwin::filter_kmers(
                     kmers_ptr,
                     idx_ptr,
                     nodes_ptr,
@@ -116,11 +116,11 @@ PYBIND11_MODULE(_core, m) {
                     used_hashes
                 );
             }
-            auto owner = std::make_shared<seqwin::FilterResult>(std::move(result));
+            auto owner = std::make_shared<seqwin::Graph>(std::move(graph));
             auto capsule = py::capsule(
-                new std::shared_ptr<seqwin::FilterResult>(owner),
+                new std::shared_ptr<seqwin::Graph>(owner),
                 [](void* ptr) {
-                    delete static_cast<std::shared_ptr<seqwin::FilterResult>*>(ptr);
+                    delete static_cast<std::shared_ptr<seqwin::Graph>*>(ptr);
                 }
             );
 

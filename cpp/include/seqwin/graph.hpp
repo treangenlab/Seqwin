@@ -28,15 +28,17 @@ struct Edge {
     std::uint64_t weight;
 };
 
-struct BuildResult {
+struct Graph {
     std::vector<Kmer> kmers;
     std::vector<std::uint64_t> idx;
     std::vector<Node> nodes;
     std::vector<Edge> edges;
     std::vector<std::vector<std::string>> ids_by_assembly;
+    std::size_t n_kmers = 0;
+    std::size_t start_assembly = 0;
 };
 
-BuildResult build(
+Graph build(
     const std::vector<std::string>& assembly_paths,
     std::size_t kmerlen,
     std::size_t windowsize,

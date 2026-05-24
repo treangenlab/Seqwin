@@ -43,7 +43,7 @@ struct EdgeState {
     std::size_t last_seen_assembly = std::numeric_limits<std::size_t>::max();
 };
 
-ThreadResult build_worker(
+Graph build_worker(
     const std::vector<std::string>& assembly_paths,
     std::size_t kmerlen,
     std::size_t windowsize,
@@ -61,10 +61,10 @@ ThreadResult build_worker(
         windowsize
     );
 
-    ThreadResult result;
-    result.kmers.reserve(n_kmers_est);
-    result.ids_by_assembly.resize(end_assembly - start_assembly);
-    result.start_assembly = start_assembly;
+    Graph graph;
+    graph.kmers.reserve(n_kmers_est);
+    graph.ids_by_assembly.resize(end_assembly - start_assembly);
+    graph.start_assembly = start_assembly;
 
     std::vector<std::uint64_t> hashes;
     hashes.reserve(n_kmers_est);
@@ -85,7 +85,7 @@ ThreadResult build_worker(
         const bool is_target = is_targets[assembly_i];
 
         auto records = seqwin::read_fasta(assembly_paths[assembly_i]);
-        auto& record_IDs = result.ids_by_assembly[assembly_i - start_assembly];
+        auto& record_IDs = graph.ids_by_assembly[assembly_i - start_assembly];
         record_IDs.resize(records.size());
 
         for (std::size_t record_idx = 0; record_idx < records.size(); ++record_idx) {
@@ -103,7 +103,7 @@ ThreadResult build_worker(
                 if (m.pos > std::numeric_limits<std::uint32_t>::max()) {
                     throw std::runtime_error("minimizer position exceeds uint32 range");
                 }
-                result.kmers.push_back(Kmer{
+                graph.kmers.push_back(Kmer{
                     static_cast<std::uint32_t>(m.pos),
                     record_idx16,
                     assembly_idx16
@@ -120,7 +120,7 @@ ThreadResult build_worker(
                     }
                     node_it->second.last_seen_assembly = assembly_i;
                 }
-                ++result.n_kmers;
+                ++graph.n_kmers;
             }
 
             if (mins.size() < 2) {
@@ -143,7 +143,15 @@ ThreadResult build_worker(
         }
     }
 
-    result.idx.resize(result.n_kmers);
+    // Create edges first to reduce peak memory
+    graph.edges.resize(edge_map.size());
+    std::size_t edge_i = 0;
+    for (const auto& [key, state] : edge_map) {
+        graph.edges[edge_i++] = Edge{key.first, key.second, state.weight};
+    }
+    std::unordered_map<EdgeKey, EdgeState, EdgeKeyHash>().swap(edge_map);
+
+    graph.idx.resize(graph.n_kmers);
     std::uint64_t cursor = 0;
     for (auto& [hash, state] : node_map) {
         (void)hash;
@@ -151,17 +159,17 @@ ThreadResult build_worker(
         state.cursor = cursor;
         cursor += state.count;
     }
-    for (std::size_t i = 0; i < result.n_kmers; ++i) {
+    for (std::size_t i = 0; i < graph.n_kmers; ++i) {
         const auto hash = hashes[i];
         auto node_it = node_map.find(hash);
-        result.idx[node_it->second.cursor++] = static_cast<std::uint64_t>(i);
+        graph.idx[node_it->second.cursor++] = static_cast<std::uint64_t>(i);
     }
 
-    result.nodes.resize(node_map.size());
+    graph.nodes.resize(node_map.size());
     std::size_t node_i = 0;
     for (const auto& [hash, state] : node_map) {
         const auto stop = state.start + state.count;
-        result.nodes[node_i++] = Node{
+        graph.nodes[node_i++] = Node{
             hash,
             state.start,
             stop,
@@ -171,18 +179,12 @@ ThreadResult build_worker(
         };
     }
 
-    result.edges.resize(edge_map.size());
-    std::size_t edge_i = 0;
-    for (const auto& [key, state] : edge_map) {
-        result.edges[edge_i++] = Edge{key.first, key.second, state.weight};
-    }
-
-    return result;
+    return graph;
 }
 
 } // namespace
 
-BuildResult build(
+Graph build(
     const std::vector<std::string>& assembly_paths,
     std::size_t kmerlen,
     std::size_t windowsize,
@@ -208,7 +210,7 @@ BuildResult build(
     }
 
     ThreadPool pool(n_workers);
-    std::vector<ThreadResult> results(n_workers);
+    std::vector<Graph> graphs(n_workers);
 
     const std::size_t base = n_assemblies / n_workers;
     const std::size_t rem = n_assemblies % n_workers;
@@ -217,7 +219,7 @@ BuildResult build(
         for (std::size_t i = start; i < end; ++i) {
             std::size_t chunk_start = i * base + std::min(i, rem);
             std::size_t chunk_end = chunk_start + base + (i < rem ? 1 : 0);
-            results[i] = build_worker(
+            graphs[i] = build_worker(
                 assembly_paths,
                 kmerlen,
                 windowsize,
@@ -230,7 +232,7 @@ BuildResult build(
         }
     });
 
-    return merge_thread_results(results, n_assemblies, pool);
+    return merge_thread_graphs(graphs, n_assemblies, pool);
 }
 
 } // namespace seqwin
