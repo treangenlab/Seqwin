@@ -30,7 +30,7 @@ PYBIND11_MODULE(_core, m) {
             seqwin::BuildResult result;
             {
                 py::gil_scoped_release release;
-                result = seqwin::build_impl(
+                result = seqwin::build(
                     assembly_paths,
                     kmerlen,
                     windowsize,

@@ -67,13 +67,13 @@ std::vector<Edge> concat_edges(std::vector<ThreadResult>& results, ThreadPool& p
 // 1. Parallel LSD radix sort based on hash (stable)
 // 2. Merge nodes with the same hash
 // 3. Build segment metadata for final materialization
-static std::pair<std::vector<Node>, std::vector<IdxSegment>> merge_nodes(
+static std::vector<IdxSegment> merge_nodes(
     std::vector<Node>& nodes,
     ThreadPool& pool
 ) {
     const std::size_t n_nodes = nodes.size();
     if (n_nodes == 0) {
-        return {{}, {}};
+        return {};
     }
 
     std::vector<Node> buf(nodes.size());
@@ -151,7 +151,7 @@ static std::pair<std::vector<Node>, std::vector<IdxSegment>> merge_nodes(
         nodes[write_i++] = Node{hash, start, stop, n_tar, n_neg, 0.0};
     }
     nodes.resize(write_i);
-    return {std::move(nodes), std::move(idx_segments)};
+    return idx_segments;
 }
 
 static std::vector<Kmer> merge_kmers(
@@ -297,8 +297,8 @@ BuildResult merge_thread_results(
     if (results.size() == 1) {
         auto& result = results[0];
 
-        auto [nodes, idx_segments] = merge_nodes(result.nodes, pool);
-        std::vector<Node>().swap(result.nodes);
+        merge_edges(result.edges, pool);
+        auto idx_segments = merge_nodes(result.nodes, pool);
 
         auto kmers = merge_kmers(
             idx_segments,
@@ -321,7 +321,7 @@ BuildResult merge_thread_results(
         return {
             std::move(kmers),
             std::move(idx),
-            std::move(nodes),
+            std::move(result.nodes),
             std::move(result.edges),
             std::move(result.ids_by_assembly)
         };
@@ -333,9 +333,8 @@ BuildResult merge_thread_results(
     auto edges = concat_edges(results, pool);
     merge_edges(edges, pool);
 
-    auto nodes_raw = concat_nodes(results, pool);
-    auto [nodes, idx_segments] = merge_nodes(nodes_raw, pool);
-    std::vector<Node>().swap(nodes_raw);
+    auto nodes = concat_nodes(results, pool);
+    auto idx_segments = merge_nodes(nodes, pool);
 
     std::vector<std::uint64_t> kmer_offsets(results.size());
     std::uint64_t total_kmers = 0;

@@ -36,7 +36,7 @@ struct BuildResult {
     std::vector<std::vector<std::string>> ids_by_assembly;
 };
 
-BuildResult build_impl(
+BuildResult build(
     const std::vector<std::string>& assembly_paths,
     std::size_t kmerlen,
     std::size_t windowsize,

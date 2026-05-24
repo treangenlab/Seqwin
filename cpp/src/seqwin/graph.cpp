@@ -17,6 +17,8 @@
 namespace seqwin {
 namespace {
 
+constexpr std::size_t map_reserve_divisor = 100;
+
 struct NodeState {
     std::uint64_t count = 0;
     std::uint64_t start = 0;
@@ -70,6 +72,9 @@ ThreadResult build_worker(
     // Reserving for unordered_map will actually allocate physical memory
     std::unordered_map<std::uint64_t, NodeState> node_map;
     std::unordered_map<EdgeKey, EdgeState, EdgeKeyHash> edge_map;
+    const auto n_map_entries_est = n_kmers_est / map_reserve_divisor;
+    node_map.reserve(n_map_entries_est);
+    edge_map.reserve(n_map_entries_est);
 
     for (std::size_t assembly_i = start_assembly; assembly_i < end_assembly; ++assembly_i) {
         const auto assembly_idx = assembly_indices[assembly_i];
@@ -177,7 +182,7 @@ ThreadResult build_worker(
 
 } // namespace
 
-BuildResult build_impl(
+BuildResult build(
     const std::vector<std::string>& assembly_paths,
     std::size_t kmerlen,
     std::size_t windowsize,
