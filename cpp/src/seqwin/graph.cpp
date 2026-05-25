@@ -144,7 +144,7 @@ ThreadGraph build_worker(
     }
 
     // Create edges first to reduce peak memory
-    graph.edges.resize(edge_map.size());
+    graph.edges = NoInitArray<Edge>(edge_map.size());
     std::size_t edge_i = 0;
     for (const auto& [key, state] : edge_map) {
         graph.edges[edge_i++] = Edge{key.first, key.second, state.weight};
@@ -165,7 +165,7 @@ ThreadGraph build_worker(
         graph.idx[node_it->second.cursor++] = static_cast<std::uint64_t>(i);
     }
 
-    graph.nodes.resize(node_map.size());
+    graph.nodes = NoInitArray<Node>(node_map.size());
     std::size_t node_i = 0;
     for (const auto& [hash, state] : node_map) {
         const auto stop = state.start + state.count;

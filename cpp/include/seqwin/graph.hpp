@@ -33,8 +33,8 @@ struct Edge {
 struct Graph {
     NoInitArray<Kmer> kmers;
     NoInitArray<std::uint64_t> idx;
-    std::vector<Node> nodes;
-    std::vector<Edge> edges;
+    NoInitArray<Node> nodes;
+    NoInitArray<Edge> edges;
     std::vector<std::vector<std::string>> ids_by_assembly;
 };
 

@@ -54,6 +54,12 @@ public:
 
     T* data() noexcept { return data_.get(); }
     const T* data() const noexcept { return data_.get(); }
+    T* begin() noexcept { return data_.get(); }
+    T* end() noexcept { return data_.get() + size_; }
+    const T* begin() const noexcept { return data_.get(); }
+    const T* end() const noexcept { return data_.get() + size_; }
+    const T* cbegin() const noexcept { return data_.get(); }
+    const T* cend() const noexcept { return data_.get() + size_; }
 
     T& operator[](std::size_t i) noexcept { return data_[i]; }
     const T& operator[](std::size_t i) const noexcept { return data_[i]; }
@@ -63,6 +69,8 @@ public:
         std::swap(size_, other.size_);
         std::swap(data_, other.data_);
     }
+
+    friend void swap(NoInitArray& a, NoInitArray& b) noexcept { a.swap(b); }
 
     void reset() noexcept
     {

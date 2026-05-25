@@ -17,10 +17,10 @@ namespace seqwin {
 class ThreadPool;
 
 struct ThreadGraph {
-    std::vector<Kmer> kmers;
+    std::vector<Kmer> kmers; // Needs push_back() support (exact kmer count is not known)
     NoInitArray<std::uint64_t> idx;
-    std::vector<Node> nodes;
-    std::vector<Edge> edges;
+    NoInitArray<Node> nodes;
+    NoInitArray<Edge> edges;
     std::vector<std::vector<std::string>> ids_by_assembly;
     std::size_t n_kmers = 0;
     std::size_t start_assembly = 0;
