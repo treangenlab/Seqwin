@@ -6,39 +6,6 @@ Dependencies:
 -------------
 - numpy
 - biopython (optional)
-
-Classes:
---------
-- SharedArr
-
-Functions:
-----------
-- print_time_delta
-- log_and_raise
-- overwrite_warning
-- overwrite_error
-- read_text
-- mkdir
-- file_to_write
-- list_dir
-- run_cmd
-- mp_wrapper
-- get_chunks
-- get_dups
-- concat_to_shm
-- concat_from_shm
-- revcomp
-- most_common
-- most_common_weighted
-- load_paths_txt
-- load_fasta
-- load_genbank
-
-Attributes:
------------
-- GZIP_EXT (str)
-- BASE_COMP (str.maketrans)
-- StartMethod (str, Enum)
 """
 
 __author__ = 'Michael X. Wang'

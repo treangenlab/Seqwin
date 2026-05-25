@@ -32,7 +32,6 @@ from pathlib import Path
 from io import BufferedWriter
 from time import time
 from queue import Empty
-from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
 
@@ -218,78 +217,6 @@ class Assemblies(pd.DataFrame):
         logger.info(f' - BLAST database created: {blastdb}')
         print_time_delta(time()-tik)
         return blastdb
-    
-    def __makeblastdb_cmd(self, title: str, prefix: Path, neg_only: bool, overwrite: bool, n_cpu: int) -> Path:
-        """Create a BLAST database for all or non-target assemblies. Use streaming with subprocess.run(shell=True) to save memory. 
-        `sd` is needed for modifying FASTA content, and `parallel` is needed for multiprocessing. 
-
-        Dependencies:
-        - sd (https://github.com/chmln/sd, https://anaconda.org/conda-forge/sd)
-        - parallel (https://www.gnu.org/software/parallel/, https://anaconda.org/conda-forge/parallel)
-
-        Args:
-            title (str): Name of the BLAST database. 
-            prefix (Path): Output directory of the BLAST database. 
-            neg_only (bool): If True, create the BLAST database on non-target assemblies only. 
-            overwrite (bool): If True, overwrite prefix if it already exists. 
-            n_cpu (int): Number of processes to run in parallel. 
-
-        Returns:
-            Path: Path to the BLAST database. 
-        """
-        # NOTE: when the size of the blastdb changes, the evalue of a specific hit also changes. 
-        # Since the evalue threshold for a blast task is set, this hit might not be included when the blastdb gets larger
-        if neg_only:
-            logger.info('Creating a BLAST database of non-target assemblies (less sensitive but faster)...')
-            df = self[self.is_target == False]
-            title += BLASTCONFIG.neg_only
-        else:
-            logger.info('Creating a BLAST database of all assemblies (more sensitive but slower)...')
-            df = self
-        tik = time()
-
-        # create a folder for BLAST
-        mkdir(prefix, overwrite)
-        blastdb = prefix / title
-
-        # make a tsv of assembly path, assembly index and is_target (input for GNU parallel)
-        assemblies_tsv = '\n'.join(
-            f'{p}\t{i}\t{BLASTCONFIG.bool2str[b]}' 
-            for p, i, b in zip(df.path, df.index, df.is_target)
-        )
-        
-        # GNU parallel command to modify assembly fasta headers (>record_id to >idx@is_target@record_id)
-        # {1}=assembly path, {2}=assembly index, {3}=is_target
-        # use zcat if the fasta file is gzipped, else use cat; then modify the headers with sd
-        # since this command uses shell syntax ([[ ... ]], &&, ||, and |), shell=True is necessary in subprocess
-        modify_fasta = '[[ {1} == *.gz ]] && zcat "{1}" || cat "{1}" | sd "^>" ">{2}%s{3}%s"' \
-            % (BLASTCONFIG.header_sep, BLASTCONFIG.header_sep)
-        
-        # command to create the blast db
-        makeblastdb = f'makeblastdb -title {title} -dbtype nucl -out {blastdb}'
-        
-        # load assembly files in paralle, and use pipes to save memory (shell=True)
-        # tried to use native python pipes with shell=False but failed
-        proc = subprocess.run(
-            rf"parallel -j {n_cpu} --colsep '\t' '{modify_fasta}' | {makeblastdb}", 
-            input=assemblies_tsv, 
-            shell=True, capture_output=True, text=True
-        )
-
-        # save the full command, stdout and stderr
-        blast_log = prefix / WORKINGDIR.blast_log
-        blast_log.write_text('\n'.join((
-            proc.args, 
-            proc.stdout, 
-            proc.stderr, 
-            assemblies_tsv
-        )))
-        if proc.returncode != 0:
-            log_and_raise(RuntimeError, msg=f'Failed to create the BLAST database. For details, please check {blast_log}')
-        
-        logger.info(f' - BLAST database created: {blastdb}')
-        print_time_delta(time()-tik)
-        return blastdb
 
 
 def _add_fasta_to_queue(path: Path, assembly_idx: int, is_target: bool, queue_idx: int, queue: mp.Queue) -> None:
@@ -350,35 +277,6 @@ def _stream_to_stdin(queue: mp.Queue, n_items: int, proc_stdin: BufferedWriter) 
             continue
 
     proc_stdin.flush() # empty stdin but don't close the process
-
-
-def _load_seq(
-    paths: list[Path], 
-    parser: Callable[[Path], tuple[dict[str, str], int]] = load_fasta, 
-    n_cpu: int = 1
-) -> list[dict[str, str]]:
-    """Deprecated. Load assembly sequences from files. 
-
-    Args:
-        paths (list[Path]): A list of paths to the assembly files. 
-        parser (Callable, optional): The function to parse the assembly files. It should return a dict of record id -> 
-            sequence (upper case), and the total number of bases in the assembly. Supported functions: `parsers.load_fasta()`, 
-            `parsers.load_genbank()`. [load_fasta]
-        n_cpu (int, optional): Number of processes to run in parallel. [1]
-
-    Returns:
-        list[dict[str,str]]: Each dict has record IDs as keys and record sequences as values. 
-    """
-    # load assembly files in paralelle
-    n_assemblies = len(paths)
-    logger.info(f' - Loading {n_assemblies} assembly files...')
-    all_seq, all_len = mp_wrapper(
-        parser, paths, n_cpu, 
-        starmap=False, unpack_output=True
-    )
-    total_len = sum(all_len)
-    logger.info(f' - Average assembly size: {total_len/n_assemblies:.0f} bp; total: {total_len} bp')
-    return all_seq
 
 
 def _fetch_seq(loc: pd.DataFrame, src_fasta: Path) -> pd.Series:

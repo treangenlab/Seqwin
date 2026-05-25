@@ -136,9 +136,9 @@ def _filter_kmers(
     2. Update 'start' and 'stop' in nodes. 
 
     Args:
-        kmers (NDArray): See `KmerGraph.kmers` (already sorted by 'hash'). 
+        kmers (NDArray): See `KmerGraph.kmers`. 
         idx (NDArray): See `KmerGraph.idx`. 
-        nodes (NDArray): See `KmerGraph.nodes` (sorted by 'hash'). 
+        nodes (NDArray): See `KmerGraph.nodes`. 
         used_hashes (frozenset[np.uint64]): K-mers and nodes with these hash values are kept. 
 
     Returns:

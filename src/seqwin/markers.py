@@ -49,7 +49,7 @@ from .assemblies import Assemblies
 from .kmers import KmerGraph
 from .ncbi import blast
 from .graph import OrderedKmers
-from .utils import print_time_delta, log_and_raise, file_to_write, mp_wrapper, most_common, most_common_weighted
+from .utils import print_time_delta, log_and_raise, file_to_write, mp_wrapper
 from .config import Config, RunState, HAS_BLAST, WORKINGDIR, BLASTCONFIG, CONSEC_KMER_TH, LEN_TH_MUL
 
 # Set ConnectedKmers.is_bad as True if any of these warnings is present
@@ -351,139 +351,6 @@ class ConnectedKmers(object):
             warnings.add('inconsistent')
 
         return graph_order
-
-    @staticmethod
-    def __get_strand(loc: pd.DataFrame, ref_order: OrderedKmers, warnings: set) -> pd.DataFrame:
-        """Determine the orientation of the subgraph in each assembly, based on k-mer ordering 
-        ('+': forward, '-': reverse, '?': undetermined, 'u': single k-mer). 
-
-        Args:
-            loc (pd.DataFrame): See `ConnectedKmers.loc`. 
-            ref_order (OrderedKmers): The reference k-mer ordering (representative or graph). 
-            warnings (set): See `ConnectedKmers.warnings`. 
-
-        Returns:
-            pd.DataFrame: See `ConnectedKmers.loc` (with updated 'strand' column). 
-        """
-        # initialize
-        loc['strand'] = '?'
-
-        if ref_order != ref_order.rev:
-            # forward and reverse ordering is not the same
-            loc['strand'] = loc['kmers'].apply(ref_order.which_strand)
-            warnings.update(ref_order.warning)
-
-            # handle sequences with only one shared k-mer with ref_order (strand as 'u'), deprecated
-            # not needed if using graph_order as ref, since these are sequences with only one k-mer
-            # loc = ConnectedKmers.__get_strand_single(loc, ref_order, warnings)
-        else:
-            # k-mer ordering is reversible
-            warnings.add('rev')
-            # determine strand based on 'kmer_strand', deprecated
-            # loc = ConnectedKmers.__get_strand_ks(loc)
-
-        return loc
-
-    @staticmethod
-    def __get_strand_single(loc: pd.DataFrame, ref_order: OrderedKmers, warnings: set) -> pd.DataFrame:
-        """Handle rows in `ConnectedKmers.loc` that have only one shared k-mer with `ref_order`. 
-
-        Args:
-            loc (pd.DataFrame): See `ConnectedKmers.loc`. 
-            ref_order (OrderedKmers): The reference k-mer ordering (representative or graph). 
-            warnings (set): See `ConnectedKmers.warnings`. 
-
-        Returns:
-            pd.DataFrame: See `ConnectedKmers.loc` (with updated 'strand' column). 
-        """
-        is_single = (loc['strand'] == 'u')
-        if not is_single.any():
-            return loc
-
-        # get kmer_strand of ref_order
-        # it's likely that they all have the same kmer_strand, but just in case we find the most common one
-        loc_ref = loc[loc['kmers'] == ref_order]
-        if len(loc_ref) > 0:
-            ref_strand: str = most_common(loc_ref['kmer_strand'])
-        else:
-            # ref_order is not found in loc
-            # might happen when the most common order and graph_order is not the same
-            return loc
-        strand_map = {kmer: strand for kmer, strand in zip(ref_order, ref_strand)}
-
-        # determine strand by k-mer strand
-        def which_strand(row: pd.Series) -> str:
-            """To be applied to all rows of loc[is_single]. 
-            """
-            # here row['kmers'] can have one k-mer, or multiple k-mers but only one of them is found in ref_order
-            for kmer, strand in zip(row['kmers'], row['kmer_strand']):
-                try:
-                    if strand == strand_map[kmer]:
-                        return '+'
-                    else:
-                        return '-'
-                except KeyError:
-                    # the current k-mer is not included in the most common ordering
-                    continue
-            # no shared k-mer with mc_order, which should not happen since this is handled in OrderedKmers.which_strand()
-            warnings.add('single_?')
-            return '?'
-        loc.loc[is_single, 'strand'] = loc[is_single].apply(which_strand, axis=1)
-        return loc
-
-    def __get_strand_ks(loc: pd.DataFrame, warnings: set) -> pd.DataFrame:
-        """Determine sequence strand based on 'kmer_strand'. Only used when strand cannot be determined by k-mer ordering
-        (e.g., forward and reverse ordering are the same (ABA), or mc_order has only one k-mer). 
-        NOTE: forward / reverse strand might have the same k-mer strand ordering (e.g., '++--'). 
-
-        Args:
-            loc (pd.DataFrame): See `ConnectedKmers.loc`. 
-            warnings (set): See `ConnectedKmers.warnings`. 
-
-        Returns:
-            pd.DataFrame: See `ConnectedKmers.loc` (with updated 'strand' column). 
-        """
-        # get the most common 'kmer_strand', weighted by the number of k-mers
-        mc_strand: str = most_common_weighted(loc['kmer_strand'])
-        # reverse complement of mc_strand
-        mc_strand_rc = mc_strand.translate(_KMER_STRAND_COMP)[::-1]
-
-        def which_strand(kmer_strand: str) -> str:
-            if kmer_strand == mc_strand:
-                return '+'
-            elif kmer_strand == mc_strand_rc:
-                return '-'
-            elif (kmer_strand in mc_strand) and (kmer_strand not in mc_strand_rc):
-                return '+'
-            elif (kmer_strand in mc_strand_rc) and (kmer_strand not in mc_strand):
-                return '-'
-            else: # undetermined strand
-                warnings.add('rev_?')
-                return '?'
-        loc['strand'] = loc['kmer_strand'].apply(which_strand)
-        return loc
-
-    @staticmethod
-    def __filter(loc: pd.DataFrame) -> pd.DataFrame:
-        """Remove abnormal rows in loc. 
-
-        Args:
-            loc (pd.DataFrame): See `ConnectedKmers.loc`. 
-
-        Returns:
-            pd.DataFrame: See `ConnectedKmers.loc` (with rows removed). 
-        """
-        # remove sequences with
-        # 1. only one k-mer
-        loc = loc[loc['n_kmers'] > 1]
-        # 2. undetermined strand
-        loc = loc[(loc['strand'] == '+') | (loc['strand'] == '-')]
-        # 3. abnormal length (should be done last)
-        # a possible scenario resulting in a super long sequence is a long run of 'N's in the original sequence
-        # Indexlr will skip those 'N's and there will be a huge gap between the coordinates of neighboring k-mers
-        med_len = np.median(loc['len'])
-        loc = loc[loc['len'] < LEN_TH_MUL*med_len]
-        return loc
 
 
 def _create_ck(
