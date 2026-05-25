@@ -16,13 +16,23 @@ namespace seqwin {
  */
 class ThreadPool;
 
+struct ThreadGraph {
+    std::vector<Kmer> kmers;
+    NoInitArray<std::uint64_t> idx;
+    std::vector<Node> nodes;
+    std::vector<Edge> edges;
+    std::vector<std::vector<std::string>> ids_by_assembly;
+    std::size_t n_kmers = 0;
+    std::size_t start_assembly = 0;
+};
+
 void log_python(
     const std::string& message,
     const std::string& level = "info"
 );
 
 Graph merge_thread_graphs(
-    std::vector<Graph>& graphs,
+    std::vector<ThreadGraph>& graphs,
     std::size_t n_assemblies,
     ThreadPool& pool
 );

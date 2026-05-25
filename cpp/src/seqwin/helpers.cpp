@@ -21,7 +21,7 @@ struct IdxSegment {
 };
 
 template <typename T, typename MemberPtr>
-std::vector<T> concat(std::vector<Graph>& graphs, MemberPtr member, ThreadPool& pool)
+std::vector<T> concat(std::vector<ThreadGraph>& graphs, MemberPtr member, ThreadPool& pool)
 {
     std::vector<T> out;
     if (graphs.empty()) {
@@ -54,14 +54,14 @@ std::vector<T> concat(std::vector<Graph>& graphs, MemberPtr member, ThreadPool& 
     return out;
 }
 
-std::vector<Node> concat_nodes(std::vector<Graph>& graphs, ThreadPool& pool)
+std::vector<Node> concat_nodes(std::vector<ThreadGraph>& graphs, ThreadPool& pool)
 {
-    return concat<Node>(graphs, &Graph::nodes, pool);
+    return concat<Node>(graphs, &ThreadGraph::nodes, pool);
 }
 
-std::vector<Edge> concat_edges(std::vector<Graph>& graphs, ThreadPool& pool)
+std::vector<Edge> concat_edges(std::vector<ThreadGraph>& graphs, ThreadPool& pool)
 {
-    return concat<Edge>(graphs, &Graph::edges, pool);
+    return concat<Edge>(graphs, &ThreadGraph::edges, pool);
 }
 
 // 1. Parallel LSD radix sort based on hash (stable)
@@ -154,13 +154,13 @@ static std::vector<IdxSegment> merge_nodes(
     return idx_segments;
 }
 
-static std::vector<Kmer> merge_kmers(
+static NoInitArray<Kmer> merge_kmers(
     const std::vector<IdxSegment>& idx_segments,
-    std::vector<Graph>& graphs,
+    std::vector<ThreadGraph>& graphs,
     std::size_t total_kmers,
     ThreadPool& pool
 ) {
-    std::vector<Kmer> kmers(total_kmers);
+    NoInitArray<Kmer> kmers(total_kmers);
 
     pool.parallel_for(idx_segments.size(), [&](std::size_t start, std::size_t end, std::size_t) {
         for (std::size_t s = start; s < end; ++s) {
@@ -177,14 +177,14 @@ static std::vector<Kmer> merge_kmers(
     return kmers;
 }
 
-static std::vector<std::uint64_t> merge_idx(
+static NoInitArray<std::uint64_t> merge_idx(
     const std::vector<IdxSegment>& idx_segments,
     const std::vector<std::uint64_t>& kmer_offsets,
-    const std::vector<Graph>& graphs,
+    const std::vector<ThreadGraph>& graphs,
     std::size_t total_kmers,
     ThreadPool& pool
 ) {
-    std::vector<std::uint64_t> idx(total_kmers);
+    NoInitArray<std::uint64_t> idx(total_kmers);
 
     pool.parallel_for(idx_segments.size(), [&](std::size_t start, std::size_t end, std::size_t) {
         for (std::size_t s = start; s < end; ++s) {
@@ -290,7 +290,7 @@ void log_python(const std::string& message, const std::string& level)
 }
 
 Graph merge_thread_graphs(
-    std::vector<Graph>& graphs,
+    std::vector<ThreadGraph>& graphs,
     std::size_t n_assemblies,
     ThreadPool& pool
 ) {
@@ -316,7 +316,7 @@ Graph merge_thread_graphs(
             graph.n_kmers,
             pool
         );
-        std::vector<std::uint64_t>().swap(graph.idx);
+        graph.idx.reset();
 
         return {
             std::move(kmers),
@@ -350,7 +350,7 @@ Graph merge_thread_graphs(
 
     auto idx = merge_idx(idx_segments, kmer_offsets, graphs, total_kmers, pool);
     for (auto& graph : graphs) {
-        std::vector<std::uint64_t>().swap(graph.idx);
+        graph.idx.reset();
     }
 
     std::vector<std::vector<std::string>> ids_by_assembly(n_assemblies);
@@ -360,7 +360,7 @@ Graph merge_thread_graphs(
         }
     }
 
-    std::vector<Graph>().swap(graphs);
+    std::vector<ThreadGraph>().swap(graphs);
 
     return {
         std::move(kmers),
@@ -383,10 +383,12 @@ Graph filter_kmers(
     Graph graph;
     graph.nodes.reserve(used_hashes.size());
 
+    std::vector<std::size_t> used_node_indices;
+    used_node_indices.reserve(used_hashes.size());
+
+    std::size_t n_kmers = 0;
     std::size_t node_i = 0;
     std::size_t used_i = 0;
-    std::uint64_t new_start = 0;
-
     while (node_i < n_nodes && used_i < used_hashes.size()) {
         const auto node_hash = nodes[node_i].hash;
         const auto used_hash = used_hashes[used_i];
@@ -400,6 +402,17 @@ Graph filter_kmers(
             continue;
         }
 
+        used_node_indices.push_back(node_i);
+        n_kmers += static_cast<std::size_t>(nodes[node_i].stop - nodes[node_i].start);
+        ++node_i;
+        ++used_i;
+    }
+
+    graph.kmers = NoInitArray<Kmer>(n_kmers);
+    graph.idx = NoInitArray<std::uint64_t>(n_kmers);
+
+    std::uint64_t new_start = 0;
+    for (const auto node_i : used_node_indices) {
         const Node& old_node = nodes[node_i];
         const auto old_start = old_node.start;
         const auto old_stop = old_node.stop;
@@ -410,12 +423,14 @@ Graph filter_kmers(
         new_node.stop = new_start + size;
         graph.nodes.push_back(new_node);
 
-        graph.kmers.insert(graph.kmers.end(), kmers + old_start, kmers + old_stop);
-        graph.idx.insert(graph.idx.end(), idx + old_start, idx + old_stop);
+        for (std::uint64_t k = 0; k < size; ++k) {
+            const auto out_i = static_cast<std::size_t>(new_start + k);
+            const auto in_i = static_cast<std::size_t>(old_start + k);
+            graph.kmers[out_i] = kmers[in_i];
+            graph.idx[out_i] = idx[in_i];
+        }
 
         new_start += size;
-        ++node_i;
-        ++used_i;
     }
 
     return graph;

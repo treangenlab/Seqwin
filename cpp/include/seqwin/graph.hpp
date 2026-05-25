@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 
+#include "seqwin/no_init_array.hpp"
+
 namespace seqwin {
 
 struct Kmer {
@@ -29,13 +31,11 @@ struct Edge {
 };
 
 struct Graph {
-    std::vector<Kmer> kmers;
-    std::vector<std::uint64_t> idx;
+    NoInitArray<Kmer> kmers;
+    NoInitArray<std::uint64_t> idx;
     std::vector<Node> nodes;
     std::vector<Edge> edges;
     std::vector<std::vector<std::string>> ids_by_assembly;
-    std::size_t n_kmers = 0;
-    std::size_t start_assembly = 0;
 };
 
 Graph build(

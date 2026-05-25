@@ -43,7 +43,7 @@ struct EdgeState {
     std::size_t last_seen_assembly = std::numeric_limits<std::size_t>::max();
 };
 
-Graph build_worker(
+ThreadGraph build_worker(
     const std::vector<std::string>& assembly_paths,
     std::size_t kmerlen,
     std::size_t windowsize,
@@ -61,7 +61,7 @@ Graph build_worker(
         windowsize
     );
 
-    Graph graph;
+    ThreadGraph graph;
     graph.kmers.reserve(n_kmers_est);
     graph.ids_by_assembly.resize(end_assembly - start_assembly);
     graph.start_assembly = start_assembly;
@@ -151,7 +151,7 @@ Graph build_worker(
     }
     std::unordered_map<EdgeKey, EdgeState, EdgeKeyHash>().swap(edge_map);
 
-    graph.idx.resize(graph.n_kmers);
+    graph.idx = NoInitArray<std::uint64_t>(graph.n_kmers);
     std::uint64_t cursor = 0;
     for (auto& [hash, state] : node_map) {
         (void)hash;
@@ -210,7 +210,7 @@ Graph build(
     }
 
     ThreadPool pool(n_workers);
-    std::vector<Graph> graphs(n_workers);
+    std::vector<ThreadGraph> graphs(n_workers);
 
     const std::size_t base = n_assemblies / n_workers;
     const std::size_t rem = n_assemblies % n_workers;
