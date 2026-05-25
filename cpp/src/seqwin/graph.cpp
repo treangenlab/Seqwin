@@ -43,7 +43,7 @@ struct EdgeState {
     std::size_t last_seen_assembly = std::numeric_limits<std::size_t>::max();
 };
 
-Graph build_worker(
+ThreadGraph build_worker(
     const std::vector<std::string>& assembly_paths,
     std::size_t kmerlen,
     std::size_t windowsize,
@@ -61,7 +61,7 @@ Graph build_worker(
         windowsize
     );
 
-    Graph graph;
+    ThreadGraph graph;
     graph.kmers.reserve(n_kmers_est);
     graph.ids_by_assembly.resize(end_assembly - start_assembly);
     graph.start_assembly = start_assembly;
@@ -144,14 +144,14 @@ Graph build_worker(
     }
 
     // Create edges first to reduce peak memory
-    graph.edges.resize(edge_map.size());
+    graph.edges = NoInitArray<Edge>(edge_map.size());
     std::size_t edge_i = 0;
     for (const auto& [key, state] : edge_map) {
         graph.edges[edge_i++] = Edge{key.first, key.second, state.weight};
     }
     std::unordered_map<EdgeKey, EdgeState, EdgeKeyHash>().swap(edge_map);
 
-    graph.idx.resize(graph.n_kmers);
+    graph.idx = NoInitArray<std::uint64_t>(graph.n_kmers);
     std::uint64_t cursor = 0;
     for (auto& [hash, state] : node_map) {
         (void)hash;
@@ -165,7 +165,7 @@ Graph build_worker(
         graph.idx[node_it->second.cursor++] = static_cast<std::uint64_t>(i);
     }
 
-    graph.nodes.resize(node_map.size());
+    graph.nodes = NoInitArray<Node>(node_map.size());
     std::size_t node_i = 0;
     for (const auto& [hash, state] : node_map) {
         const auto stop = state.start + state.count;
@@ -210,7 +210,7 @@ Graph build(
     }
 
     ThreadPool pool(n_workers);
-    std::vector<Graph> graphs(n_workers);
+    std::vector<ThreadGraph> graphs(n_workers);
 
     const std::size_t base = n_assemblies / n_workers;
     const std::size_t rem = n_assemblies % n_workers;
