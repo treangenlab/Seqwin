@@ -37,7 +37,7 @@ GZIP_EXT = '.gz'
 BASE_COMP = str.maketrans('ATCGatcg', 'TAGCtagc') # Translation table for complement DNA bases
 
 class StartMethod(str, Enum):
-    """Start methods for multiprocessing. 
+    """Start methods for multiprocessing.
     """
     spawn = 'spawn'
     fork = 'fork'
@@ -50,12 +50,12 @@ _START_METHOD = (
 
 @dataclass(slots=True, frozen=True)
 class SharedArr:
-    """Class for a NumPy array attached to a SharedMemory instance. 
+    """Class for a NumPy array attached to a SharedMemory instance.
 
     Attributes:
-        name (str): Name of the SharedMemory instance. 
-        shape (tuple): Shape of the NumPy array. 
-        dtype (DTypeLike): dtype of the NumPy array. 
+        name (str): Name of the SharedMemory instance.
+        shape (tuple): Shape of the NumPy array.
+        dtype (DTypeLike): dtype of the NumPy array.
     """
     name: str
     shape: tuple[int, ...]
@@ -63,18 +63,18 @@ class SharedArr:
 
 
 def print_time_delta(seconds: float) -> None:
-    """Print time in seconds. 
+    """Print time in seconds.
     """
     logger.info(f' - Finished in {datetime.timedelta(seconds=seconds)}')
 
 
 def log_and_raise(
-    exception: type[Exception] = Exception, 
-    msg: str = '', 
-    from_none: bool = False, 
+    exception: type[Exception] = Exception,
+    msg: str = '',
+    from_none: bool = False,
     from_e: BaseException | None = None
 ) -> None:
-    """Log and raise an error. 
+    """Log and raise an error.
 
     Args:
         exception (type[Exception], optional): Exception type. [Exception]
@@ -96,29 +96,29 @@ def log_and_raise(
 
 
 def overwrite_warning(path: Path) -> None:
-    """Log overwrite warning. 
+    """Log overwrite warning.
     """
     logger.warning(f'File/directory already exists, content is overwritten (overwriting is turned on): {path}')
 
 
 def overwrite_error(path: Path) -> None:
-    """Raise FileExistsError. 
+    """Raise FileExistsError.
     """
     log_and_raise(FileExistsError, f'File/directory already exists, and overwriting is turned off: {path}', from_none=True)
 
 
 def read_text(path: Path) -> str:
-    """Read a UTF-8 text file with universal newline normalization. 
+    """Read a UTF-8 text file with universal newline normalization.
     """
     with open(path, 'r', encoding='utf-8', newline=None) as f:
         return f.read()
 
 
 def mkdir(path: Path, overwrite: bool=False, verbose=False) -> None:
-    """Create a directory. If the directory exists, remove it or raise an error. 
+    """Create a directory. If the directory exists, remove it or raise an error.
 
     Args:
-        path (Path): Path of the directory to be created. 
+        path (Path): Path of the directory to be created.
         overwrite (bool, optional): If True and the dir already exists, delete the existing dir and create a new empty one. [False]
         verbose (bool, optional): If True, print a warning message when content is overwritten. [False]
     """
@@ -137,10 +137,10 @@ def mkdir(path: Path, overwrite: bool=False, verbose=False) -> None:
 
 
 def file_to_write(path: Path, overwrite: bool=False, verbose=False) -> None:
-    """Prepare to write a file. If the file exists, remove it or raise an error. 
+    """Prepare to write a file. If the file exists, remove it or raise an error.
 
     Args:
-        path (Path): Path of the file to write. 
+        path (Path): Path of the file to write.
         overwrite (bool, optional): If True and the file already exists, delete the existing file. [False]
         verbose (bool, optional): If True, print a warning message when content is overwritten. [False]
     """
@@ -156,17 +156,17 @@ def file_to_write(path: Path, overwrite: bool=False, verbose=False) -> None:
 
 
 def list_dir(
-    path: Path = Path.cwd(), 
+    path: Path = Path.cwd(),
     mode: Literal['a', 'd', 'f'] = 'a'
 ) -> list[Path]:
-    """List all subdirectories and/or files under a directory. 
+    """List all subdirectories and/or files under a directory.
 
     Args:
         path (Path, optional): Path of the directory to list. ['./']
         mode (str, optional): 'd' to list subdirectories, 'f' to list files, 'a' to list all. ['a']
 
     Returns:
-        list: A list of sub-directories and/or files, sorted by names. 
+        list: A list of sub-directories and/or files, sorted by names.
     """
     # sanity check
     if not path.is_dir():
@@ -185,19 +185,19 @@ def list_dir(
 
 
 def run_cmd(
-    *args: str | Path, 
-    stdin: str | None = None, 
+    *args: str | Path,
+    stdin: str | None = None,
     raise_error: bool = True
 ) -> subprocess.CompletedProcess[str]:
-    """Run a command using subprocess.run(). Example usage: run_cmd('ls', '-a'). 
+    """Run a command using subprocess.run(). Example usage: run_cmd('ls', '-a').
 
     Args:
-        *args (str | Path): Command arguments. Must be strings or paths. 
+        *args (str | Path): Command arguments. Must be strings or paths.
         stdin (str, optional): Standard input. [None]
         raise_error (bool, optional): If True, raise an error if the command did not run successfully. [True]
 
     Returns:
-        CompletedProcess: command outputs, including stdout and stderr. 
+        CompletedProcess: command outputs, including stdout and stderr.
     """
     for a in args:
         if not isinstance(a, (str, Path)):
@@ -215,32 +215,32 @@ def run_cmd(
 
 
 def mp_wrapper(
-    func: Callable, 
-    all_args: Iterable, 
-    n_cpu: int=1, 
-    text: str | None=None, 
-    starmap: bool=True, 
-    unpack_output: bool=False, 
-    n_jobs: int | None=None, 
+    func: Callable,
+    all_args: Iterable,
+    n_cpu: int=1,
+    text: str | None=None,
+    starmap: bool=True,
+    unpack_output: bool=False,
+    n_jobs: int | None=None,
     start_method: StartMethod | None=_START_METHOD
 ) -> list:
-    """Wrapper for multiprocessing.Pool(). 
+    """Wrapper for multiprocessing.Pool().
 
     Args:
-        func (Callable): Function for multiprocessing. 
-        all_args (Iterable): Iterable of function arguments/parameters. 
+        func (Callable): Function for multiprocessing.
+        all_args (Iterable): Iterable of function arguments/parameters.
         n_cpu (int, optional): Number of processes to run in parallel. [1]
         text (str | None, optional): Message to be printed when multiprocessing starts. [None]
-        starmap (bool, optional): Use pool.starmap if True (func takes multiple arguments); 
+        starmap (bool, optional): Use pool.starmap if True (func takes multiple arguments);
             use pool.map if False (func takes only one argument). [True]
         unpack_output (bool, optional): If func has multiple output, return multiple lists instead of a single list of tuples. [False]
-        n_jobs (int | None, optional): Number of elements in `all_args`. 
+        n_jobs (int | None, optional): Number of elements in `all_args`.
             Helps determine the `chunksize` option for `pool.map` and `pool.starmap`. None to let Python decide. [None]
-        start_method (str | None, optional): Set the start method for multiprocessing ('fork', 'spawn', 'forkserver'). 
-            By default, 'spawn' is used for Windows and 'fork' for other systems. Use None to let Python decide. 
+        start_method (str | None, optional): Set the start method for multiprocessing ('fork', 'spawn', 'forkserver').
+            By default, 'spawn' is used for Windows and 'fork' for other systems. Use None to let Python decide.
 
     Returns:
-        list: A list of func outputs, in the same order as all_args. 
+        list: A list of func outputs, in the same order as all_args.
     """
     tik = time()
     if text:
@@ -279,14 +279,14 @@ def mp_wrapper(
 
 
 def get_chunks(ls: Sequence, n: int=1) -> Generator[Sequence, None, None]:
-    """Yield `n` roughly same size chunks of from a list. 
+    """Yield `n` roughly same size chunks of from a list.
 
     Args:
-        ls (Sequence): A list or list-alike. 
+        ls (Sequence): A list or list-alike.
         n (int): Number of chunks. [1]
 
     Yields:
-        Sequence: Chunks of ls. 
+        Sequence: Chunks of ls.
     """
     l = len(ls)
     size, remainder = divmod(l, n)
@@ -302,7 +302,7 @@ def get_chunks(ls: Sequence, n: int=1) -> Generator[Sequence, None, None]:
 
 
 def get_dups(iterable: Iterable[Hashable]) -> set:
-    """Returns a set of duplicated element(s) in an iterable. All elements should be Hashable. 
+    """Returns a set of duplicated element(s) in an iterable. All elements should be Hashable.
     """
     seen = set()
     duplicates = list()
@@ -315,15 +315,15 @@ def get_dups(iterable: Iterable[Hashable]) -> set:
 
 
 def concat_to_shm(arrays: Sequence[NDArray]) -> SharedArr:
-    """Concat NumPy arrays along the first dimension into a shared memory block. 
-    - Each individual array is deleted during this process to save memory. 
-    - Arrays are copied as raw bytes to bypass overhead of NumPy assignment. 
+    """Concat NumPy arrays along the first dimension into a shared memory block.
+    - Each individual array is deleted during this process to save memory.
+    - Arrays are copied as raw bytes to bypass overhead of NumPy assignment.
 
     Args:
-        arrays (Sequence[NDArray]): Arrays to be concatenated. 
+        arrays (Sequence[NDArray]): Arrays to be concatenated.
 
     Returns:
-        SharedArr: The concatenated array attached to a SharedMemory instance. 
+        SharedArr: The concatenated array attached to a SharedMemory instance.
     """
     if not arrays:
         log_and_raise(ValueError, 'No array is provided')
@@ -343,7 +343,7 @@ def concat_to_shm(arrays: Sequence[NDArray]) -> SharedArr:
     n0 = sum(arr.shape[0] for arr in arrays)
     out_shape = (n0, *trailing_shape)
     out_shm = SharedMemory(
-        create=True, 
+        create=True,
         size=int(np.prod(out_shape, dtype=np.int64) * dtype.itemsize)
     )
     try:
@@ -369,16 +369,16 @@ def concat_to_shm(arrays: Sequence[NDArray]) -> SharedArr:
 
 
 def concat_from_shm(arrays: Sequence[SharedArr], n_cpu: int=1) -> NDArray:
-    """Concat SharedArr instances along the first dimension into a NumPy array. 
-    - Each SharedArr is unlinked during this process to save memory. 
-    - Arrays are copied as raw bytes, in parallel. 
+    """Concat SharedArr instances along the first dimension into a NumPy array.
+    - Each SharedArr is unlinked during this process to save memory.
+    - Arrays are copied as raw bytes, in parallel.
 
     Args:
-        arrays (Sequence[SharedArr]): Arrays to be concatenated. 
+        arrays (Sequence[SharedArr]): Arrays to be concatenated.
         n_cpu (int, optional): Number of threads to run in parallel. [1]
 
     Returns:
-        NDArray: The concatenated NumPy array. 
+        NDArray: The concatenated NumPy array.
     """
     if not arrays:
         log_and_raise(ValueError, 'No array is provided')
@@ -404,7 +404,7 @@ def concat_from_shm(arrays: Sequence[SharedArr], n_cpu: int=1) -> NDArray:
     # copy each array into its slot in out_buf as raw bytes, in parallel
     # we have to use thread-based parallelism to write to the same private memory block
     def copy_array(arr_name: str, offset: int, arr_size: int):
-        """The worker function for each thread. 
+        """The worker function for each thread.
         """
         arr_shm = SharedMemory(arr_name)
         try:
@@ -436,35 +436,35 @@ def concat_from_shm(arrays: Sequence[SharedArr], n_cpu: int=1) -> NDArray:
 
 
 def revcomp(seq: str) -> str:
-    """Return the reverse complement of a DNA sequence. 
+    """Return the reverse complement of a DNA sequence.
     """
     return seq.translate(BASE_COMP)[::-1]
 
 
 def most_common(iterable: Iterable[Hashable]):
-    """Return the most common element in an Iterable. 
-    All elements should be Hashable. 
+    """Return the most common element in an Iterable.
+    All elements should be Hashable.
     """
     return Counter(iterable).most_common(1)[0][0]
 
 
 def most_common_weighted(iterable: Iterable):
-    """Return the most common element in an Iterable, weighted by element length. 
-    Each element should be Hashable and Sized (e.g., tuple or str). 
+    """Return the most common element in an Iterable, weighted by element length.
+    Each element should be Hashable and Sized (e.g., tuple or str).
     """
     c = Counter(iterable)
     return max(c, key=lambda k: len(k)*c[k])
 
 
 def load_paths_txt(paths_txt: Path) -> list[Path]:
-    """Load file paths from a text file, with one path per line. 
-    Relative paths are resolved relative to the directory containing `paths_txt`. 
+    """Load file paths from a text file, with one path per line.
+    Relative paths are resolved relative to the directory containing `paths_txt`.
 
     Args:
-        paths_txt (Path): A text file with one path per line. 
+        paths_txt (Path): A text file with one path per line.
 
     Returns:
-        list[Path]: A list of valid and resolved file paths. 
+        list[Path]: A list of valid and resolved file paths.
     """
     paths_txt = paths_txt.resolve(strict=True)
     base_dir = paths_txt.parent
@@ -490,14 +490,14 @@ def load_paths_txt(paths_txt: Path) -> list[Path]:
 
 
 def load_fasta(path: Path) -> tuple[str, ...]:
-    """Parse an assembly file in FASTA format and return its sequences. 
-    Gzip files are supported (file name should end with .gz). 
+    """Parse an assembly file in FASTA format and return its sequences.
+    Gzip files are supported (file name should end with .gz).
 
     Args:
-        path (Path): Path to the FASTA file. If the file is gzipped, the extension should be .gz. 
+        path (Path): Path to the FASTA file. If the file is gzipped, the extension should be .gz.
 
     Returns:
-        tuple[str, ...]: Sequences of FASTA records (upper case), in the same order as they appear in the file. 
+        tuple[str, ...]: Sequences of FASTA records (upper case), in the same order as they appear in the file.
     """
     # read file content
     if path.suffix == GZIP_EXT:
@@ -532,16 +532,16 @@ def load_fasta(path: Path) -> tuple[str, ...]:
 
 if _HAS_BIO:
     def load_genbank(path: Path) -> tuple[dict[str, str], int]:
-        """Parse an assembly file in GenBank format, and get the sequences and IDs of all records. 
-        Gzip files are supported (file name should end with .gz). 
+        """Parse an assembly file in GenBank format, and get the sequences and IDs of all records.
+        Gzip files are supported (file name should end with .gz).
 
         Args:
-            path (Path): Path to the GenBank file. If the file is gzipped, the extension should be .gz. 
+            path (Path): Path to the GenBank file. If the file is gzipped, the extension should be .gz.
 
         Returns:
             tuple: A tuple containing
-                1. dict[str, str]: A dictionary with record ID as key and record sequence as value. 
-                2. int: Sum of the length of all sequence records. 
+                1. dict[str, str]: A dictionary with record ID as key and record sequence as value.
+                2. int: Sum of the length of all sequence records.
         """
         if path.suffix == GZIP_EXT:
             with gzip.open(path, 'rb') as f:
@@ -559,7 +559,7 @@ if _HAS_BIO:
             all_record[record_id] = seq
             all_id.append(record_id)
             total_len += len(seq)
-        
+
         # check duplicate record ID
         if len(all_id) != len(set(all_id)):
             logger.warning(f' - Duplicate record ID(s) {get_dups(all_id)}, in: {path}')
@@ -567,7 +567,7 @@ if _HAS_BIO:
 else:
     def load_genbank(path) -> None:
         log_and_raise(
-            ImportError, 
-            'Biopython is needed for parsing GenBank files', 
+            ImportError,
+            'Biopython is needed for parsing GenBank files',
             from_none=True
         )

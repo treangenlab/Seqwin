@@ -2,7 +2,7 @@
 Graph
 =====
 
-Graph utilities. 
+Graph utilities.
 
 Dependencies:
 -------------
@@ -47,25 +47,25 @@ EDGE_W: str = 'w' # Key for edge weight, used in networkx graphs. ['w']
 
 
 class WeightedGraph(Counter):
-    """A weighted graph object inherited from `collections.Counter`, with data structure of {edge: weight}. 
-    An edge should contain two hashable elements and ordering matters, with edge direction of (first -> second). 
+    """A weighted graph object inherited from `collections.Counter`, with data structure of {edge: weight}.
+    An edge should contain two hashable elements and ordering matters, with edge direction of (first -> second).
     """
     def __init__(self, edges: Iterable[tuple]=()) -> None:
-        """Create a weighted graph with an Iterable of edges. 
-        Each edge should be a tuple containing two hashable elements as nodes. 
-        Note that the ordering of the two nodes matters, with edge direction of (first node -> second node). 
+        """Create a weighted graph with an Iterable of edges.
+        Each edge should be a tuple containing two hashable elements as nodes.
+        Note that the ordering of the two nodes matters, with edge direction of (first node -> second node).
 
         Args:
-            edges (Iterable[tuple], optional): Each edge should be a tuple containing two hashable elements as nodes. 
-            Note that the ordering of the two nodes matters, with edge direction of (first node -> second node). 
+            edges (Iterable[tuple], optional): Each edge should be a tuple containing two hashable elements as nodes.
+            Note that the ordering of the two nodes matters, with edge direction of (first node -> second node).
         """
         super().__init__(edges)
 
     def add_path(self, nodes: Iterable, cyclic=False) -> None:
-        """Add a path to the weighted graph. 
+        """Add a path to the weighted graph.
 
         Args:
-            nodes (Iterable): A path will be constructed from the nodes (in order) and added to the graph. 
+            nodes (Iterable): A path will be constructed from the nodes (in order) and added to the graph.
             cyclic (bool, optional): If True, connect the last node back to the first node. [False]
         """
         nodes = iter(nodes)
@@ -77,38 +77,38 @@ class WeightedGraph(Counter):
             return
         if cyclic:
             stop_nodes = chain(stop_nodes, (first_node,))
-        
+
         # add edges to graph
         self.update(
             tuple((u, v)) for u, v in zip(start_nodes, stop_nodes)
         )
 
     def to_nxGraph(self) -> nx.Graph:
-        """Convert to networkx.Graph (undirected), with edge weights set as edge attribute EDGE_W. 
+        """Convert to networkx.Graph (undirected), with edge weights set as edge attribute EDGE_W.
         """
         return nx.Graph((*edge, {EDGE_W: weight}) for edge, weight in self.items())
 
 
 class OrderedKmers(tuple):
-    """Ordered k-mers created from an Iterable of integers. 
-    The `which_strand()` method can take another Iterable of k-mers and determine its strand ('+'/'-'/'?'/'u'), 
-    by comparing its ordering to self. 
+    """Ordered k-mers created from an Iterable of integers.
+    The `which_strand()` method can take another Iterable of k-mers and determine its strand ('+'/'-'/'?'/'u'),
+    by comparing its ordering to self.
 
     Attributes:
-        rev (tuple): K-mers in reversed order. 
-        is_dup (bool): True if there are duplicates in the k-mers. 
-        warning (set): For debugging only. 
+        rev (tuple): K-mers in reversed order.
+        is_dup (bool): True if there are duplicates in the k-mers.
+        warning (set): For debugging only.
 
     Examples:
         ```
         l = [
             (1,2,3,3,4,5),
             (5,4,3,3,2,1),
-            (1,2,3,4,5), 
-            (5,4,3,2,1), 
-            (2,), 
-            (0,), 
-            (6,5), 
+            (1,2,3,4,5),
+            (5,4,3,2,1),
+            (2,),
+            (0,),
+            (6,5),
             (9,10),
             (1,3,5),
             (2,3,4),
@@ -131,12 +131,12 @@ class OrderedKmers(tuple):
         return super().__new__(cls, kmers)
 
     def __init__(self, kmers: Iterable[int]) -> None:
-        """Ordered k-mers created from an Iterable of integers. 
-        The `which_strand()` method can take another Iterable of k-mers and determine its strand ('+'/'-'/'?'/'u'), 
-        by comparing its ordering to self. 
+        """Ordered k-mers created from an Iterable of integers.
+        The `which_strand()` method can take another Iterable of k-mers and determine its strand ('+'/'-'/'?'/'u'),
+        by comparing its ordering to self.
 
         Args:
-            kmers (Iterable[int]): K-mers as an Iterable of integers. 
+            kmers (Iterable[int]): K-mers as an Iterable of integers.
         """
         # here self is already created as a tuple
         # kmers is not used here, but have to keep it or it will raise a TypeError (for docstring as well)
@@ -144,19 +144,19 @@ class OrderedKmers(tuple):
         self._idx_map = {kmer: idx for idx, kmer in enumerate(self)}
         self.is_dup = len(self._idx_map) < self.__len__() # True if there are duplicated k-mers
         self.warning = set()
-    
+
     def which_strand(self, kmers: Iterable[int]) -> str:
-        """Given an Iterable of k-mers, compare its ordering to self and determine its strand ('+'/'-'/'?'/'u'). 
+        """Given an Iterable of k-mers, compare its ordering to self and determine its strand ('+'/'-'/'?'/'u').
 
         Args:
-            kmers (Iterable[int]): K-mers as an Iterable of integers. 
+            kmers (Iterable[int]): K-mers as an Iterable of integers.
 
         Returns:
             str: strand type
-            - '+': forward strand, 
-            - '-': reverse strand, 
-            - '?': unknown strand, 
-            - 'u': only one shared k-mer with self, so the strand has to be determined by other methods. 
+            - '+': forward strand,
+            - '-': reverse strand,
+            - '?': unknown strand,
+            - 'u': only one shared k-mer with self, so the strand has to be determined by other methods.
         """
         # keep in mind that there might be k-mers not found in self
         idx_map = self._idx_map
@@ -223,20 +223,20 @@ class OrderedKmers(tuple):
 
 
 def compose_weighted_graphs(graphs: Iterable[WeightedGraph]):
-    """Compose multiple WeightedGraph objects by adding the weights of same edges together. 
+    """Compose multiple WeightedGraph objects by adding the weights of same edges together.
 
     Args:
-        graphs (Iterable[WeightedGraph]): Graphs to be composed. 
+        graphs (Iterable[WeightedGraph]): Graphs to be composed.
 
     Returns:
-        WeightedGraph: The composed graph. 
+        WeightedGraph: The composed graph.
     """
     graphs = iter(graphs)
     try:
         merged_graph = next(graphs)
     except StopIteration:
         raise ValueError('No graph is given to compose. ')
-    
+
     merged_graph = merged_graph.copy() # a shallow copy
     for g in graphs:
         merged_graph.update(g)
@@ -244,11 +244,11 @@ def compose_weighted_graphs(graphs: Iterable[WeightedGraph]):
 
 
 def add_path_weighted(graph: nx.Graph, path: Sequence) -> None:
-    """Add a path to a weighted, undirected graph. Increment edge weight by 1 if the edge already exists. 
+    """Add a path to a weighted, undirected graph. Increment edge weight by 1 if the edge already exists.
 
     Args:
-        graph (nx.Graph): A weighted, undirected graph. 
-        path (Sequence): A path (sequence of nodes) to be added to graph. 
+        graph (nx.Graph): A weighted, undirected graph.
+        path (Sequence): A path (sequence of nodes) to be added to graph.
     """
     # loop through each consecutive pair of nodes in the path
     for i in range(len(path) - 1):
@@ -264,19 +264,19 @@ def add_path_weighted(graph: nx.Graph, path: Sequence) -> None:
 
 if _HAS_MPL:
     def draw_weighted_graph(
-        graph: nx.Graph, 
-        save_path: str | None=None, 
-        figsize: tuple | None=None, 
-        node_size: int=200, 
-        edge_width: int=2, 
-        font_size: int=8, 
+        graph: nx.Graph,
+        save_path: str | None=None,
+        figsize: tuple | None=None,
+        node_size: int=200,
+        edge_width: int=2,
+        font_size: int=8,
         seed: int=0
     ) -> None:
-        """Draw a NetworkX graph with edge attribute 'weight'. 
+        """Draw a NetworkX graph with edge attribute 'weight'.
         Code adapted from `networkx doc<https://networkx.org/documentation/stable/auto_examples/drawing/plot_weighted_graph.html>`__.
 
         Args:
-            graph (nx.Graph): A weighted, undirected graph. 
+            graph (nx.Graph): A weighted, undirected graph.
             save_path (str | None, optional): Path to save the figure in SVG format. None for showing the figure without saving. [None]
         """
         # positions for all nodes - seed for reproducibility
@@ -284,7 +284,7 @@ if _HAS_MPL:
 
         if figsize is not None:
             plt.figure(figsize=figsize)
-        
+
         # nodes
         nx.draw_networkx_nodes(graph, pos, node_size=node_size)
 
