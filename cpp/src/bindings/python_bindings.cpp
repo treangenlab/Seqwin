@@ -71,22 +71,22 @@ PYBIND11_MODULE(_core, m) {
                 owner->edges.data(),
                 capsule
             );
-            py::list all_idx_to_id;
+            py::list ids_by_assembly;
             for (const auto& ids : owner->ids_by_assembly) {
-                py::tuple idx_to_id(ids.size());
+                py::tuple ids_tuple(ids.size());
                 for (std::size_t i = 0; i < ids.size(); ++i) {
-                    idx_to_id[i] = ids[i];
+                    ids_tuple[i] = ids[i];
                 }
-                all_idx_to_id.append(idx_to_id);
+                ids_by_assembly.append(ids_tuple);
             }
 
-            return py::make_tuple(kmers, idx, nodes, edges, all_idx_to_id);
+            return py::make_tuple(kmers, idx, nodes, edges, ids_by_assembly);
         },
         py::arg("assembly_paths"),
         py::arg("kmerlen"),
         py::arg("windowsize"),
-        py::arg("assembly_idx"),
-        py::arg("is_target"),
+        py::arg("assembly_indices"),
+        py::arg("is_targets"),
         py::arg("n_cpu") = 1
     );
 

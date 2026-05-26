@@ -48,31 +48,31 @@ def test_build_threading_equivalence(targets_dir, non_targets_dir) -> None:
         non_targets_dir / 'non-target-1.fasta',
         non_targets_dir / 'non-target-2.fasta',
     ]
-    assembly_idx = [0, 1, 2, 3]
-    is_target = [True, True, False, False]
+    assembly_indices = [0, 1, 2, 3]
+    is_targets = [True, True, False, False]
 
     kmers_1, idx_1, nodes_1, edges_1, record_ids_1 = build(
         assembly_paths,
         kmerlen=7,
         windowsize=10,
-        assembly_idx=assembly_idx,
-        is_target=is_target,
+        assembly_indices=assembly_indices,
+        is_targets=is_targets,
         n_cpu=1,
     )
     kmers_2, idx_2, nodes_2, edges_2, record_ids_2 = build(
         assembly_paths,
         kmerlen=7,
         windowsize=10,
-        assembly_idx=assembly_idx,
-        is_target=is_target,
+        assembly_indices=assembly_indices,
+        is_targets=is_targets,
         n_cpu=2,
     )
     kmers_many, idx_many, nodes_many, edges_many, record_ids_many = build(
         assembly_paths,
         kmerlen=7,
         windowsize=10,
-        assembly_idx=assembly_idx,
-        is_target=is_target,
+        assembly_indices=assembly_indices,
+        is_targets=is_targets,
         n_cpu=99,
     )
 

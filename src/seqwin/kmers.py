@@ -49,13 +49,12 @@ class KmerGraph(object):
     2. Extract low-penalty subgraphs from the k-mer graph with `self.filter()`.
 
     Attributes:
-        kmers (NDArray[np.void]): A 1-D NumPy structured array of k-mers from all assemblies, with dtype `KMER_DTYPE` defined in `seqwin.graph`.
-            Grouped and sorted by k-mer hashes.
+        kmers (NDArray[np.void]): A 1-D NumPy structured array of k-mers from all assemblies, grouped and sorted by k-mer hashes.
         idx (NDArray[np.uint64] | None): The original indices assigned when k-mers are generated (ordered by genomic positions).
             Parallel to `kmers`.
-        nodes (NDArray[np.void]): A 1-D NumPy structured array of k-mer nodes, with dtype `NODE_DTYPE` defined in `seqwin.graph`.
+        nodes (NDArray[np.void]): A 1-D NumPy structured array of k-mer nodes.
             For each node, `kmers[node['start']:node['stop']]` is the k-mer group with `node['hash']`.
-        edges (NDArray[np.void]): A 1-D NumPy structured array of weighted, undirected edges, with dtype `EDGE_DTYPE` defined in `seqwin.graph`.
+        edges (NDArray[np.void]): A 1-D NumPy structured array of weighted, undirected edges.
             Edge weight is the number of assemblies where the two k-mers are adjacent.
         graph (nx.Graph): The graph instance built from filtered nodes and edges.
         subgraphs (tuple[frozenset[np.uint64], ...] | None): Low-penalty subgraphs. Each subgraph is a set of k-mer hash values.
