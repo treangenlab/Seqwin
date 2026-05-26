@@ -79,9 +79,6 @@ ThreadGraph build_worker(
 
     for (std::size_t assembly_i = start_assembly; assembly_i < end_assembly; ++assembly_i) {
         const auto assembly_idx = assembly_indices[assembly_i];
-        if (assembly_idx > std::numeric_limits<std::uint16_t>::max()) {
-            throw std::runtime_error("Assembly index exceeds uint16 range");
-        }
         const bool is_target = is_targets[assembly_i];
 
         auto records = seqwin::read_fasta(assembly_paths[assembly_i]);
@@ -201,8 +198,8 @@ Graph build(
             "assembly_paths, assembly_indices, and is_targets must have the same length");
     }
     for (std::size_t i = 0; i < assembly_indices.size(); ++i) {
-        if (assembly_indices[i] != i) {
-            throw std::runtime_error("assembly_indices must be strictly incremental from 0 to N-1");
+        if (assembly_indices[i] > std::numeric_limits<std::uint16_t>::max()) {
+            throw std::runtime_error("Assembly index exceeds uint16 range");
         }
     }
 
