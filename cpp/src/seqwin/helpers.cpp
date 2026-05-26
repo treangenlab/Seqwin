@@ -13,6 +13,9 @@ namespace py = pybind11;
 namespace seqwin {
 namespace {
 
+/**
+ * @brief Describes a contiguous local `idx` segment and its output position.
+ */
 struct IdxSegment {
     std::size_t thread_id;
     std::size_t local_start;
@@ -64,9 +67,15 @@ NoInitArray<Edge> concat_edges(std::vector<ThreadGraph>& graphs, ThreadPool& poo
 }
 
 /**
- * 1. Parallel LSD radix sort based on hash (stable)
- * 2. Merge nodes with the same hash
- * 3. Build segment metadata for final materialization
+ * @brief Sort and merge nodes with identical hashes.
+ *
+ * 1. Parallel LSD radix sort on node hash.
+ * 2. Merge nodes with the same hash.
+ * 3. Return local `idx` segment metadata to materialize `kmers`.
+ *
+ * @param nodes Node array to sort and merge.
+ * @param pool Thread pool used for radix sorting.
+ * @return Segment metadata for rebuilding `kmers` and `idx`.
  */
 static std::vector<IdxSegment> merge_nodes(
     NoInitArray<Node>& nodes,
