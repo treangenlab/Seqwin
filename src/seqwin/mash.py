@@ -79,7 +79,7 @@ def sketch(
         log_text = f' - Generating MinHash sketches with Mash for {len(assembly_path)} assemblies...'
         assembly_path = assembly_path[0]
     else:
-        log_and_raise(ValueError, 'Invalid assembly_path for mash_sketch, must be str or list.')
+        log_and_raise(ValueError, 'Invalid assembly_path for mash_sketch, must be str or list')
 
     # determine output path (Mash appends .msh to the output path)
     if out_path is None:

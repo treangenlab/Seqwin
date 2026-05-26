@@ -192,7 +192,7 @@ class Config(BaseModel):
         if (not HAS_DATASETS) and (self.tar_taxa or self.neg_taxa):
             raise FileNotFoundError(
                 ('ncbi-datasets-cli is not installed. Genomes cannot be downloaded from the '
-                'provided taxon names or IDs. Please provide local file paths instead.'))
+                'provided taxon names or IDs. Please provide local files instead'))
 
         if not self.download_only:
             if (self.tar_paths is None) and (self.tar_taxa is None) and (self.tar_dir is None):

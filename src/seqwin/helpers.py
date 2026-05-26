@@ -161,7 +161,7 @@ def get_subgraphs(
         log_and_raise(
             RuntimeError,
             ('No low-penalty subgraph was found. '
-            'Try decrease --stringency, or increase --penalty-th (penalty threshold, check log for the calculated value).')
+            'Try decrease --stringency, or increase --penalty-th (penalty threshold, check log for the calculated value)')
         )
 
     # due to the greedy nature of node expansion, subgraphs created first are usually larger

@@ -205,7 +205,7 @@ def download_taxon(
             log_and_raise(
                 RuntimeError,
                 (f'Genome package might be incomplete {tax_dir}\n'
-                'Consider deleting it and try again.'),
+                'Consider deleting it and try again'),
                 from_e=e
             )
         logger.info(f' - Found {len(assembly_paths)} genome assemblies.')

@@ -446,9 +446,9 @@ def get_assemblies(config: Config, state: RunState) -> Assemblies:
             neg_paths.extend(_get_paths_dir(neg_dir))
 
         if not tar_paths:
-            log_and_raise(RuntimeError, msg='No target assembly found.')
+            log_and_raise(RuntimeError, msg='No target assembly found')
         if not neg_paths:
-            log_and_raise(RuntimeError, msg='No non-target assembly found.')
+            log_and_raise(RuntimeError, msg='No non-target assembly found')
 
         # check if all paths are unique
         all_paths = tar_paths + neg_paths

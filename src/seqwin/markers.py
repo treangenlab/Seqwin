@@ -617,7 +617,7 @@ def eval_markers(
     # blast check all markers against all / non-target assemblies
     blast_out = blast(all_seqs, db=blastdb, task=BLASTCONFIG.task, columns=BLASTCONFIG.columns, n_cpu=n_cpu, batch_size=BLASTCONFIG.batch_size)
     if len(blast_out) == 0:
-        log_and_raise(RuntimeError, 'No BLAST hit found.')
+        log_and_raise(RuntimeError, 'No BLAST hit found')
     # blast_out.to_pickle('blast_out.pkl')
 
     #---------- extract BLAST hits of each marker ----------#
