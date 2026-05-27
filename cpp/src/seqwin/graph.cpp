@@ -53,6 +53,7 @@ ThreadGraph build_worker(
     std::size_t end_assembly,
     std::size_t thread_id
 ) {
+    // Estimate total minimizer count in all assemblies
     const auto n_kmers_est = seqwin::est_kmer_number(
         std::vector<std::string>(
             assembly_paths.begin() + static_cast<std::ptrdiff_t>(start_assembly),
@@ -66,7 +67,7 @@ ThreadGraph build_worker(
     graph.ids_by_assembly.resize(end_assembly - start_assembly);
     graph.start_assembly = start_assembly;
 
-    std::vector<std::uint64_t> hashes;
+    std::vector<std::uint64_t> hashes; // Used to build ThreadGraph.idx
     hashes.reserve(n_kmers_est);
 
     // Reserving for unordered_map will actually allocate physical memory
@@ -78,38 +79,34 @@ ThreadGraph build_worker(
 
     for (std::size_t assembly_i = start_assembly; assembly_i < end_assembly; ++assembly_i) {
         const auto assembly_idx = assembly_indices[assembly_i];
-        if (assembly_idx > std::numeric_limits<std::uint16_t>::max()) {
-            throw std::runtime_error("assembly_idx must fit in uint16");
-        }
-        const auto assembly_idx16 = static_cast<std::uint16_t>(assembly_idx);
         const bool is_target = is_targets[assembly_i];
 
         auto records = seqwin::read_fasta(assembly_paths[assembly_i]);
-        auto& record_IDs = graph.ids_by_assembly[assembly_i - start_assembly];
-        record_IDs.resize(records.size());
+        auto& record_ids = graph.ids_by_assembly[assembly_i - start_assembly];
+        record_ids.resize(records.size());
 
         for (std::size_t record_idx = 0; record_idx < records.size(); ++record_idx) {
             if (record_idx > std::numeric_limits<std::uint16_t>::max()) {
-                throw std::runtime_error("record_idx must fit in uint16");
+                throw std::runtime_error("Number of FASTA records exceeds uint16 range");
             }
-            const auto record_idx16 = static_cast<std::uint16_t>(record_idx);
-
             auto& record = records[record_idx];
-            record_IDs[record_idx] = std::move(record.id);
+            record_ids[record_idx] = std::move(record.id);
 
+            // Generate minimizers for the current record
             const auto mins = btllib::minimize_sequence(record.sequence, kmerlen, windowsize);
 
             for (const auto& m : mins) {
                 if (m.pos > std::numeric_limits<std::uint32_t>::max()) {
-                    throw std::runtime_error("minimizer position exceeds uint32 range");
+                    throw std::runtime_error("Minimizer position exceeds uint32 range");
                 }
                 graph.kmers.push_back(Kmer{
                     static_cast<std::uint32_t>(m.pos),
-                    record_idx16,
-                    assembly_idx16
+                    static_cast<std::uint16_t>(record_idx),
+                    static_cast<std::uint16_t>(assembly_idx)
                 });
                 hashes.push_back(m.out_hash);
 
+                // Add this minimizer to an existing node, or create a new node
                 auto [node_it, node_inserted] = node_map.try_emplace(m.out_hash);
                 ++(node_it->second.count);
                 if (node_inserted || node_it->second.last_seen_assembly != assembly_i) {
@@ -123,10 +120,12 @@ ThreadGraph build_worker(
                 ++graph.n_kmers;
             }
 
+            // Current record is too short for an edge
             if (mins.size() < 2) {
                 continue;
             }
 
+            // Add undirected edges
             for (std::size_t i = 0; i + 1 < mins.size(); ++i) {
                 auto u = mins[i].out_hash;
                 auto v = mins[i + 1].out_hash;
@@ -143,7 +142,7 @@ ThreadGraph build_worker(
         }
     }
 
-    // Create edges first to reduce peak memory
+    // Materialize edges first to reduce peak memory
     graph.edges = NoInitArray<Edge>(edge_map.size());
     std::size_t edge_i = 0;
     for (const auto& [key, state] : edge_map) {
@@ -151,6 +150,7 @@ ThreadGraph build_worker(
     }
     std::unordered_map<EdgeKey, EdgeState, EdgeKeyHash>().swap(edge_map);
 
+    // Build ThreadGraph.idx (grouped by minimizer hash)
     graph.idx = NoInitArray<std::uint64_t>(graph.n_kmers);
     std::uint64_t cursor = 0;
     for (auto& [hash, state] : node_map) {
@@ -195,11 +195,11 @@ Graph build(
     if (assembly_paths.size() != assembly_indices.size() ||
         assembly_paths.size() != is_targets.size()) {
         throw std::runtime_error(
-            "assembly_paths, assembly_idx, and is_target must have the same length");
+            "assembly_paths, assembly_indices, and is_targets must have the same length");
     }
     for (std::size_t i = 0; i < assembly_indices.size(); ++i) {
-        if (assembly_indices[i] != i) {
-            throw std::runtime_error("assembly_indices must be strictly incremental from 0 to N-1");
+        if (assembly_indices[i] > std::numeric_limits<std::uint16_t>::max()) {
+            throw std::runtime_error("Assembly index exceeds uint16 range");
         }
     }
 
@@ -209,7 +209,7 @@ Graph build(
         n_workers = std::min(n_workers, n_assemblies);
     }
 
-    ThreadPool pool(n_workers);
+    ThreadPool pool(n_workers); // Avoid spawning threads every time
     std::vector<ThreadGraph> graphs(n_workers);
 
     const std::size_t base = n_assemblies / n_workers;

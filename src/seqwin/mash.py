@@ -2,7 +2,7 @@
 Mash
 ====
 
-Assembly distance estimation with `Mash <https://doi.org/10.1186/s13059-016-0997-x>`__. 
+Assembly distance estimation with `Mash <https://doi.org/10.1186/s13059-016-0997-x>`__.
 
 Dependencies:
 ------------
@@ -37,31 +37,31 @@ _DIST_COL = ('ref', 'query', 'dist', 'pval', 'jaccard') # output columns of `mas
 
 
 def sketch(
-    assembly_path: Path | Iterable[Path], 
-    kmerlen: int = 21, 
-    sketchsize: int = 1000, 
-    out_path: Path | None = None, 
-    overwrite: bool = False, 
+    assembly_path: Path | Iterable[Path],
+    kmerlen: int = 21,
+    sketchsize: int = 1000,
+    out_path: Path | None = None,
+    overwrite: bool = False,
     n_cpu: int = 1
 ) -> Path:
-    """Create a Mash / MinHash sketch for a single assembly, or a merged sketch for multiple assemblies. 
+    """Create a Mash / MinHash sketch for a single assembly, or a merged sketch for multiple assemblies.
 
     Args:
-        assembly_path (Path | list[Path]): Path to the assembly file in FASTA format, or a list of assembly paths. 
+        assembly_path (Path | list[Path]): Path to the assembly file in FASTA format, or a list of assembly paths.
         kmerlen (int, optional): k-mer length. [21]
         sketchsize (int, optional): Sketch size (number of non-redundant k-mers). [1000]
-        out_path (Path | None, optional): Output path for the sketch file. 
+        out_path (Path | None, optional): Output path for the sketch file.
             If None, output to `assembly_path + '.msh'` or `assembly_path[0] + '.msh'`. [None]
         overwrite (bool, optional): If True, overwrite the existing Mash sketch file. [False]
         n_cpu (int, optional): Number of processes to run in parallel. [1]
 
     Returns:
-        Path: Path to the Mash sketch file (.msh). 
+        Path: Path to the Mash sketch file (.msh).
     """
     args = [
-        'mash', 'sketch', 
-        '-k', str(kmerlen), 
-        '-s', str(sketchsize), 
+        'mash', 'sketch',
+        '-k', str(kmerlen),
+        '-s', str(sketchsize),
         '-p', str(n_cpu)
     ]
 
@@ -79,7 +79,7 @@ def sketch(
         log_text = f' - Generating MinHash sketches with Mash for {len(assembly_path)} assemblies...'
         assembly_path = assembly_path[0]
     else:
-        log_and_raise(ValueError, 'Invalid assembly_path for mash_sketch, must be str or list.')
+        log_and_raise(ValueError, 'Invalid assembly_path for mash_sketch, must be str or list')
 
     # determine output path (Mash appends .msh to the output path)
     if out_path is None:
@@ -104,30 +104,30 @@ def sketch(
 
 
 def dist(
-    ref_path: Path, 
-    query_path: Path | None = None, 
+    ref_path: Path,
+    query_path: Path | None = None,
     n_cpu: int = 1
 ) -> pd.DataFrame:
-    """Run `mash dist {ref_path} {query_path}` and parse the TSV output as a pandas DataFrame. 
-    Note: high memory usage when the number of assemblies in the sketch file is large. 
-    
+    """Run `mash dist {ref_path} {query_path}` and parse the TSV output as a pandas DataFrame.
+    Note: high memory usage when the number of assemblies in the sketch file is large.
+
     Args:
-        ref_path (Path): Path to the reference sketch file. It could include multiple sketches, merged with the 'mash paste' command. 
+        ref_path (Path): Path to the reference sketch file. It could include multiple sketches, merged with the 'mash paste' command.
         query_path (Path | None, optional): Path to the query sketch. If None, query ref_path against itself. [None]
         n_cpu (int, optional): Number of processes to run in parallel. [1]
 
     Returns:
-        pd.DataFrame: Tabular output of `mash dist`, each row is an assembly pair, 
-            with columns ['ref', 'query', 'dist', 'pval', 'jaccard', 'shared', 'total']. 
+        pd.DataFrame: Tabular output of `mash dist`, each row is an assembly pair,
+            with columns ['ref', 'query', 'dist', 'pval', 'jaccard', 'shared', 'total'].
     """
     if query_path is None:
         query_path = ref_path
 
     logger.info(' - Calculating Mash distances of assembly pairs...')
     cmd_out = run_cmd(
-        'mash', 'dist', 
-        '-p', str(n_cpu), 
-        ref_path, 
+        'mash', 'dist',
+        '-p', str(n_cpu),
+        ref_path,
         query_path
     )
     # parse stdout; pd.read_csv() does auto type conversion
@@ -138,32 +138,32 @@ def dist(
 
 
 def get_jaccard(
-    ref_path: Path, 
-    query_path: Path | None = None, 
-    n_cpu: int = 1, 
+    ref_path: Path,
+    query_path: Path | None = None,
+    n_cpu: int = 1,
     bufsize: int = 1_000_000
 ) -> Generator[float, None, None]:
-    """Estimate the pairwise Jaccard index between (each assembly sketch in the query) 
-    and (each assembly sketch in the reference), with `mash dist`. Use a stream pipe to save memory. 
-    
+    """Estimate the pairwise Jaccard index between (each assembly sketch in the query)
+    and (each assembly sketch in the reference), with `mash dist`. Use a stream pipe to save memory.
+
     Args:
-        ref_path (Path): Path to the reference sketch file. It could include multiple sketches, merged with the 'mash paste' command. 
+        ref_path (Path): Path to the reference sketch file. It could include multiple sketches, merged with the 'mash paste' command.
         query_path (Path | None, optional): Path to the query sketch. If None, query ref_path against itself. [None]
         n_cpu (int, optional): Number of processes to run in parallel. [1]
         bufsize (int, optional): `bufsize` option for `subprocess.Popen`. [1_000_000]
 
     Yields:
-        float: Jaccard index of each assembly pair. 
+        float: Jaccard index of each assembly pair.
     """
     if query_path is None:
         query_path = ref_path
 
     logger.info(' - Calculating Jaccard indices of assembly pairs...')
     proc = subprocess.Popen(
-        ('mash', 'dist', '-p', str(n_cpu), ref_path, query_path), 
-        stdout=subprocess.PIPE, 
+        ('mash', 'dist', '-p', str(n_cpu), ref_path, query_path),
+        stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        text=True, 
+        text=True,
         bufsize=bufsize
     )
 

@@ -2,7 +2,7 @@
 Assemblies
 ==========
 
-Create an instance for all input genome assemblies. 
+Create an instance for all input genome assemblies.
 
 Dependencies:
 -------------
@@ -32,7 +32,6 @@ from pathlib import Path
 from io import BufferedWriter
 from time import time
 from queue import Empty
-from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
 
@@ -47,52 +46,52 @@ from .utils import print_time_delta, log_and_raise, mkdir, file_to_write, \
 from .config import Config, RunState, WORKINGDIR, BLASTCONFIG
 
 _FASTA_EXT = (
-    '.fna', '.fasta', '.fna.gz', '.fasta.gz', 
+    '.fna', '.fasta', '.fna.gz', '.fasta.gz',
     '.fa', '.fas', '.fa.gz', '.fas.gz'
 )
 
 
 class Assemblies(pd.DataFrame):
-    """Package all input genome assemblies as a pandas DataFrame. 
+    """Package all input genome assemblies as a pandas DataFrame.
 
     Attributes:
-        path (pd.Series[Path]): Assembly paths. 
-        is_target (pd.Series[bool]): True for target assemblies. 
-        record_ids (pd.Series[tuple[str, ...] | None]): Record IDs of each assembly. 
+        path (pd.Series[Path]): Assembly paths.
+        is_target (pd.Series[bool]): True for target assemblies.
+        record_ids (pd.Series[tuple[str, ...] | None]): Record IDs of each assembly.
     """
     def __init__(self, tar_paths: list[Path], neg_paths: list[Path]) -> None:
-        """Package all input genome assemblies as a pandas DataFrame. 
+        """Package all input genome assemblies as a pandas DataFrame.
 
         Args:
-            tar_paths (list[Path]): A list of paths to target assemblies. 
-            neg_paths (list[Path]): A list of paths to non-target assemblies. 
+            tar_paths (list[Path]): A list of paths to target assemblies.
+            neg_paths (list[Path]): A list of paths to non-target assemblies.
         """
         data = dict(
-            path=tar_paths + neg_paths, 
-            is_target=[True]*len(tar_paths) + [False]*len(neg_paths), 
+            path=tar_paths + neg_paths,
+            is_target=[True]*len(tar_paths) + [False]*len(neg_paths),
             record_ids=None
         )
         super().__init__(data)
 
     def mash(self, kmerlen: int, sketchsize: int, out_path: Path, overwrite: bool, n_cpu: int) -> NDArray[np.floating]:
-        """Calculate the Jaccard indices of all assembly pairs with Mash. 
+        """Calculate the Jaccard indices of all assembly pairs with Mash.
 
         Args:
-            kmerlen (int): K-mer length for `mash sketch`. 
-            sketchsize (int): Sketch size for `mash sketch`. 
-            out_path (Path): Output path for the Mash sketch file (.msh). 
-            overwrite (bool): If True, overwrite the existing Mash sketch file. 
-            n_cpu (int): Number of processes to run in parallel. 
+            kmerlen (int): K-mer length for `mash sketch`.
+            sketchsize (int): Sketch size for `mash sketch`.
+            out_path (Path): Output path for the Mash sketch file (.msh).
+            overwrite (bool): If True, overwrite the existing Mash sketch file.
+            n_cpu (int): Number of processes to run in parallel.
 
         Returns:
-            NDArray[np.floating]: A matrix of Jaccard indices of all assembly pairs. 
+            NDArray[np.floating]: A matrix of Jaccard indices of all assembly pairs.
         """
         mash_sketch = sketch(
-            self.path.tolist(), 
-            kmerlen=kmerlen, 
-            sketchsize=sketchsize, 
-            out_path=out_path, 
-            overwrite=overwrite, 
+            self.path.tolist(),
+            kmerlen=kmerlen,
+            sketchsize=sketchsize,
+            out_path=out_path,
+            overwrite=overwrite,
             n_cpu=n_cpu
         )
         return np.array(
@@ -100,21 +99,21 @@ class Assemblies(pd.DataFrame):
         ).reshape(len(self), len(self))
 
     def fetch_seq(self, loc: pd.DataFrame, n_cpu: int) -> pd.Series:
-        """Fetch the actual sequences for a DataFrame of assembly locations. 
-        - Fetching the sequence of each location one by one is slow, since it needs layers of indices to 
-        access the actual sequence (assembly, record, start and stop). 
-        - To solve this, rows from the same assembly are grouped together, 
-        and different groups are fetched in parallel. 
+        """Fetch the actual sequences for a DataFrame of assembly locations.
+        - Fetching the sequence of each location one by one is slow, since it needs layers of indices to
+        access the actual sequence (assembly, record, start and stop).
+        - To solve this, rows from the same assembly are grouped together,
+        and different groups are fetched in parallel.
 
         Args:
-            loc (pd.DataFrame): Assembly locations. Row indices are kept in the returned Series, but the 
-                ordering might be different. To make sure the returned Series has the same order as `loc`, 
-                row indices should be sorted with `ascending=True`. 
-                Required columns: ['assembly_idx', 'record_idx', 'start', 'stop']. 
-            n_cpu (int): Number of processes to run in parallel. 
+            loc (pd.DataFrame): Assembly locations. Row indices are kept in the returned Series, but the
+                ordering might be different. To make sure the returned Series has the same order as `loc`,
+                row indices should be sorted with `ascending=True`.
+                Required columns: ['assembly_idx', 'record_idx', 'start', 'stop'].
+            n_cpu (int): Number of processes to run in parallel.
 
         Returns:
-            pd.Series: A sequence is fetched for each row in `loc`. indices are sorted with `ascending=True`. 
+            pd.Series: A sequence is fetched for each row in `loc`. indices are sorted with `ascending=True`.
         """
         # group sequences by assembly_idx
         loc: dict[int, pd.DataFrame] = dict(tuple(
@@ -130,11 +129,11 @@ class Assemblies(pd.DataFrame):
 
         # fetch the actual sequences by start and stop in the source sequences
         fetch_seq_args = zip(
-            loc.values(), 
+            loc.values(),
             all_src_paths
         )
         all_seq: pd.Series = pd.concat(
-            mp_wrapper(_fetch_seq, fetch_seq_args, n_cpu, n_jobs=len(loc)), 
+            mp_wrapper(_fetch_seq, fetch_seq_args, n_cpu, n_jobs=len(loc)),
             axis=0
         )
         # sort the returned sequences by the original ordering (before groupby)
@@ -142,21 +141,21 @@ class Assemblies(pd.DataFrame):
         return all_seq
 
     def makeblastdb(self, prefix: Path, neg_only: bool, overwrite: bool, n_cpu: int) -> Path:
-        """Create a BLAST database for all (or non-target) assemblies. Use native Python streaming and multiprocessing. 
-        - Note: macOS (x64 or ARM) has a hard-wired pipe buffer size of 64kB (vs. 1MB on Linux), so `makeblastdb` will 
+        """Create a BLAST database for all (or non-target) assemblies. Use native Python streaming and multiprocessing.
+        - Note: macOS (x64 or ARM) has a hard-wired pipe buffer size of 64kB (vs. 1MB on Linux), so `makeblastdb` will
         be a lot slower on a Mac when the input is streamed to `stdin`. While on Linux the difference is negligible
-        due to the larger buffer size. 
+        due to the larger buffer size.
 
         Args:
-            prefix (Path): Output directory of the BLAST database. 
-            neg_only (bool): If True, create the BLAST database on non-target assemblies only. 
-            overwrite (bool): If True, overwrite prefix if it already exists. 
-            n_cpu (int): Number of processes to run in parallel. 
+            prefix (Path): Output directory of the BLAST database.
+            neg_only (bool): If True, create the BLAST database on non-target assemblies only.
+            overwrite (bool): If True, overwrite prefix if it already exists.
+            n_cpu (int): Number of processes to run in parallel.
 
         Returns:
-            Path: Path to the BLAST database. 
+            Path: Path to the BLAST database.
         """
-        # NOTE: when the size of the blastdb changes, the evalue of a specific hit also changes. 
+        # NOTE: when the size of the blastdb changes, the evalue of a specific hit also changes.
         # Since the evalue threshold for a blast task is set, this hit might not be included when the blastdb gets larger
         if neg_only:
             logger.info('Creating a BLAST database of non-target assemblies (less sensitive but faster)...')
@@ -175,19 +174,19 @@ class Assemblies(pd.DataFrame):
         # load fasta files and stream to stdin to save memory
         with mp.Manager() as manager:
             # only Manager().Queue() can be shared between processes (e.g, when used with Pool())
-            # so that different processes can put items in the same queue. 
+            # so that different processes can put items in the same queue.
             queue = manager.Queue(maxsize=BLASTCONFIG.queue_size+n_cpu) # set queue size to limit memory usage
             queue_idx = range(len(df)) # queue index must start from 0 (for df.index, this is not True when neg_only is True)
 
             # create a process for makeblastdb
             makeblastdb_args = [
-                'makeblastdb', 
-                '-title', title, 
-                '-dbtype', 'nucl', 
+                'makeblastdb',
+                '-title', title,
+                '-dbtype', 'nucl',
                 '-out', blastdb
             ]
             proc = subprocess.Popen(
-                makeblastdb_args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, 
+                makeblastdb_args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 text=False # use bytes
             )
 
@@ -208,8 +207,8 @@ class Assemblies(pd.DataFrame):
         # save command, stdout and stderr
         blast_log = prefix / WORKINGDIR.blast_log
         blast_log.write_text('\n'.join((
-            str(makeblastdb_args), 
-            stdout, 
+            str(makeblastdb_args),
+            stdout,
             stderr
         )))
         if proc.returncode != 0:
@@ -218,95 +217,23 @@ class Assemblies(pd.DataFrame):
         logger.info(f' - BLAST database created: {blastdb}')
         print_time_delta(time()-tik)
         return blastdb
-    
-    def __makeblastdb_cmd(self, title: str, prefix: Path, neg_only: bool, overwrite: bool, n_cpu: int) -> Path:
-        """Create a BLAST database for all or non-target assemblies. Use streaming with subprocess.run(shell=True) to save memory. 
-        `sd` is needed for modifying FASTA content, and `parallel` is needed for multiprocessing. 
-
-        Dependencies:
-        - sd (https://github.com/chmln/sd, https://anaconda.org/conda-forge/sd)
-        - parallel (https://www.gnu.org/software/parallel/, https://anaconda.org/conda-forge/parallel)
-
-        Args:
-            title (str): Name of the BLAST database. 
-            prefix (Path): Output directory of the BLAST database. 
-            neg_only (bool): If True, create the BLAST database on non-target assemblies only. 
-            overwrite (bool): If True, overwrite prefix if it already exists. 
-            n_cpu (int): Number of processes to run in parallel. 
-
-        Returns:
-            Path: Path to the BLAST database. 
-        """
-        # NOTE: when the size of the blastdb changes, the evalue of a specific hit also changes. 
-        # Since the evalue threshold for a blast task is set, this hit might not be included when the blastdb gets larger
-        if neg_only:
-            logger.info('Creating a BLAST database of non-target assemblies (less sensitive but faster)...')
-            df = self[self.is_target == False]
-            title += BLASTCONFIG.neg_only
-        else:
-            logger.info('Creating a BLAST database of all assemblies (more sensitive but slower)...')
-            df = self
-        tik = time()
-
-        # create a folder for BLAST
-        mkdir(prefix, overwrite)
-        blastdb = prefix / title
-
-        # make a tsv of assembly path, assembly index and is_target (input for GNU parallel)
-        assemblies_tsv = '\n'.join(
-            f'{p}\t{i}\t{BLASTCONFIG.bool2str[b]}' 
-            for p, i, b in zip(df.path, df.index, df.is_target)
-        )
-        
-        # GNU parallel command to modify assembly fasta headers (>record_id to >idx@is_target@record_id)
-        # {1}=assembly path, {2}=assembly index, {3}=is_target
-        # use zcat if the fasta file is gzipped, else use cat; then modify the headers with sd
-        # since this command uses shell syntax ([[ ... ]], &&, ||, and |), shell=True is necessary in subprocess
-        modify_fasta = '[[ {1} == *.gz ]] && zcat "{1}" || cat "{1}" | sd "^>" ">{2}%s{3}%s"' \
-            % (BLASTCONFIG.header_sep, BLASTCONFIG.header_sep)
-        
-        # command to create the blast db
-        makeblastdb = f'makeblastdb -title {title} -dbtype nucl -out {blastdb}'
-        
-        # load assembly files in paralle, and use pipes to save memory (shell=True)
-        # tried to use native python pipes with shell=False but failed
-        proc = subprocess.run(
-            rf"parallel -j {n_cpu} --colsep '\t' '{modify_fasta}' | {makeblastdb}", 
-            input=assemblies_tsv, 
-            shell=True, capture_output=True, text=True
-        )
-
-        # save the full command, stdout and stderr
-        blast_log = prefix / WORKINGDIR.blast_log
-        blast_log.write_text('\n'.join((
-            proc.args, 
-            proc.stdout, 
-            proc.stderr, 
-            assemblies_tsv
-        )))
-        if proc.returncode != 0:
-            log_and_raise(RuntimeError, msg=f'Failed to create the BLAST database. For details, please check {blast_log}')
-        
-        logger.info(f' - BLAST database created: {blastdb}')
-        print_time_delta(time()-tik)
-        return blastdb
 
 
 def _add_fasta_to_queue(path: Path, assembly_idx: int, is_target: bool, queue_idx: int, queue: mp.Queue) -> None:
     """
-    1. Add assembly index and is_target into the header lines of an assembly FASTA file. 
-    2. Put the modified FASTA file content, as well as its queue_idx in a queue. 
+    1. Add assembly index and is_target into the header lines of an assembly FASTA file.
+    2. Put the modified FASTA file content, as well as its queue_idx in a queue.
 
-    The use of queue_idx is to make sure that items in the queue can be fetched in order (in `_stream_to_stdin()`), 
-    so that the behavior is exactly the same as reading all FASTA files into memory using a single thread. 
+    The use of queue_idx is to make sure that items in the queue can be fetched in order (in `_stream_to_stdin()`),
+    so that the behavior is exactly the same as reading all FASTA files into memory using a single thread.
 
     Args:
-        path (Path): Path to the assembly FASTA file. 
-        assembly_idx (int): Assembly index. 
-        is_target (bool): True for target assemblies. 
-        queue_idx (int): Used to determine the order of assemblies in the queue. Must start from 0. 
-        queue (mp.Queue): queue_idx and modified FASTA file content are put into this queue. 
-            Use `mp.Manager().Queue()` to share this queue across different processes (e.g., when this function is called by `mp.Pool()`). 
+        path (Path): Path to the assembly FASTA file.
+        assembly_idx (int): Assembly index.
+        is_target (bool): True for target assemblies.
+        queue_idx (int): Used to determine the order of assemblies in the queue. Must start from 0.
+        queue (mp.Queue): queue_idx and modified FASTA file content are put into this queue.
+            Use `mp.Manager().Queue()` to share this queue across different processes (e.g., when this function is called by `mp.Pool()`).
     """
     # read file content as bytes
     if path.suffix == GZIP_EXT:
@@ -326,12 +253,12 @@ def _add_fasta_to_queue(path: Path, assembly_idx: int, is_target: bool, queue_id
 
 
 def _stream_to_stdin(queue: mp.Queue, n_items: int, proc_stdin: BufferedWriter) -> None:
-    """Get items from an indexed queue, and write them to the stdin of a process by the order of their indices. 
+    """Get items from an indexed queue, and write them to the stdin of a process by the order of their indices.
 
     Args:
-        queue (mp.Queue): Each queue item should be a tuple of (idx, data). 
-        n_items (int): Total number of items in the queue. 
-        proc_stdin (io.BufferedWriter): Standard input of a process (e.g., `subprocess.Popen().stdin`). 
+        queue (mp.Queue): Each queue item should be a tuple of (idx, data).
+        n_items (int): Total number of items in the queue.
+        proc_stdin (io.BufferedWriter): Standard input of a process (e.g., `subprocess.Popen().stdin`).
     """
     next_idx = 0
     buffer: dict[int, bytes] = dict()
@@ -352,77 +279,48 @@ def _stream_to_stdin(queue: mp.Queue, n_items: int, proc_stdin: BufferedWriter) 
     proc_stdin.flush() # empty stdin but don't close the process
 
 
-def _load_seq(
-    paths: list[Path], 
-    parser: Callable[[Path], tuple[dict[str, str], int]] = load_fasta, 
-    n_cpu: int = 1
-) -> list[dict[str, str]]:
-    """Deprecated. Load assembly sequences from files. 
-
-    Args:
-        paths (list[Path]): A list of paths to the assembly files. 
-        parser (Callable, optional): The function to parse the assembly files. It should return a dict of record id -> 
-            sequence (upper case), and the total number of bases in the assembly. Supported functions: `parsers.load_fasta()`, 
-            `parsers.load_genbank()`. [load_fasta]
-        n_cpu (int, optional): Number of processes to run in parallel. [1]
-
-    Returns:
-        list[dict[str,str]]: Each dict has record IDs as keys and record sequences as values. 
-    """
-    # load assembly files in paralelle
-    n_assemblies = len(paths)
-    logger.info(f' - Loading {n_assemblies} assembly files...')
-    all_seq, all_len = mp_wrapper(
-        parser, paths, n_cpu, 
-        starmap=False, unpack_output=True
-    )
-    total_len = sum(all_len)
-    logger.info(f' - Average assembly size: {total_len/n_assemblies:.0f} bp; total: {total_len} bp')
-    return all_seq
-
-
 def _fetch_seq(loc: pd.DataFrame, src_fasta: Path) -> pd.Series:
-    """Fetch sequences from a source FASTA file, based on their record id, start and stop coordinates. 
+    """Fetch sequences from a source FASTA file, based on their record id, start and stop coordinates.
 
     Args:
-        loc (pd.DataFrame): A group of sequences in the same assembly. Required columns: 'record_idx', 'start' and 'stop'. 
-        src_fasta (Path): Path to the assembly FASTA file. 
+        loc (pd.DataFrame): A group of sequences in the same assembly. Required columns: 'record_idx', 'start' and 'stop'.
+        src_fasta (Path): Path to the assembly FASTA file.
 
     Returns:
-        pd.Series: Fetched sequences with the same index of `loc`. 
+        pd.Series: Fetched sequences with the same index of `loc`.
     """
     src_seq = load_fasta(src_fasta)
     # NOTE: assume all forward strand
     return loc.apply(
-        lambda row: src_seq[row['record_idx']][row['start']:row['stop']], 
+        lambda row: src_seq[row['record_idx']][row['start']:row['stop']],
         axis=1
     )
 
 
 def _get_paths_dl(taxa_list: list[str], prefix: Path, config: Config) -> list[Path]:
-    """Download assembly files for each taxon, and return the file paths. 
+    """Download assembly files for each taxon, and return the file paths.
 
     Args:
-        taxa_list (list[str]): See `tar_taxa` and `neg_taxa` in `Config` in `config.py`. 
-        prefix (Path): Download prefix. 
-        config (Config): See `Config` in `config.py`. 
+        taxa_list (list[str]): See `tar_taxa` and `neg_taxa` in `Config` in `config.py`.
+        prefix (Path): Download prefix.
+        config (Config): See `Config` in `config.py`.
 
     Returns:
-        list[Path]: Paths to assembly files. 
+        list[Path]: Paths to assembly files.
     """
     paths = list()
     # download genome assemblies under each taxon
     for taxon in taxa_list:
         download_paths = download_taxon(
-            taxon=taxon, 
-            prefix=prefix, 
-            level=config.level, 
-            source=config.source, 
-            annotated=config.annotated, 
-            exclude_mag=config.exclude_mag, 
-            gzip=config.gzip, 
+            taxon=taxon,
+            prefix=prefix,
+            level=config.level,
+            source=config.source,
+            annotated=config.annotated,
+            exclude_mag=config.exclude_mag,
+            gzip=config.gzip,
             api_key=config.api_key.get_secret_value() if config.api_key is not None else None,
-            overwrite=config.overwrite, 
+            overwrite=config.overwrite,
             n_cpu=config.n_cpu
         )
         if download_paths is not None:
@@ -431,13 +329,13 @@ def _get_paths_dl(taxa_list: list[str], prefix: Path, config: Config) -> list[Pa
 
 
 def _get_paths_txt(paths_txt: Path) -> list[Path]:
-    """Load assembly paths from a text file. 
+    """Load assembly paths from a text file.
 
     Args:
-        paths_txt (Path): See `tar_paths` and `neg_paths` in `Config` in `config.py`. 
+        paths_txt (Path): See `tar_paths` and `neg_paths` in `Config` in `config.py`.
 
     Returns:
-        list[Path]: Paths to assembly files. 
+        list[Path]: Paths to assembly files.
     """
     paths = load_paths_txt(paths_txt)
     logger.info(f'Found {len(paths)} assemblies from {paths_txt}')
@@ -445,13 +343,13 @@ def _get_paths_txt(paths_txt: Path) -> list[Path]:
 
 
 def _get_paths_dir(input_dir: Path) -> list[Path]:
-    """Load assembly paths from a directory (non-recursive). 
+    """Load assembly paths from a directory (non-recursive).
 
     Args:
-        input_dir (Path): See `tar_dir` and `neg_dir` in `Config` in `config.py`. 
+        input_dir (Path): See `tar_dir` and `neg_dir` in `Config` in `config.py`.
 
     Returns:
-        list[Path]: Paths to assembly files. 
+        list[Path]: Paths to assembly files.
     """
     paths = list()
 
@@ -470,16 +368,16 @@ def _get_paths_dir(input_dir: Path) -> list[Path]:
 
 
 def _download(config: Config, working_dir: Path) -> tuple[list[Path], list[Path]]:
-    """Download assemblies and return file paths. Return empty lists if nothing to download. 
+    """Download assemblies and return file paths. Return empty lists if nothing to download.
 
     Args:
-        config (Config): See `Config` in `config.py`. 
-        working_dir (Path): See `RunState` in `config.py`. 
+        config (Config): See `Config` in `config.py`.
+        working_dir (Path): See `RunState` in `config.py`.
 
     Returns:
         tuple: A tuple containing
-            1. list[Path]: Paths to downloaded target assemblies. 
-            2. list[Path]: Paths to downloaded non-target assemblies. 
+            1. list[Path]: Paths to downloaded target assemblies.
+            2. list[Path]: Paths to downloaded non-target assemblies.
     """
     tar_taxa = config.tar_taxa
     neg_taxa = config.neg_taxa
@@ -514,15 +412,15 @@ def _download(config: Config, working_dir: Path) -> tuple[list[Path], list[Path]
 
 
 def get_assemblies(config: Config, state: RunState) -> Assemblies:
-    """Load assembly paths and package them in an Assemblies instance. 
-    If taxonomy names are provided, download the genome FASTA files from NCBI. 
+    """Load assembly paths and package them in an Assemblies instance.
+    If taxonomy names are provided, download the genome FASTA files from NCBI.
 
     Args:
-        config (Config): See `Config` in `config.py`. 
-        state (RunState): See `RunState` in `config.py`. 
+        config (Config): See `Config` in `config.py`.
+        state (RunState): See `RunState` in `config.py`.
 
     Returns:
-        Assemblies: The Assemblies instance. 
+        Assemblies: The Assemblies instance.
     """
     tar_paths_txt = config.tar_paths
     neg_paths_txt = config.neg_paths
@@ -548,9 +446,9 @@ def get_assemblies(config: Config, state: RunState) -> Assemblies:
             neg_paths.extend(_get_paths_dir(neg_dir))
 
         if not tar_paths:
-            log_and_raise(RuntimeError, msg='No target assembly found.')
+            log_and_raise(RuntimeError, msg='No target assembly found')
         if not neg_paths:
-            log_and_raise(RuntimeError, msg='No non-target assembly found.')
+            log_and_raise(RuntimeError, msg='No non-target assembly found')
 
         # check if all paths are unique
         all_paths = tar_paths + neg_paths

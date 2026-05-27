@@ -2,8 +2,8 @@
 Markers
 =======
 
-A core module of Seqwin. Extract candidate markers (signatures) from subgraphs of a k-mer graph 
-(`kmers.KmerGraph.subgraphs`). 
+A core module of Seqwin. Extract candidate markers (signatures) from subgraphs of a k-mer graph
+(`kmers.KmerGraph.subgraphs`).
 
 Dependencies:
 -------------
@@ -49,7 +49,7 @@ from .assemblies import Assemblies
 from .kmers import KmerGraph
 from .ncbi import blast
 from .graph import OrderedKmers
-from .utils import print_time_delta, log_and_raise, file_to_write, mp_wrapper, most_common, most_common_weighted
+from .utils import print_time_delta, log_and_raise, file_to_write, mp_wrapper
 from .config import Config, RunState, HAS_BLAST, WORKINGDIR, BLASTCONFIG, CONSEC_KMER_TH, LEN_TH_MUL
 
 # Set ConnectedKmers.is_bad as True if any of these warnings is present
@@ -65,18 +65,18 @@ _KMER_STRAND_COMP = str.maketrans('+-', '-+')
 @dataclass(slots=True, frozen=True)
 class MarkerMetrics:
     """
-    Metrics of a marker, calculated from its BLAST alignments against target / non-target assemblies. 
-    Metrics default to None if BLAST is not run. 
+    Metrics of a marker, calculated from its BLAST alignments against target / non-target assemblies.
+    Metrics default to None if BLAST is not run.
 
     Attributes:
-        conservation (float | None): Average fraction of identical bases between the marker and target assemblies. 
-        f_tar_hits (float | None): Fraction of target assemblies with a BLAST hit. 
-        divergence (float | None): Average fraction of mismatches and gaps between the marker and non-target assemblies. 
-        f_neg_hits (float | None): Fraction of non-target assemblies with a BLAST hit. 
-        avg_repeats_tar (float | None): Average number of repeats of this marker in target assemblies. 
-        avg_pident_tar (float | None): Average percentage of identical bases of all repeats in target assemblies. 
-        avg_repeats_neg (float | None): Average number of repeats of this marker in non-target assemblies. 
-        avg_pident_neg (float | None): Average percentage of identical bases of all repeats in non-target assemblies. 
+        conservation (float | None): Average fraction of identical bases between the marker and target assemblies.
+        f_tar_hits (float | None): Fraction of target assemblies with a BLAST hit.
+        divergence (float | None): Average fraction of mismatches and gaps between the marker and non-target assemblies.
+        f_neg_hits (float | None): Fraction of non-target assemblies with a BLAST hit.
+        avg_repeats_tar (float | None): Average number of repeats of this marker in target assemblies.
+        avg_pident_tar (float | None): Average percentage of identical bases of all repeats in target assemblies.
+        avg_repeats_neg (float | None): Average number of repeats of this marker in non-target assemblies.
+        avg_pident_neg (float | None): Average percentage of identical bases of all repeats in non-target assemblies.
     """
     conservation: float | None = None
     f_tar_hits: float | None = None
@@ -94,28 +94,28 @@ _BASELINE_METRICS = MarkerMetrics(**{f: .0 for f in _METRIC_NAMES})
 
 
 class ConnectedKmers(object):
-    """The candidate marker Class, created from a low-penalty subgraph of the k-mer graph `KmerGraph.graph`. 
+    """The candidate marker Class, created from a low-penalty subgraph of the k-mer graph `KmerGraph.graph`.
 
     Attributes:
-        graph (nx.Graph): A low-penalty subgraph of the k-mer graph `KmerGraph.graph`. 
-        kmers (pd.DataFrame): K-mers of each node in the subgraph, from all assemblies. 
-            It's a subset of `KmerGraph.kmers`, with index inherited. 
-            K-mers with adjacent indices are also adjacent in the assembly sequence. 
-        loc (pd.DataFrame): Location of the subgraph in each assembly. 
-            Columns: ['assembly_idx', 'record_idx', 'start', 'stop', 'n_kmers', 
-            'kmers', 'is_target', 'n_repeats', 'len', 'seq']. 
-        path (OrderedKmers | None): K-mer ordering in the graph. None if the graph is not linear. 
-        rep (pd.Series): Representative sequence of the subgraph (a certain row in `loc`). 
-        len (int): Length of the representative sequence. 
-        n_rep (int): Number of assemblies having the same k-mer order as the representative. 
-        blast (pd.DataFrame | None): The best BLAST hit of the representative sequence in each assembly. 
-        metrics (MarkerMetrics): Metrics calculated with BLAST. 
-        rep_ratio (float | None): Fraction of target assemblies that have the same k-mer ordering as the representative. 
-        warnings (set): Undesirable features of the k-mer ordering. 
-        is_bad (bool): Set as True if `warnings` has anything listed in `_BAD_WARNINGS`. 
+        graph (nx.Graph): A low-penalty subgraph of the k-mer graph `KmerGraph.graph`.
+        kmers (pd.DataFrame): K-mers of each node in the subgraph, from all assemblies.
+            It's a subset of `KmerGraph.kmers`, with index inherited.
+            K-mers with adjacent indices are also adjacent in the assembly sequence.
+        loc (pd.DataFrame): Location of the subgraph in each assembly.
+            Columns: ['assembly_idx', 'record_idx', 'start', 'stop', 'n_kmers',
+            'kmers', 'is_target', 'n_repeats', 'len', 'seq'].
+        path (OrderedKmers | None): K-mer ordering in the graph. None if the graph is not linear.
+        rep (pd.Series): Representative sequence of the subgraph (a certain row in `loc`).
+        len (int): Length of the representative sequence.
+        n_rep (int): Number of assemblies having the same k-mer order as the representative.
+        blast (pd.DataFrame | None): The best BLAST hit of the representative sequence in each assembly.
+        metrics (MarkerMetrics): Metrics calculated with BLAST.
+        rep_ratio (float | None): Fraction of target assemblies that have the same k-mer ordering as the representative.
+        warnings (set): Undesirable features of the k-mer ordering.
+        is_bad (bool): Set as True if `warnings` has anything listed in `_BAD_WARNINGS`.
     """
     __slots__ = (
-        'graph', 'kmers', 'loc', 'path', 'rep', 'len', 'n_rep', 'blast', 
+        'graph', 'kmers', 'loc', 'path', 'rep', 'len', 'n_rep', 'blast',
         'metrics', 'rep_ratio', 'warnings', 'is_bad'
     )
     graph: nx.Graph
@@ -132,17 +132,17 @@ class ConnectedKmers(object):
     is_bad: bool
 
     def __init__(self, graph: nx.Graph, kmers: pd.DataFrame, kmerlen: int) -> None:
-        """Given a subgraph of the k-mer graph, 
-        1. Determine the boundary of the subgraph in each assembly. 
-        2. Determine the representative k-mer order. 
-        3. (deprecated) Determine the orientation (strand, +/-) of the subgraph in each assembly. 
+        """Given a subgraph of the k-mer graph,
+        1. Determine the boundary of the subgraph in each assembly.
+        2. Determine the representative k-mer order.
+        3. (deprecated) Determine the orientation (strand, +/-) of the subgraph in each assembly.
 
         Args:
-            graph (nx.Graph): A connected low-penalty subgraph of the k-mer graph `KmerGraph.graph`. 
-            kmers (pd.DataFrame): K-mers of each node in the subgraph, from all assemblies. 
-                It's a subset of `KmerGraph.kmers`, with index inherited. 
-                K-mers with adjacent indices are also adjacent in the assembly sequence. 
-            kmerlen (int): See `Config` in `config.py`. 
+            graph (nx.Graph): A connected low-penalty subgraph of the k-mer graph `KmerGraph.graph`.
+            kmers (pd.DataFrame): K-mers of each node in the subgraph, from all assemblies.
+                It's a subset of `KmerGraph.kmers`, with index inherited.
+                K-mers with adjacent indices are also adjacent in the assembly sequence.
+            kmerlen (int): See `Config` in `config.py`.
         """
         warnings = set() # passed to methods to add warnings in-place
 
@@ -191,17 +191,17 @@ class ConnectedKmers(object):
 
     @staticmethod
     def __get_loc(kmers: pd.DataFrame, kmerlen: int) -> pd.DataFrame:
-        """Determine the location / boundary of the subgraph in each assembly. 
-        1. Find consecutive k-mers for each assembly. 
-        2. Determine the boundaries (start & stop) of each group of consecutive k-mers. 
-        3. Select the largest consecutive group for each assembly. 
+        """Determine the location / boundary of the subgraph in each assembly.
+        1. Find consecutive k-mers for each assembly.
+        2. Determine the boundaries (start & stop) of each group of consecutive k-mers.
+        3. Select the largest consecutive group for each assembly.
 
         Args:
-            kmers (pd.DataFrame): See `ConnectedKmers.__init__()`. 
-            kmerlen (int): See `Config` in `config.py`. 
+            kmers (pd.DataFrame): See `ConnectedKmers.__init__()`.
+            kmerlen (int): See `Config` in `config.py`.
 
         Returns:
-            pd.DataFrame: See `ConnectedKmers.loc`. 
+            pd.DataFrame: See `ConnectedKmers.loc`.
         """
         # sort by k-mer index
         # essentially the same as sorting by k-mer position ['assembly_idx', 'record_idx', 'pos']
@@ -226,10 +226,10 @@ class ConnectedKmers(object):
             by=['assembly_idx', 'record_idx', 'consec_gp'], as_index=False, sort=False, observed=True
         ).agg(
             # if we only need 'pos', "groupby()['pos'].agg(['first', 'last', 'size'])" is faster
-            start=pd.NamedAgg(column='pos', aggfunc='first'), 
-            stop=pd.NamedAgg(column='pos', aggfunc='last'), 
-            n_kmers=pd.NamedAgg(column='pos', aggfunc='size'), 
-            kmers=pd.NamedAgg(column='hash', aggfunc=tuple), 
+            start=pd.NamedAgg(column='pos', aggfunc='first'),
+            stop=pd.NamedAgg(column='pos', aggfunc='last'),
+            n_kmers=pd.NamedAgg(column='pos', aggfunc='size'),
+            kmers=pd.NamedAgg(column='hash', aggfunc=tuple),
             # kmer_strand=pd.NamedAgg(column='strand', aggfunc='sum'), # much faster than "lambda x: ''.join(x)"
             is_target=pd.NamedAgg(column='is_target', aggfunc='first'), # should be the same within each group
         )
@@ -255,18 +255,18 @@ class ConnectedKmers(object):
 
     @staticmethod
     def __get_rep_order(loc: pd.DataFrame, warnings: set) -> tuple[OrderedKmers, int]:
-        """Determine the representative k-mer order and the number of target assemblies having it. 
-        1. Find the most common canonical k-mer ordering in target assemblies, weighted by the number of k-mers. 
-        2. Sanity check. 
+        """Determine the representative k-mer order and the number of target assemblies having it.
+        1. Find the most common canonical k-mer ordering in target assemblies, weighted by the number of k-mers.
+        2. Sanity check.
 
         Args:
-            loc (pd.DataFrame): See `ConnectedKmers.loc`. 
-            warnings (set): See `ConnectedKmers.warnings`. 
+            loc (pd.DataFrame): See `ConnectedKmers.loc`.
+            warnings (set): See `ConnectedKmers.warnings`.
 
         Returns:
             tuple: A tuple containing
-                1. OrderedKmers: The representative k-mer order. 
-                2. int: See `ConnectedKmers.n_rep`. 
+                1. OrderedKmers: The representative k-mer order.
+                2. int: See `ConnectedKmers.n_rep`.
         """
         # count the number of each unique k-mer ordering in target assemblies
         tar_kmers = loc[loc['is_target'] == True]['kmers']
@@ -281,12 +281,12 @@ class ConnectedKmers(object):
 
         # get the most common canonical ordering, weighted by the number of k-mers
         rep_canonical = max(
-            c_canonical, 
+            c_canonical,
             key=lambda k: len(k)*c_canonical[k]
         )
         # get the most common orientation
         rep_order = OrderedKmers(max(
-            (rep_canonical, rep_canonical[::-1]), 
+            (rep_canonical, rep_canonical[::-1]),
             key=lambda k: c[k] # if k does not exist in tar_kmers, c will return 0 (e.g., only one orientation exists)
         ))
 
@@ -300,17 +300,17 @@ class ConnectedKmers(object):
 
     @staticmethod
     def __get_graph_order(graph: nx.Graph, rep_order: OrderedKmers, warnings: set) -> OrderedKmers | None:
-        """Determine k-mer order in the subgraph. 
-        1. Check if the subgraph is linear. Return None if not linear. 
-        2. If linear, determine its k-mer ordering and check if it has the same orientation as `rep_order`. 
+        """Determine k-mer order in the subgraph.
+        1. Check if the subgraph is linear. Return None if not linear.
+        2. If linear, determine its k-mer ordering and check if it has the same orientation as `rep_order`.
 
         Args:
-            graph (nx.Graph): See `ConnectedKmers.__init__()`. 
-            rep_order (OrderedKmers): See `ConnectedKmers.__get_rep_order()`. 
-            warnings (set): See `ConnectedKmers.warnings`. 
+            graph (nx.Graph): See `ConnectedKmers.__init__()`.
+            rep_order (OrderedKmers): See `ConnectedKmers.__get_rep_order()`.
+            warnings (set): See `ConnectedKmers.warnings`.
 
         Returns:
-            OrderedKmers | None: If the graph is linear, return the k-mer order in the graph; else return None. 
+            OrderedKmers | None: If the graph is linear, return the k-mer order in the graph; else return None.
         """
         # check linearity
         leaf_nodes = tuple(node for node in graph if graph.degree[node] == 1)
@@ -352,144 +352,11 @@ class ConnectedKmers(object):
 
         return graph_order
 
-    @staticmethod
-    def __get_strand(loc: pd.DataFrame, ref_order: OrderedKmers, warnings: set) -> pd.DataFrame:
-        """Determine the orientation of the subgraph in each assembly, based on k-mer ordering 
-        ('+': forward, '-': reverse, '?': undetermined, 'u': single k-mer). 
-
-        Args:
-            loc (pd.DataFrame): See `ConnectedKmers.loc`. 
-            ref_order (OrderedKmers): The reference k-mer ordering (representative or graph). 
-            warnings (set): See `ConnectedKmers.warnings`. 
-
-        Returns:
-            pd.DataFrame: See `ConnectedKmers.loc` (with updated 'strand' column). 
-        """
-        # initialize
-        loc['strand'] = '?'
-
-        if ref_order != ref_order.rev:
-            # forward and reverse ordering is not the same
-            loc['strand'] = loc['kmers'].apply(ref_order.which_strand)
-            warnings.update(ref_order.warning)
-
-            # handle sequences with only one shared k-mer with ref_order (strand as 'u'), deprecated
-            # not needed if using graph_order as ref, since these are sequences with only one k-mer
-            # loc = ConnectedKmers.__get_strand_single(loc, ref_order, warnings)
-        else:
-            # k-mer ordering is reversible
-            warnings.add('rev')
-            # determine strand based on 'kmer_strand', deprecated
-            # loc = ConnectedKmers.__get_strand_ks(loc)
-
-        return loc
-
-    @staticmethod
-    def __get_strand_single(loc: pd.DataFrame, ref_order: OrderedKmers, warnings: set) -> pd.DataFrame:
-        """Handle rows in `ConnectedKmers.loc` that have only one shared k-mer with `ref_order`. 
-
-        Args:
-            loc (pd.DataFrame): See `ConnectedKmers.loc`. 
-            ref_order (OrderedKmers): The reference k-mer ordering (representative or graph). 
-            warnings (set): See `ConnectedKmers.warnings`. 
-
-        Returns:
-            pd.DataFrame: See `ConnectedKmers.loc` (with updated 'strand' column). 
-        """
-        is_single = (loc['strand'] == 'u')
-        if not is_single.any():
-            return loc
-
-        # get kmer_strand of ref_order
-        # it's likely that they all have the same kmer_strand, but just in case we find the most common one
-        loc_ref = loc[loc['kmers'] == ref_order]
-        if len(loc_ref) > 0:
-            ref_strand: str = most_common(loc_ref['kmer_strand'])
-        else:
-            # ref_order is not found in loc
-            # might happen when the most common order and graph_order is not the same
-            return loc
-        strand_map = {kmer: strand for kmer, strand in zip(ref_order, ref_strand)}
-
-        # determine strand by k-mer strand
-        def which_strand(row: pd.Series) -> str:
-            """To be applied to all rows of loc[is_single]. 
-            """
-            # here row['kmers'] can have one k-mer, or multiple k-mers but only one of them is found in ref_order
-            for kmer, strand in zip(row['kmers'], row['kmer_strand']):
-                try:
-                    if strand == strand_map[kmer]:
-                        return '+'
-                    else:
-                        return '-'
-                except KeyError:
-                    # the current k-mer is not included in the most common ordering
-                    continue
-            # no shared k-mer with mc_order, which should not happen since this is handled in OrderedKmers.which_strand()
-            warnings.add('single_?')
-            return '?'
-        loc.loc[is_single, 'strand'] = loc[is_single].apply(which_strand, axis=1)
-        return loc
-
-    def __get_strand_ks(loc: pd.DataFrame, warnings: set) -> pd.DataFrame:
-        """Determine sequence strand based on 'kmer_strand'. Only used when strand cannot be determined by k-mer ordering
-        (e.g., forward and reverse ordering are the same (ABA), or mc_order has only one k-mer). 
-        NOTE: forward / reverse strand might have the same k-mer strand ordering (e.g., '++--'). 
-
-        Args:
-            loc (pd.DataFrame): See `ConnectedKmers.loc`. 
-            warnings (set): See `ConnectedKmers.warnings`. 
-
-        Returns:
-            pd.DataFrame: See `ConnectedKmers.loc` (with updated 'strand' column). 
-        """
-        # get the most common 'kmer_strand', weighted by the number of k-mers
-        mc_strand: str = most_common_weighted(loc['kmer_strand'])
-        # reverse complement of mc_strand
-        mc_strand_rc = mc_strand.translate(_KMER_STRAND_COMP)[::-1]
-
-        def which_strand(kmer_strand: str) -> str:
-            if kmer_strand == mc_strand:
-                return '+'
-            elif kmer_strand == mc_strand_rc:
-                return '-'
-            elif (kmer_strand in mc_strand) and (kmer_strand not in mc_strand_rc):
-                return '+'
-            elif (kmer_strand in mc_strand_rc) and (kmer_strand not in mc_strand):
-                return '-'
-            else: # undetermined strand
-                warnings.add('rev_?')
-                return '?'
-        loc['strand'] = loc['kmer_strand'].apply(which_strand)
-        return loc
-
-    @staticmethod
-    def __filter(loc: pd.DataFrame) -> pd.DataFrame:
-        """Remove abnormal rows in loc. 
-
-        Args:
-            loc (pd.DataFrame): See `ConnectedKmers.loc`. 
-
-        Returns:
-            pd.DataFrame: See `ConnectedKmers.loc` (with rows removed). 
-        """
-        # remove sequences with
-        # 1. only one k-mer
-        loc = loc[loc['n_kmers'] > 1]
-        # 2. undetermined strand
-        loc = loc[(loc['strand'] == '+') | (loc['strand'] == '-')]
-        # 3. abnormal length (should be done last)
-        # a possible scenario resulting in a super long sequence is a long run of 'N's in the original sequence
-        # Indexlr will skip those 'N's and there will be a huge gap between the coordinates of neighboring k-mers
-        med_len = np.median(loc['len'])
-        loc = loc[loc['len'] < LEN_TH_MUL*med_len]
-        return loc
-
 
 def _create_ck(
     graph: nx.Graph, nodes: tuple[np.uint64], kmers: tuple, idx: tuple, n_tar: int, kmerlen: int
 ) -> ConnectedKmers:
-    """Create a ConnectedKmers instance by taking the outputs of `_get_create_ck_args()`. 
+    """Create a ConnectedKmers instance by taking the outputs of `_get_create_ck_args()`.
     """
     # add hash and idx to each group
     kmers_df = list()
@@ -507,15 +374,15 @@ def _create_ck(
 def _get_create_ck_args(
     kg: KmerGraph, kmerlen: int, n_tar: int
 ) -> Generator[tuple[nx.Graph, pd.DataFrame, int], None, None]:
-    """Generate input arguments for `_create_ck()`. 
+    """Generate input arguments for `_create_ck()`.
 
     Args:
-        kg (KmerGraph): See `KmerGraph` in `kmers.py`. 
-        kmerlen (int): See `Config` in `config.py`. 
-        n_tar (int): See `RunState` in `config.py`. 
+        kg (KmerGraph): See `KmerGraph` in `kmers.py`.
+        kmerlen (int): See `Config` in `config.py`.
+        n_tar (int): See `RunState` in `config.py`.
 
     Yields:
-        tuple: Input arguments of `_create_ck()`. 
+        tuple: Input arguments of `_create_ck()`.
     """
     kmers = kg.kmers
     idx = kg.idx
@@ -550,22 +417,22 @@ def _get_create_ck_args(
 def _fetch_cks_seq(
     all_cks: list[ConnectedKmers], assemblies: Assemblies, rep_only: bool, n_cpu: int
 ) -> list[str] | None:
-    """Fetch the actual sequences for a list of ConnectedKmers instances. 
+    """Fetch the actual sequences for a list of ConnectedKmers instances.
 
     Args:
-        all_cks (list[ConnectedKmers]): See `_get_cks()`. 
-        assemblies (Assemblies): See `Assemblies` in `assemblies.py`. 
-        rep_only (bool): If True, only fetch the representative of each ConnectedKmers instance (fewer assemblies to be loaded); 
-            else fetch all sequences. 
-        n_cpu (int): See `Config` in `config.py`. 
+        all_cks (list[ConnectedKmers]): See `_get_cks()`.
+        assemblies (Assemblies): See `Assemblies` in `assemblies.py`.
+        rep_only (bool): If True, only fetch the representative of each ConnectedKmers instance (fewer assemblies to be loaded);
+            else fetch all sequences.
+        n_cpu (int): See `Config` in `config.py`.
 
     Returns:
-        list[str] | None: If `rep_only=True`, return a list of representative sequences; else return None. 
+        list[str] | None: If `rep_only=True`, return a list of representative sequences; else return None.
     """
     if rep_only:
         # concat all ConnectedKmers.rep and transpose
         df_loc = pd.concat(
-            (ck.rep for ck in all_cks), 
+            (ck.rep for ck in all_cks),
             axis=1, ignore_index=True
         ).transpose()
     else:
@@ -573,7 +440,7 @@ def _fetch_cks_seq(
         ck_idx = range(len(all_cks))
         # ck.loc.index is already sorted
         df_loc = pd.concat(
-            (ck.loc for ck in all_cks), 
+            (ck.loc for ck in all_cks),
             ignore_index=False, keys=ck_idx
         )
 
@@ -597,22 +464,22 @@ def _get_cks(
     kmers: KmerGraph, assemblies: Assemblies, kmerlen: int, min_len: int, n_tar: int, n_cpu: int
 ) -> tuple[list[ConnectedKmers], list[str]]:
     """
-    1. Create a ConnectedKmers instance for each low-penalty subgraph of the k-mer graph (`KmerGraph.subgraphs`). 
-    2. Remove instances that are shorter than min_len or have defects (`ConnectedKmers.is_bad`). 
-    3. Fetch the representative sequence for each remaining instance. 
+    1. Create a ConnectedKmers instance for each low-penalty subgraph of the k-mer graph (`KmerGraph.subgraphs`).
+    2. Remove instances that are shorter than min_len or have defects (`ConnectedKmers.is_bad`).
+    3. Fetch the representative sequence for each remaining instance.
 
     Args:
-        kmers (KmerGraph): See `KmerGraph` in `kmers.py`. 
-        assemblies (Assemblies): See `Assemblies` in `assemblies.py`. 
-        kmerlen (int): See `Config` in `config.py`. 
-        min_len (int): See `Config` in `config.py`. 
-        n_tar (int): See `RunState` in `config.py`. 
-        n_cpu (int): See `Config` in `config.py`. 
+        kmers (KmerGraph): See `KmerGraph` in `kmers.py`.
+        assemblies (Assemblies): See `Assemblies` in `assemblies.py`.
+        kmerlen (int): See `Config` in `config.py`.
+        min_len (int): See `Config` in `config.py`.
+        n_tar (int): See `RunState` in `config.py`.
+        n_cpu (int): See `Config` in `config.py`.
 
     Returns:
         tuple: A tuple containing
-            1. list[ConnectedKmers]: Candidate markers as ConnectedKmers instances. 
-            2. list[str]: Sequences of each marker. 
+            1. list[ConnectedKmers]: Candidate markers as ConnectedKmers instances.
+            2. list[str]: Sequences of each marker.
     """
     logger.info('Finding a representative for each low-penalty subgraph...')
     tik = time()
@@ -620,14 +487,14 @@ def _get_cks(
     # create a ConnectedKmers instance for each subgraph
     logger.info(' - Processing each subgraph...')
     all_cks: list[ConnectedKmers] = mp_wrapper(
-        _create_ck, 
-        _get_create_ck_args(kmers, kmerlen, n_tar), 
+        _create_ck,
+        _get_create_ck_args(kmers, kmerlen, n_tar),
         n_cpu=n_cpu, n_jobs=len(kmers.subgraphs)
     )
 
     # get candidate ConnectedKmers instances
     all_cks = list(
-        ck for ck in all_cks 
+        ck for ck in all_cks
         if (ck.len >= min_len) and (not ck.is_bad)
     )
     logger.info(f' - Found {len(all_cks)} candidate signatures')
@@ -644,36 +511,36 @@ def _get_cks(
 
 
 def _get_avg_ident(blast_out: pd.DataFrame, query_len: int, n: int) -> float:
-    """Given a list of BLAST hits, calculate the average sequence identity between the query and all subjects. 
-    The denominator (`n`) is the number of subject sequences that are expected to include the query sequence. 
-    Note that `n` might not be the same as `len(blast_out)`, since some subjects may have no hit. 
+    """Given a list of BLAST hits, calculate the average sequence identity between the query and all subjects.
+    The denominator (`n`) is the number of subject sequences that are expected to include the query sequence.
+    Note that `n` might not be the same as `len(blast_out)`, since some subjects may have no hit.
 
     Args:
         blast_out (pd.DataFrame): Each row should be a BLAST hit of the query, with column
-            'nident' (number of identical matches). 
-        query_len (int): Length of the query sequence. 
-        n (int): The number of subjects that are expected to include the query sequence. 
+            'nident' (number of identical matches).
+        query_len (int): Length of the query sequence.
+        n (int): The number of subjects that are expected to include the query sequence.
 
     Returns:
-        float: Conservation. 
+        float: Conservation.
     """
     return sum(blast_out['nident']) / query_len / n
 
 
 def _get_avg_dist(blast_out: pd.DataFrame, query_len: int, n: int) -> float:
-    """Given a list of BLAST hits, calculate the average distance between the query and all subjects. 
-    The denominator (`n`) is the number of subject sequences that are expected to include the query sequence. 
-    Note that `n` might not be the same as `len(blast_out)`, since some subjects may have no hit. 
+    """Given a list of BLAST hits, calculate the average distance between the query and all subjects.
+    The denominator (`n`) is the number of subject sequences that are expected to include the query sequence.
+    Note that `n` might not be the same as `len(blast_out)`, since some subjects may have no hit.
 
     Args:
-        blast_out (pd.DataFrame): Each row should be a BLAST hit of the query, with columns, 
-            1. 'mismatch': number of mismatches. 
-            2. 'gaps': total number of gaps in BOTH query and subject (might cause inaccuracy). 
-        query_len (int): Length of the query sequence. 
-        n (int): The number of subjects that are expected to include the query sequence. 
+        blast_out (pd.DataFrame): Each row should be a BLAST hit of the query, with columns,
+            1. 'mismatch': number of mismatches.
+            2. 'gaps': total number of gaps in BOTH query and subject (might cause inaccuracy).
+        query_len (int): Length of the query sequence.
+        n (int): The number of subjects that are expected to include the query sequence.
 
     Returns:
-        float: Divergence. 
+        float: Divergence.
     """
     return sum(blast_out['mismatch'] + blast_out['gaps']) / query_len / n
 
@@ -681,19 +548,19 @@ def _get_avg_dist(blast_out: pd.DataFrame, query_len: int, n: int) -> float:
 def _get_metrics(
     blast_out: pd.DataFrame, marker_len: int, n_tar: int, n_neg: int
 ) -> MarkerMetrics:
-    """Calculate the metrics of a marker based on its BLAST hits in all assemblies. 
-    - Conservation is calculated with `_get_avg_ident()` on target assemblies. 
-    - Divergence is calculated with `_get_avg_dist()` on non-target assemblies. 
+    """Calculate the metrics of a marker based on its BLAST hits in all assemblies.
+    - Conservation is calculated with `_get_avg_ident()` on target assemblies.
+    - Divergence is calculated with `_get_avg_dist()` on non-target assemblies.
 
     Args:
-        blast_out (pd.DataFrame): Each row is the best BLAST hit of the marker in an assembly. 
+        blast_out (pd.DataFrame): Each row is the best BLAST hit of the marker in an assembly.
             Required columns: ['is_target', 'nident', 'mismatch', 'gaps', 'n_hits', 'avg_nident']
-        marker_len (int): Marker length. 
-        n_tar (int): Number of target assemblies. 
-        n_neg (int): Number of non-target assemblies. 
+        marker_len (int): Marker length.
+        n_tar (int): Number of target assemblies.
+        n_neg (int): Number of non-target assemblies.
 
     Returns:
-        MarkerMetrics: Marker metrics. 
+        MarkerMetrics: Marker metrics.
     """
     if blast_out is None: # no blast hit in any assembly
         return _BASELINE_METRICS
@@ -722,19 +589,19 @@ def _get_metrics(
 def eval_markers(
     all_seqs: list[str], blastdb: Path, n_tar: int, n_neg: int, n_cpu: int=1
 ) -> tuple[list[pd.DataFrame], list[MarkerMetrics]]:
-    """BLAST check each marker (signature) sequence against all / non-target assemblies, and calculate the metrics of each marker. 
+    """BLAST check each marker (signature) sequence against all / non-target assemblies, and calculate the metrics of each marker.
 
     Args:
-        all_seqs (list[str]): A list of marker sequences. 
-        blastdb (Path): Path to a BLAST database generated by Seqwin (e.g., `seqwin-out/blastdb/`). 
-        n_tar (int): Number of target assemblies. 
-        n_neg (int): Number of non-target assemblies. 
+        all_seqs (list[str]): A list of marker sequences.
+        blastdb (Path): Path to a BLAST database generated by Seqwin (e.g., `seqwin-out/blastdb/`).
+        n_tar (int): Number of target assemblies.
+        n_neg (int): Number of non-target assemblies.
         n_cpu (int, optional): Number of threads to use. [1]
 
     Returns:
         tuple: A tuple containing
-            1. list[pd.DataFrame]: BLAST hits of each marker. 
-            2. list[MarkerMetrics]: Metrics of each marker. 
+            1. list[pd.DataFrame]: BLAST hits of each marker.
+            2. list[MarkerMetrics]: Metrics of each marker.
     """
     if blastdb.name == BLASTCONFIG.title_neg_only:
         neg_only = True
@@ -750,7 +617,7 @@ def eval_markers(
     # blast check all markers against all / non-target assemblies
     blast_out = blast(all_seqs, db=blastdb, task=BLASTCONFIG.task, columns=BLASTCONFIG.columns, n_cpu=n_cpu, batch_size=BLASTCONFIG.batch_size)
     if len(blast_out) == 0:
-        log_and_raise(RuntimeError, 'No BLAST hit found.')
+        log_and_raise(RuntimeError, 'No BLAST hit found')
     # blast_out.to_pickle('blast_out.pkl')
 
     #---------- extract BLAST hits of each marker ----------#
@@ -766,7 +633,7 @@ def eval_markers(
 
     # keep the best alignment (highest bitscore) for each assembly
     blast_out.sort_values(
-        by=['qseqid', 'assembly_idx', 'bitscore'], 
+        by=['qseqid', 'assembly_idx', 'bitscore'],
         ascending=[True, True, False], inplace=True
     )
     blast_out = blast_out.groupby(
@@ -774,7 +641,7 @@ def eval_markers(
     )
     # also keep nident of other less optimal alignments
     nident = blast_out['nident'].agg(
-        n_hits='count', 
+        n_hits='count',
         avg_nident='mean'
     )
     blast_out = blast_out.head(1)
@@ -798,9 +665,9 @@ def eval_markers(
     # calculate conservation and divergence for each marker based on its blast output
     logger.info(' - Evaluating each signature...')
     metrics_args = zip(
-        all_blast, 
-        map(len, all_seqs), 
-        repeat(n_tar, n_seqs), 
+        all_blast,
+        map(len, all_seqs),
+        repeat(n_tar, n_seqs),
         repeat(n_neg, n_seqs)
     )
     metrics = mp_wrapper(
@@ -815,18 +682,18 @@ def _eval_cks(
     all_cks: list[ConnectedKmers], all_reps: list[str], blastdb: Path, n_tar: int, n_neg: int, n_cpu: int
 ) -> None:
     """
-    1. BLAST check the representative sequence of each ConnectedKmers instance (ck), against all / non-target assemblies. 
-    2. Calculate the conservation and divergence for each ck. 
-    3. Update the attributes of each ck. 
-    4. Sort all_cks by conservation + divergence. 
+    1. BLAST check the representative sequence of each ConnectedKmers instance (ck), against all / non-target assemblies.
+    2. Calculate the conservation and divergence for each ck.
+    3. Update the attributes of each ck.
+    4. Sort all_cks by conservation + divergence.
 
     Args:
-        all_cks (list[ConnectedKmers]): ConnectedKmers instances. 
-        all_reps (list[str]): Representative sequences, in the same order as all_cks. 
-        blastdb (Path): See `RunState` in `config.py`. 
-        n_tar (int): See `RunState` in `config.py`. 
-        n_neg (int): See `RunState` in `config.py`. 
-        n_cpu (int): See `Config` in `config.py`. 
+        all_cks (list[ConnectedKmers]): ConnectedKmers instances.
+        all_reps (list[str]): Representative sequences, in the same order as all_cks.
+        blastdb (Path): See `RunState` in `config.py`.
+        n_tar (int): See `RunState` in `config.py`.
+        n_neg (int): See `RunState` in `config.py`.
+        n_cpu (int): See `Config` in `config.py`.
     """
     # run evaluation
     results = eval_markers(all_reps, blastdb, n_tar, n_neg, n_cpu)
@@ -837,7 +704,7 @@ def _eval_cks(
 
     # sort in-place
     all_cks.sort(
-        key=lambda ck: ck.metrics.conservation+ck.metrics.divergence, 
+        key=lambda ck: ck.metrics.conservation+ck.metrics.divergence,
         reverse=True
     )
 
@@ -845,16 +712,16 @@ def _eval_cks(
 def get_markers(
     kmers: KmerGraph, assemblies: Assemblies, config: Config, state: RunState
 ) -> list[ConnectedKmers]:
-    """Extract candidate markers (signatures) from a k-mer graph, and save them to files. 
+    """Extract candidate markers (signatures) from a k-mer graph, and save them to files.
 
     Args:
-        kmers (KmerGraph): See `KmerGraph` in `kmers.py`. 
-        assemblies (Assemblies): See `Assemblies` in `assemblies.py`. 
-        config (Config): See `Config` in `config.py`. 
-        state (RunState): See `RunState` in `config.py`. 
+        kmers (KmerGraph): See `KmerGraph` in `kmers.py`.
+        assemblies (Assemblies): See `Assemblies` in `assemblies.py`.
+        config (Config): See `Config` in `config.py`.
+        state (RunState): See `RunState` in `config.py`.
 
     Returns:
-        list[ConnectedKmers]: Candidate markers. 
+        list[ConnectedKmers]: Candidate markers.
     """
     overwrite = config.overwrite
     kmerlen = config.kmerlen
@@ -875,9 +742,9 @@ def get_markers(
     if run_blast and HAS_BLAST:
         logger.info('Evaluating candidate signatures with BLAST...')
         blastdb = assemblies.makeblastdb(
-            prefix=working_dir / WORKINGDIR.blast_dir, 
-            neg_only=blast_neg_only, 
-            overwrite=overwrite, 
+            prefix=working_dir / WORKINGDIR.blast_dir,
+            neg_only=blast_neg_only,
+            overwrite=overwrite,
             n_cpu=n_cpu
         )
         _eval_cks(all_cks, all_reps, blastdb, n_tar, n_neg, n_cpu)
@@ -910,7 +777,7 @@ def get_markers(
     markers_csv = working_dir / WORKINGDIR.markers_csv
     file_to_write(markers_csv, overwrite)
     pd.DataFrame(
-        csv, 
+        csv,
         columns=('fasta_header', 'length', *_METRIC_NAMES, 'rep_ratio', 'n_nodes')
     ).to_csv(markers_csv, index=False, encoding='utf-8', lineterminator='\n')
     logger.info(f'Metrics of candidate signatures saved as {markers_csv}')

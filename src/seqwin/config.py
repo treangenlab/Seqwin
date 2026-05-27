@@ -2,7 +2,7 @@
 Configurations
 ==============
 
-Seqwin run configurations. Including user/dev configs and internal configs. 
+Seqwin run configurations. Including user/dev configs and internal configs.
 
 Dependencies:
 -------------
@@ -45,10 +45,10 @@ _LOG_DATEFMT = '%Y-%m-%d %H:%M:%S'
 
 # init root logger
 logging.basicConfig(
-    format=_LOG_FMT, 
-    datefmt=_LOG_DATEFMT, 
-    level=logging.INFO, 
-    stream=sys.stdout, 
+    format=_LOG_FMT,
+    datefmt=_LOG_DATEFMT,
+    level=logging.INFO,
+    stream=sys.stdout,
 )
 
 from pathlib import Path
@@ -72,7 +72,7 @@ _INPUT_DIRS = ('tar_dir', 'neg_dir', 'prefix')
 
 
 class Config(BaseModel):
-    """Seqwin configurations. 
+    """Seqwin configurations.
 
     Attributes:
         tar_taxa (list[str] | None): Target NCBI taxonomy name(s) / ID(s). Must be exact matches. [None]
@@ -114,7 +114,7 @@ class Config(BaseModel):
 
         seed (int): Random seed for reproducibility. [42]
         n_cpu (int): Number of parallel processes or threads to use. [4]
-        version (str): Seqwin version. 
+        version (str): Seqwin version.
     """
     # Inputs
     tar_taxa: list[str] | None = None
@@ -192,7 +192,7 @@ class Config(BaseModel):
         if (not HAS_DATASETS) and (self.tar_taxa or self.neg_taxa):
             raise FileNotFoundError(
                 ('ncbi-datasets-cli is not installed. Genomes cannot be downloaded from the '
-                'provided taxon names or IDs. Please provide local file paths instead.'))
+                'provided taxon names or IDs. Please provide local files instead'))
 
         if not self.download_only:
             if (self.tar_paths is None) and (self.tar_taxa is None) and (self.tar_dir is None):
@@ -213,27 +213,27 @@ class Config(BaseModel):
 
     model_config = {
         # similar to @dataclass(slots=True, frozen=True)
-        'frozen': True, 
-        'slots': True, 
-        'validate_default': True, 
+        'frozen': True,
+        'slots': True,
+        'validate_default': True,
         'hide_input_in_errors': True
     }
 
 
 @dataclass(slots=True)
 class RunState:
-    """Runtime variables. 
+    """Runtime variables.
 
     Attributes:
-        working_dir (Path): Working directory, defined by prefix and title. 
-        rng (random.Random): Built-in `random.Random` instance for reproducibility. 
-        n_tar (int | None): Number of target assemblies. 
-        n_neg (int | None): Number of non-target assemblies. 
-        penalty_th (float | None): Node penalty threshold (user input or auto-computed). 
-        edge_weight_th (float | None): Graph edge weight threshold. 
-        min_nodes (int | None): Min number of nodes for a low-penalty subgraph. 
-        max_nodes (int | None): Max number of nodes for a low-penalty subgraph. 
-        blastdb (Path | None): Path to the BLAST database inside the working directory. 
+        working_dir (Path): Working directory, defined by prefix and title.
+        rng (random.Random): Built-in `random.Random` instance for reproducibility.
+        n_tar (int | None): Number of target assemblies.
+        n_neg (int | None): Number of non-target assemblies.
+        penalty_th (float | None): Node penalty threshold (user input or auto-computed).
+        edge_weight_th (float | None): Graph edge weight threshold.
+        min_nodes (int | None): Min number of nodes for a low-penalty subgraph.
+        max_nodes (int | None): Max number of nodes for a low-penalty subgraph.
+        blastdb (Path | None): Path to the BLAST database inside the working directory.
     """
     working_dir: Path
     rng: Random
@@ -248,7 +248,7 @@ class RunState:
 
 @dataclass(slots=True, frozen=True)
 class WorkingDir:
-    """Files and directories under the working directory. 
+    """Files and directories under the working directory.
 
     Attributes:
         log (str): Seqwin log file. ['seqwin.log']
@@ -276,7 +276,7 @@ class WorkingDir:
 
 @dataclass(slots=True, frozen=True)
 class BlastConfig:
-    """Settings for the BLAST commands `makeblastdb` and `blastn`. 
+    """Settings for the BLAST commands `makeblastdb` and `blastn`.
 
     Attributes:
         title_neg_only (str): DB title when created from non-target assemblies only. ['neg-only']
@@ -286,7 +286,7 @@ class BlastConfig:
         str2bool (Mapping[str, bool]): Reversed mapping of bool2str for parsing BLAST outputs. ['y' -> True, 'n' -> False]
         header_sep (str): Separator used in FASTA headers. Should pick a rare char (cannot be '$', BLAST treats it as a special char). ['@']
         task (str): Presets for BLAST parameters ('blastn', 'blastn-short', 'megablast'). ['blastn']
-        columns (tuple[str, ...]): Columns to be included in the BLAST TSV output. See `ncbi.py` for more information. 
+        columns (tuple[str, ...]): Columns to be included in the BLAST TSV output. See `ncbi.py` for more information.
         batch_size (int): Number of query sequences in a single BLAST run. [1000]
     """
     title_neg_only: str = 'neg-only'
@@ -302,33 +302,33 @@ class BlastConfig:
     header_sep: str = '@'
     task: Task = Task.blastn
     columns = (
-        'qseqid', 
-        'sseqid', 
-        'nident', 
-        'mismatch', 
-        'gaps', 
-        'qstart', 
-        'qend', 
-        'sstart', 
-        'send', 
-        'evalue', 
-        'bitscore', 
+        'qseqid',
+        'sseqid',
+        'nident',
+        'mismatch',
+        'gaps',
+        'qstart',
+        'qend',
+        'sstart',
+        'send',
+        'evalue',
+        'bitscore',
         'sseq'
     )
     batch_size: int = 1000
 
 
 def config_logger(file: Path, level: int) -> None:
-    """Add a file handler and set logging level for the root logger. 
+    """Add a file handler and set logging level for the root logger.
 
     Args:
-        file (Path): Path to the log file. 
-        level (int): Logging level (e.g., `logging.INFO`). 
+        file (Path): Path to the log file.
+        level (int): Logging level (e.g., `logging.INFO`).
     """
     # use the same format
     logFormatter = logging.Formatter(
-        fmt=_LOG_FMT, 
-        datefmt=_LOG_DATEFMT, 
+        fmt=_LOG_FMT,
+        datefmt=_LOG_DATEFMT,
         style='%'
     )
     fileHandler = logging.FileHandler(file, mode='a')

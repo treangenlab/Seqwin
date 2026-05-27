@@ -3,10 +3,10 @@ Seqwin
 ======
 
 Ultrafast identification of signature sequences in microbial genomes
-- Output sensitive and specific genomic signatures. 
-- High input scalability. 
-- Robust to sequence variations and low-quality assemblies. 
-- Use raw sequences as input. 
+- Output sensitive and specific genomic signatures.
+- High input scalability.
+- Robust to sequence variations and low-quality assemblies.
+- Use raw sequences as input.
 
 Usage:
 ------

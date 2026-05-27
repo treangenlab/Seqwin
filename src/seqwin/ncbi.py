@@ -2,8 +2,8 @@
 NCBI
 ====
 
-- Search and download genome assemblies with NCBI `Datasets <https://www.ncbi.nlm.nih.gov/datasets/>`__. 
-- Run NCBI `BLAST+ <https://www.ncbi.nlm.nih.gov/books/NBK131777/>`__. 
+- Search and download genome assemblies with NCBI `Datasets <https://www.ncbi.nlm.nih.gov/datasets/>`__.
+- Run NCBI `BLAST+ <https://www.ncbi.nlm.nih.gov/books/NBK131777/>`__.
 
 Dependencies:
 -------------
@@ -99,20 +99,20 @@ def _add_api_key(args: list[str | Path], api_key: str | None) -> list[str | Path
 
 
 def search_taxon(taxon: str, api_key: str | None=None) -> tuple[str | None, str | None]:
-    """Search a taxon on NCBI Taxonomy. Internet connection is needed. 
+    """Search a taxon on NCBI Taxonomy. Internet connection is needed.
 
     Args:
-        taxon (str): Name or ID of the taxon (exact match). 
+        taxon (str): Name or ID of the taxon (exact match).
         api_key (str | None, optional): NCBI API key. [None]
 
     Returns:
         tuple: A tuple containing
-            1. str | None: NCBI Taxonomy ID of the taxon. 
-            2. str | None: Current scientific name of the taxon. 
+            1. str | None: NCBI Taxonomy ID of the taxon.
+            2. str | None: Current scientific name of the taxon.
     """
     logger.info(f'Searching NCBI Taxonomy for "{taxon}"...')
     args = [
-        'datasets', 'summary', 'taxonomy', 'taxon', str(taxon), 
+        'datasets', 'summary', 'taxonomy', 'taxon', str(taxon),
         '--as-json-lines', # output as json
         '--report', 'names', # do not output tax ids of children
     ]
@@ -133,13 +133,13 @@ def search_taxon(taxon: str, api_key: str | None=None) -> tuple[str | None, str 
 
 
 def get_assembly_paths(package_dir: Path) -> list[Path]:
-    """Get the file paths of all genome assemblies in a NCBI genome package. 
+    """Get the file paths of all genome assemblies in a NCBI genome package.
 
     Args:
-        package_dir (Path): Path of the genome package directory (e.g., ncbi_dataset). 
+        package_dir (Path): Path of the genome package directory (e.g., ncbi_dataset).
 
     Returns:
-        list[Path]: File paths of all genome assemblies in the package. 
+        list[Path]: File paths of all genome assemblies in the package.
     """
     # sanity check
     if not package_dir.is_dir():
@@ -159,23 +159,23 @@ def get_assembly_paths(package_dir: Path) -> list[Path]:
 
 
 def download_taxon(
-    taxon: str, 
-    prefix: Path = Path.cwd(), 
-    format: Format = Format.fasta, 
-    level: Level = Level.contig, 
-    source: Source = Source.genbank, 
-    annotated: bool = True, 
-    exclude_mag: bool = False, 
-    gzip: bool = True, 
-    api_key: str | None = None, 
-    overwrite: bool = False, 
+    taxon: str,
+    prefix: Path = Path.cwd(),
+    format: Format = Format.fasta,
+    level: Level = Level.contig,
+    source: Source = Source.genbank,
+    annotated: bool = True,
+    exclude_mag: bool = False,
+    gzip: bool = True,
+    api_key: str | None = None,
+    overwrite: bool = False,
     n_cpu: int = 1
 ) -> list[Path] | None:
-    """Download genome assemblies under a taxon from NCBI Taxonomy. Internet connection is needed. 
-    Atypical genomes and genomes from large multi-isolate projects are excluded. 
+    """Download genome assemblies under a taxon from NCBI Taxonomy. Internet connection is needed.
+    Atypical genomes and genomes from large multi-isolate projects are excluded.
 
     Args:
-        taxon (str): Name or ID of the taxon (exact match). 
+        taxon (str): Name or ID of the taxon (exact match).
         prefix (Path, optional): A directory where the data package is downloaded. [cwd]
         format (str, optional): Format of genome sequences, should be 'fasta' or 'genbank'. ['fasta']
         level (str, optional): Limit to genomes ≥ this assembly level ('contig' < 'scaffold' < 'chromosome' < 'complete'). ['contig']
@@ -188,7 +188,7 @@ def download_taxon(
         n_cpu (int, optional): Number of processes to run in parallel. [1]
 
     Returns:
-        list[Path] | None: File paths of downloaded genome assemblies. Return None if the taxon is not found. 
+        list[Path] | None: File paths of downloaded genome assemblies. Return None if the taxon is not found.
     """
     # sanity check
     if not prefix.is_dir():
@@ -203,9 +203,9 @@ def download_taxon(
             assembly_paths = get_assembly_paths(tax_dir)
         except Exception as e:
             log_and_raise(
-                RuntimeError, 
+                RuntimeError,
                 (f'Genome package might be incomplete {tax_dir}\n'
-                'Consider deleting it and try again.'), 
+                'Consider deleting it and try again'),
                 from_e=e
             )
         logger.info(f' - Found {len(assembly_paths)} genome assemblies.')
@@ -225,11 +225,11 @@ def download_taxon(
 
     # arguments for the download command
     args = [
-        'datasets', 'download', 'genome', 
-        'taxon', tax_id, 
-        '--filename', tax_zip, 
-        '--exclude-atypical', '--exclude-multi-isolate', 
-        '--no-progressbar', '--dehydrated', 
+        'datasets', 'download', 'genome',
+        'taxon', tax_id,
+        '--filename', tax_zip,
+        '--exclude-atypical', '--exclude-multi-isolate',
+        '--no-progressbar', '--dehydrated',
     ]
     if format == Format.fasta:
         args += ['--include', 'genome']
@@ -286,7 +286,7 @@ def download_taxon(
 
     # download actual sequences
     args = [
-        'datasets', 'rehydrate', '--directory', tax_dir, 
+        'datasets', 'rehydrate', '--directory', tax_dir,
         '--max-workers', str(n_cpu), '--no-progressbar'
     ]
     if gzip:
@@ -300,10 +300,10 @@ def download_taxon(
     except Exception as e:
         shutil.rmtree(tax_dir) # remove incomplete dir
         log_and_raise(
-            RuntimeError, 
+            RuntimeError,
             (f'Failed to rehydrate data package for taxon "{taxon}".\n'
             'NCBI might have blocked the request due to high usage. Try waiting for a while before running Seqwin again.\n'
-            'Add --overwrite to the command so that downloaded taxon packages can be reused.'), 
+            'Add --overwrite to the command so that downloaded taxon packages can be reused.'),
             from_e=e
         )
 
@@ -315,8 +315,8 @@ def download_taxon(
 
 
 def _get_blast_outfmt(columns: Sequence[str]) -> str:
-    """Given the columns to be included in the BLAST TSV output, get the value to be provided to 
-    the -outfmt argument of the blastn command. See `blastn -help` for more info. 
+    """Given the columns to be included in the BLAST TSV output, get the value to be provided to
+    the -outfmt argument of the blastn command. See `blastn -help` for more info.
     """
     # we need a custom output format since some info (e.g., sequences) are not included in the tsv by default
     # do not surround the return str with double quotes (" ") even if there are spaces in it, `subprocess.run()` will do it for you
@@ -325,31 +325,31 @@ def _get_blast_outfmt(columns: Sequence[str]) -> str:
 
 
 def _blast_batch(
-    seq_idx: Sequence[int], 
-    seq_list: Sequence[str], 
-    db: Path, 
-    task: str, 
-    columns: Sequence[str], 
-    outfmt: str, 
-    taxids: str | None, 
-    neg_taxids: str | None, 
+    seq_idx: Sequence[int],
+    seq_list: Sequence[str],
+    db: Path,
+    task: str,
+    columns: Sequence[str],
+    outfmt: str,
+    taxids: str | None,
+    neg_taxids: str | None,
     n_cpu: int
 ) -> pd.DataFrame:
-    """Run BLAST on a list of sequences and return a DataFrame of the tabular output. 
+    """Run BLAST on a list of sequences and return a DataFrame of the tabular output.
 
     Args:
-        seq_idx (Sequence[int]): Indices of the input sequences. 
-        seq_list (Sequence[str]): A list of sequences for BLAST. 
-        db (Path): Path to the BLAST database. 
-        task (str): Preset BLAST tasks ('blastn', 'blastn-short', 'megablast'). 
-        columns (Sequence[str]): Columns to be included in the DataFrame output. 
-        outfmt (str): Output of `_get_blast_outfmt()`. 
-        taxids (str | None): Only search for these taxonomy IDs and their descendants. 
-        neg_taxids (str | None): Do NOT search for these taxonomy IDs and their descendants. 
-        n_cpu (int): Number of processes to run in parallel. 
+        seq_idx (Sequence[int]): Indices of the input sequences.
+        seq_list (Sequence[str]): A list of sequences for BLAST.
+        db (Path): Path to the BLAST database.
+        task (str): Preset BLAST tasks ('blastn', 'blastn-short', 'megablast').
+        columns (Sequence[str]): Columns to be included in the DataFrame output.
+        outfmt (str): Output of `_get_blast_outfmt()`.
+        taxids (str | None): Only search for these taxonomy IDs and their descendants.
+        neg_taxids (str | None): Do NOT search for these taxonomy IDs and their descendants.
+        n_cpu (int): Number of processes to run in parallel.
 
     Returns:
-        pd.DataFrame: A DataFrame of the tabular output. 
+        pd.DataFrame: A DataFrame of the tabular output.
     """
     # create input fasta for blast
     blast_in = ''.join(
@@ -358,9 +358,9 @@ def _blast_batch(
 
     # prepare blastn args
     args = [
-        'blastn', 
-        '-db', db, 
-        '-task', task, 
+        'blastn',
+        '-db', db,
+        '-task', task,
         '-outfmt', outfmt, # output in tsv format with specified columns
         '-max_hsps', _MAX_HSPS, # maximum number of HSPs per subject sequence to save for each query
         '-max_target_seqs', _MAX_TARGET_SEQS, # maximum number of aligned sequences to keep
@@ -381,24 +381,24 @@ def _blast_batch(
 
 
 def blast(
-    seq_list: Sequence[str], 
-    db: Path, 
-    task: Task = Task.blastn, 
-    columns: Sequence[str] | None = None, 
-    taxids: Sequence[int] | None = None, 
-    neg_taxids: Sequence[int] | None = None, 
-    n_cpu: int = 1, 
+    seq_list: Sequence[str],
+    db: Path,
+    task: Task = Task.blastn,
+    columns: Sequence[str] | None = None,
+    taxids: Sequence[int] | None = None,
+    neg_taxids: Sequence[int] | None = None,
+    n_cpu: int = 1,
     batch_size: int = 1000
 ) -> pd.DataFrame:
-    """Run BLAST on a list of sequences and return a DataFrame of the tabular output. 
-    - -max_hsps is set to 1000. 
-    - -max_target_seqs is set to 50000. 
+    """Run BLAST on a list of sequences and return a DataFrame of the tabular output.
+    - -max_hsps is set to 1000.
+    - -max_target_seqs is set to 50000.
     - To avoid having too many query sequences in a single BLAST run, each run only takes a batch
-    of sequences with batch size determined by batch_size. 
+    of sequences with batch size determined by batch_size.
 
     Args:
-        seq_list (Sequence[str]): A list of sequences for BLAST. 
-        db (Path): Path to the BLAST database. 
+        seq_list (Sequence[str]): A list of sequences for BLAST.
+        db (Path): Path to the BLAST database.
         task (str): Preset BLAST tasks ('blastn', 'blastn-short', 'megablast'). ['blastn']
         columns (Sequence[str] | None): Columns to be included in the DataFrame output. None to use default columns. [None]
         taxids (Sequence[int] | None): Only search for these taxonomy IDs and their descendants. [None]
@@ -407,23 +407,23 @@ def blast(
         batch_size (int, optional): Number of query sequences in a single BLAST run. [1000]
 
     Returns:
-        pd.DataFrame: A DataFrame of the tabular output, with default columns, 
-            1. 'qseqid': query or source (e.g., gene) sequence id. 
-            2. 'sseqid': subject or target (e.g., reference genome) sequence id. 
-            3. 'length': alignment length. 
-            4. 'pident': percentage of identical matches (= nident / length). 
-            5. 'nident': number of identical matches (= length - mismatch - gaps). 
-            6. 'mismatch': number of mismatches. 
-            7. 'gapopen': number of gap openings. 
-            8. 'gaps': total number of gaps in both query and subject. 
-            9. 'qstart': start of alignment in query. 
-            10. 'qend': end of alignment in query. 
-            11. 'sstart': start of alignment in subject. 
-            12. 'send': end of alignment in subject. 
-            13. 'evalue': expect value. 
-            14. 'bitscore': bit score. 
-            15. 'qseq': aligned part of query sequence. 
-            16. 'sseq': aligned part of subject sequence. 
+        pd.DataFrame: A DataFrame of the tabular output, with default columns,
+            1. 'qseqid': query or source (e.g., gene) sequence id.
+            2. 'sseqid': subject or target (e.g., reference genome) sequence id.
+            3. 'length': alignment length.
+            4. 'pident': percentage of identical matches (= nident / length).
+            5. 'nident': number of identical matches (= length - mismatch - gaps).
+            6. 'mismatch': number of mismatches.
+            7. 'gapopen': number of gap openings.
+            8. 'gaps': total number of gaps in both query and subject.
+            9. 'qstart': start of alignment in query.
+            10. 'qend': end of alignment in query.
+            11. 'sstart': start of alignment in subject.
+            12. 'send': end of alignment in subject.
+            13. 'evalue': expect value.
+            14. 'bitscore': bit score.
+            15. 'qseq': aligned part of query sequence.
+            16. 'sseq': aligned part of subject sequence.
     """
     # check input
     tot_seq = len(seq_list)
@@ -451,9 +451,9 @@ def blast(
         logger.info(f' - {batch_start}/{tot_seq}')
         batch_stop = batch_start + batch_size
         blast_out.append(_blast_batch(
-            seq_idx[batch_start: batch_stop], 
-            seq_list[batch_start: batch_stop], 
-            db, task, columns, outfmt, 
+            seq_idx[batch_start: batch_stop],
+            seq_list[batch_start: batch_stop],
+            db, task, columns, outfmt,
             taxids, neg_taxids, n_cpu
         ))
         batch_start = batch_stop

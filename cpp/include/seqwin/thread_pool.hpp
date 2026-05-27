@@ -13,6 +13,9 @@
 
 namespace seqwin {
 
+/**
+ * @brief Simple fixed-size worker pool for parallel range processing.
+ */
 class ThreadPool {
 public:
     explicit ThreadPool(std::size_t n_workers)
@@ -45,6 +48,16 @@ public:
 
     std::size_t size() const noexcept { return n_workers_; }
 
+    /**
+     * @brief Run a function over contiguous chunks of `[0, n_items)`.
+     *
+     * The callable receives `(start, end, worker_id)`. Any exception thrown by a
+     * worker is captured and rethrown on the calling thread.
+     *
+     * @tparam Fn Callable type.
+     * @param n_items Number of items in the range.
+     * @param fn Function invoked once for each non-empty chunk.
+     */
     template <typename Fn>
     void parallel_for(std::size_t n_items, Fn&& fn)
     {

@@ -2,7 +2,7 @@
 Core
 ====
 
-Seqwin entry point. 
+Seqwin entry point.
 
 Dependencies:
 -------------
@@ -42,15 +42,15 @@ from .config import Config, RunState, config_logger, WORKINGDIR
 
 
 class Seqwin(object):
-    """Seqwin run instance. 
+    """Seqwin run instance.
 
     Attributes:
-        config (Config): See `Config` in `config.py`. 
-        state (RunState): See `RunState` in `config.py`. 
-        assemblies (Assemblies): See `Assemblies` in `assemblies.py`. 
-        kmers (KmerGraph | None): See `KmerGraph` in `kmers.py`. Generated with `self.run()`. 
-        mash (pd.DataFrame | None): Tabular output of `mash dist`. Generated with `self.run()`. 
-        markers (list[ConnectedKmers] | None): See `ConnectedKmers` in `markers.py`. Generated with `self.run()`. 
+        config (Config): See `Config` in `config.py`.
+        state (RunState): See `RunState` in `config.py`.
+        assemblies (Assemblies): See `Assemblies` in `assemblies.py`.
+        kmers (KmerGraph | None): See `KmerGraph` in `kmers.py`. Generated with `self.run()`.
+        mash (pd.DataFrame | None): Tabular output of `mash dist`. Generated with `self.run()`.
+        markers (list[ConnectedKmers] | None): See `ConnectedKmers` in `markers.py`. Generated with `self.run()`.
     """
     __slots__ = ('config', 'state', 'assemblies', 'kmers', 'mash', 'markers')
     config: Config
@@ -61,14 +61,14 @@ class Seqwin(object):
     markers: list[ConnectedKmers] | None
 
     def __init__(self, config: Config) -> None:
-        """Initiate a Seqwin run instance. 
-        1. Create a working directory. 
-        2. Initialize the logger. 
-        3. Save config to JSON. 
-        4. Load all assemblies. 
+        """Initiate a Seqwin run instance.
+        1. Create a working directory.
+        2. Initialize the logger.
+        3. Save config to JSON.
+        4. Load all assemblies.
 
         Args:
-            config (Config): See `Config` in `config.py`. 
+            config (Config): See `Config` in `config.py`.
         """
         prefix = config.prefix
         title = config.title
@@ -119,7 +119,7 @@ class Seqwin(object):
         self.markers = None
 
     def run(self) -> None:
-        """Build the k-mer graph and extract candidate markers. 
+        """Build the k-mer graph and extract candidate markers.
         """
         config = self.config
         state = self.state
@@ -148,13 +148,13 @@ class Seqwin(object):
 
 
 def run(config: Config) -> Seqwin:
-    """Run Seqwin. 
+    """Run Seqwin.
 
     Args:
-        config (Config): See `Config` in `config.py`. 
+        config (Config): See `Config` in `config.py`.
 
     Returns:
-        Seqwin: The Seqwin run instance. 
+        Seqwin: The Seqwin run instance.
     """
     seqwin = Seqwin(config)
     if not config.download_only:
@@ -163,13 +163,13 @@ def run(config: Config) -> Seqwin:
 
 
 def load(path: str | Path) -> Seqwin:
-    """Load a Seqwin run instance from file. 
+    """Load a Seqwin run instance from file.
 
     Args:
-        path (str | Path): Path to the Seqwin run snapshot (`results.seqwin`). 
+        path (str | Path): Path to the Seqwin run snapshot (`results.seqwin`).
 
     Returns:
-        Seqwin: The Seqwin run instance. 
+        Seqwin: The Seqwin run instance.
     """
     if isinstance(path, str):
         path = Path(path)

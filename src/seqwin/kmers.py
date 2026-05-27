@@ -2,7 +2,7 @@
 K-mer Graph
 ===========
 
-A core module of Seqwin. Create a k-mer graph from k-mers of all input genome assemblies. 
+A core module of Seqwin. Create a k-mer graph from k-mers of all input genome assemblies.
 
 Dependencies:
 -------------
@@ -45,21 +45,20 @@ from .config import Config, RunState, HAS_MASH, WORKINGDIR, EDGE_W, NODE_P
 
 class KmerGraph(object):
     """
-    1. Create a weighted, undirected k-mer graph, and calculate node penalty scores. 
-    2. Extract low-penalty subgraphs from the k-mer graph with `self.filter()`. 
+    1. Create a weighted, undirected k-mer graph, and calculate node penalty scores.
+    2. Extract low-penalty subgraphs from the k-mer graph with `self.filter()`.
 
     Attributes:
-        kmers (NDArray[np.void]): A 1-D NumPy structured array of k-mers from all assemblies, with dtype `KMER_DTYPE` defined in `seqwin.graph`. 
-            Grouped and sorted by k-mer hashes. 
-        idx (NDArray[np.uint64] | None): The original indices assigned when k-mers are generated (ordered by genomic positions). 
-            Parallel to `kmers`. 
-        nodes (NDArray[np.void]): A 1-D NumPy structured array of k-mer nodes, with dtype `NODE_DTYPE` defined in `seqwin.graph`. 
-            For each node, `kmers[node['start']:node['stop']]` is the k-mer group with `node['hash']`. 
-        edges (NDArray[np.void]): A 1-D NumPy structured array of weighted, undirected edges, with dtype `EDGE_DTYPE` defined in `seqwin.graph`. 
-            Edge weight is the number of assemblies where the two k-mers are adjacent. 
-        graph (nx.Graph): The graph instance built from filtered nodes and edges. 
-        subgraphs (tuple[frozenset[np.uint64], ...] | None): Low-penalty subgraphs. Each subgraph is a set of k-mer hash values. 
-            Generated with `self.filter()`. 
+        kmers (NDArray[np.void]): A 1-D NumPy structured array of k-mers from all assemblies, grouped and sorted by k-mer hashes.
+        idx (NDArray[np.uint64] | None): The original indices assigned when k-mers are generated (ordered by genomic positions).
+            Parallel to `kmers`.
+        nodes (NDArray[np.void]): A 1-D NumPy structured array of k-mer nodes.
+            For each node, `kmers[node['start']:node['stop']]` is the k-mer group with `node['hash']`.
+        edges (NDArray[np.void]): A 1-D NumPy structured array of weighted, undirected edges.
+            Edge weight is the number of assemblies where the two k-mers are adjacent.
+        graph (nx.Graph): The graph instance built from filtered nodes and edges.
+        subgraphs (tuple[frozenset[np.uint64], ...] | None): Low-penalty subgraphs. Each subgraph is a set of k-mer hash values.
+            Generated with `self.filter()`.
     """
     __slots__ = (
         'kmers', 'idx', 'nodes', 'edges', 'graph', 'subgraphs', '_filtered_flag'
@@ -74,32 +73,32 @@ class KmerGraph(object):
 
     def __init__(self, assemblies: Assemblies, kmerlen: int, windowsize: int, n_cpu: int) -> None:
         """
-        1. Generate minimizer sketches and weighted edges. 
-        2. Generate k-mer nodes and calculate node penalty scores. 
+        1. Generate minimizer sketches and weighted edges.
+        2. Generate k-mer nodes and calculate node penalty scores.
 
         Args:
-            assemblies (Assemblies): See `Assemblies` in `assemblies.py`. 
-            kmerlen (int): See `Config` in `config.py`. 
-            windowsize (int): See `Config` in `config.py`. 
-            n_cpu (int): See `Config` in `config.py`. 
+            assemblies (Assemblies): See `Assemblies` in `assemblies.py`.
+            kmerlen (int): See `Config` in `config.py`.
+            windowsize (int): See `Config` in `config.py`.
+            n_cpu (int): See `Config` in `config.py`.
         """
         n_assemblies = len(assemblies)
         logger.info(f'Building minimizer graph from {n_assemblies} assemblies...')
         tik = time()
 
         kmers, idx, nodes, edges, record_ids = build(
-            assemblies.path, 
-            kmerlen, 
-            windowsize, 
-            assemblies.index, 
-            assemblies.is_target, 
-            n_cpu=n_cpu, 
+            assemblies.path,
+            kmerlen,
+            windowsize,
+            assemblies.index,
+            assemblies.is_target,
+            n_cpu=n_cpu,
         )
         # calculate penalty for each node
         n_tar = sum(assemblies.is_target)
         n_neg = n_assemblies - n_tar
         nodes['penalty'] = _frac_to_penalty(
-            nodes['n_tar'] / n_tar, 
+            nodes['n_tar'] / n_tar,
             nodes['n_neg'] / n_neg
         )
         assemblies.record_ids = record_ids
@@ -121,17 +120,17 @@ class KmerGraph(object):
     def filter(
         self, penalty_th: float, edge_weight_th: float, min_nodes: int, max_nodes: int | None, rng: Random
     ) -> None:
-        """Filter graph edges and nodes. 
-        1. Remove low-weight edges and isolated nodes. 
-        2. Create the graph instance and extract low-penalty subgraphs. 
-        3. Remove k-mers not included in any of the subgraphs. 
+        """Filter graph edges and nodes.
+        1. Remove low-weight edges and isolated nodes.
+        2. Create the graph instance and extract low-penalty subgraphs.
+        3. Remove k-mers not included in any of the subgraphs.
 
         Args:
-            penalty_th (float): See `RunState` in `config.py`. 
-            edge_weight_th (float): See `RunState` in `config.py`. 
-            min_nodes (int): See `RunState` in `config.py`. 
-            max_nodes (int | None): See `RunState` in `config.py`. 
-            rng (random.Random): See `RunState` in `config.py`. 
+            penalty_th (float): See `RunState` in `config.py`.
+            edge_weight_th (float): See `RunState` in `config.py`.
+            min_nodes (int): See `RunState` in `config.py`.
+            max_nodes (int | None): See `RunState` in `config.py`.
+            rng (random.Random): See `RunState` in `config.py`.
         """
         kmers = self.kmers
         idx = self.idx
@@ -173,18 +172,18 @@ class KmerGraph(object):
 
     @staticmethod
     def __filter_graph(nodes: NDArray, edges: NDArray, edge_weight_th: float) -> tuple[NDArray, NDArray, nx.Graph]:
-        """Remove low-weight edges and isolated nodes, and create the graph instance. 
-        
+        """Remove low-weight edges and isolated nodes, and create the graph instance.
+
         Args:
-            nodes (NDArray): See `KmerGraph.nodes`. 
-            edges (NDArray): See `KmerGraph.edges`. 
-            edge_weight_th (float): See `RunState` in `config.py`. 
+            nodes (NDArray): See `KmerGraph.nodes`.
+            edges (NDArray): See `KmerGraph.edges`.
+            edge_weight_th (float): See `RunState` in `config.py`.
 
         Returns:
             tuple: A tuple containing
-                1. NDArray: Filtered nodes. 
-                2. NDArray: Filtered edges. 
-                3. nx.Graph: See `KmerGraph.graph`. 
+                1. NDArray: Filtered nodes.
+                2. NDArray: Filtered edges.
+                3. nx.Graph: See `KmerGraph.graph`.
         """
         logger.info(' - Filtering graph edges and nodes...')
         n_nodes, n_edges = len(nodes), len(edges)
@@ -206,8 +205,8 @@ class KmerGraph(object):
         graph = nx.Graph()
         graph.add_weighted_edges_from(edge_values, weight=EDGE_W)
         nx.set_node_attributes(
-            graph, 
-            values=dict(zip(nodes['hash'], nodes['penalty'])), 
+            graph,
+            values=dict(zip(nodes['hash'], nodes['penalty'])),
             name=NODE_P
         )
 
@@ -215,20 +214,20 @@ class KmerGraph(object):
 
 
 def _expected_frac(jaccard_mtx: NDArray) -> np.floating:
-    """Calculate the expected fraction from a matrix of pairwise Jaccard indices. 
-    Here fraction means: for a k-mer `h` in a group of genomes (k-mer sets), the fraction of sets in 
-    a second group that also contain `h`. `jaccard_mtx` is the pairwise Jaccard indices between sets 
-    in the two groups. Note that this could be a self comparison (two groups are the same). 
-    - `E(frac) = mean(2J / (1+J))`, where `J` is the Jaccard matrix. 
-    - This expectation ≥ mean of the Jaccard matrix, (`2J / (1+J) ≥ J, 0 ≤ J ≤ 1`). 
+    """Calculate the expected fraction from a matrix of pairwise Jaccard indices.
+    Here fraction means: for a k-mer `h` in a group of genomes (k-mer sets), the fraction of sets in
+    a second group that also contain `h`. `jaccard_mtx` is the pairwise Jaccard indices between sets
+    in the two groups. Note that this could be a self comparison (two groups are the same).
+    - `E(frac) = mean(2J / (1+J))`, where `J` is the Jaccard matrix.
+    - This expectation ≥ mean of the Jaccard matrix, (`2J / (1+J) ≥ J, 0 ≤ J ≤ 1`).
     """
     return np.mean(2 * jaccard_mtx / (1 + jaccard_mtx))
 
 
 def _frac_to_penalty(frac_tar: NDArray | float, frac_neg: NDArray | float) -> NDArray | float:
-    """The penalty formula (Euclidean / L2 norm of the two fractions). 
-    - When `frac_tar` and `frac_neg` are expectations, this formula doesn't give the expected penalty, since it's non-linear. 
-    - However, since it is convex, the returned value ≤ the true expectation (Jensen’s inequality). 
+    """The penalty formula (Euclidean / L2 norm of the two fractions).
+    - When `frac_tar` and `frac_neg` are expectations, this formula doesn't give the expected penalty, since it's non-linear.
+    - However, since it is convex, the returned value ≤ the true expectation (Jensen’s inequality).
     """
     return ((1 - frac_tar)**2 + frac_neg**2)**0.5
 
@@ -236,17 +235,17 @@ def _frac_to_penalty(frac_tar: NDArray | float, frac_neg: NDArray | float) -> ND
 def get_kmers(
     assemblies: Assemblies, config: Config, state: RunState
 ) -> tuple[KmerGraph, NDArray | None]:
-    """Create a `KmerGraph` instance, calculate filtering thresholds and run the `filter()` method to generate low-penalty subgraphs. 
+    """Create a `KmerGraph` instance, calculate filtering thresholds and run the `filter()` method to generate low-penalty subgraphs.
 
     Args:
-        assemblies (Assemblies): See `Assemblies` in `assemblies.py`. 
-        config (Config): See `Config` in `config.py`. 
-        state (RunState): See `RunState` in `config.py`. 
+        assemblies (Assemblies): See `Assemblies` in `assemblies.py`.
+        config (Config): See `Config` in `config.py`.
+        state (RunState): See `RunState` in `config.py`.
 
     Returns:
         tuple: A tuple containing
-            1. KmerGraph: The KmerGraph instance. 
-            2. NDArray | None: A matrix of Jaccard indices of all assembly pairs. 
+            1. KmerGraph: The KmerGraph instance.
+            2. NDArray | None: A matrix of Jaccard indices of all assembly pairs.
     """
     overwrite = config.overwrite
     kmerlen = config.kmerlen
@@ -275,11 +274,11 @@ def get_kmers(
         # skip kmers.filter(), debug only
         kmers_path = working_dir / 'kmers.npz'
         np.savez(
-            kmers_path, 
-            kmers=kmers.kmers, 
-            idx=kmers.idx, 
-            nodes=kmers.nodes, 
-            edges=kmers.edges, 
+            kmers_path,
+            kmers=kmers.kmers,
+            idx=kmers.idx,
+            nodes=kmers.nodes,
+            edges=kmers.edges,
             allow_pickle=False
         )
         log_and_raise(SystemExit, f'Filtering is turned off. Raw k-mers are saved to {kmers_path}')
@@ -293,10 +292,10 @@ def get_kmers(
         # we only care about the presence & absence of k-mers in target assemblies
         if run_mash and HAS_MASH:
             jaccard = assemblies.mash(
-                kmerlen=kmerlen, 
-                sketchsize=sketchsize, 
-                out_path=working_dir / WORKINGDIR.mash, 
-                overwrite=overwrite, 
+                kmerlen=kmerlen,
+                sketchsize=sketchsize,
+                out_path=working_dir / WORKINGDIR.mash,
+                overwrite=overwrite,
                 n_cpu=n_cpu
             )
             e_absence_tar = 1 - _expected_frac(jaccard[:n_tar, :n_tar])

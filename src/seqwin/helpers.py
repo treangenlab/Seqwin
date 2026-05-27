@@ -2,7 +2,7 @@
 Helpers
 =======
 
-Helper functions for `kmers.py`. 
+Helper functions for `kmers.py`.
 
 Dependencies:
 -------------
@@ -33,39 +33,39 @@ from .config import NODE_P
 
 
 def get_subgraphs(
-    graph: nx.Graph, 
-    penalty_th: float, 
-    min_nodes: int, 
-    max_nodes: int | None, 
+    graph: nx.Graph,
+    penalty_th: float,
+    min_nodes: int,
+    max_nodes: int | None,
     rng: Random
 ) -> tuple[
-    tuple[frozenset[np.uint64], ...], 
+    tuple[frozenset[np.uint64], ...],
     frozenset[np.uint64]
 ]:
-    """Find disjoint (no shared node) subgraphs whose average node-penalty ≤ `penalty_th` and size within `size_th`. 
-    1. Remove low-weight edges and isolated nodes from `graph`. 
-    2. Find nodes with penalty ≤ `penalty_th` as seeds of subgraphs. 
-    3. Greedy seed-expansion with breadth first search (BFS), where the neighboring node with the lowest penalty is 
-        selected in each iteration. 
+    """Find disjoint (no shared node) subgraphs whose average node-penalty ≤ `penalty_th` and size within `size_th`.
+    1. Remove low-weight edges and isolated nodes from `graph`.
+    2. Find nodes with penalty ≤ `penalty_th` as seeds of subgraphs.
+    3. Greedy seed-expansion with breadth first search (BFS), where the neighboring node with the lowest penalty is
+        selected in each iteration.
 
-    A heap frontier (nodes to be visited in BFS) is used to accelerate the expansion process. 
-    The heap is implemented with the built-in Python `heapq` module, which is a min-heap. 
-    E.g., when tuples of `(penalty, node)` are pushed to the heap, it will always pop the tuple with the smallest `penalty` first. 
-    This is faster than calling `min()` every time to fetch the node with the lowest penalty. 
-    When tested on the Salmonella dataset (576 genomes, no edge filtering), this implementation is more than 3x faster than the naive one. 
-    However, the performance gain becomes less significant when more low-weight edges are removed. 
+    A heap frontier (nodes to be visited in BFS) is used to accelerate the expansion process.
+    The heap is implemented with the built-in Python `heapq` module, which is a min-heap.
+    E.g., when tuples of `(penalty, node)` are pushed to the heap, it will always pop the tuple with the smallest `penalty` first.
+    This is faster than calling `min()` every time to fetch the node with the lowest penalty.
+    When tested on the Salmonella dataset (576 genomes, no edge filtering), this implementation is more than 3x faster than the naive one.
+    However, the performance gain becomes less significant when more low-weight edges are removed.
 
     Args:
-        graph (nx.Graph): See `KmerGraph.graph`. 
-        penalty_th (float): See `Config` in `config.py`. 
-        min_nodes (int): See `Config` in `config.py`. 
-        max_nodes (int | None): See `Config` in `config.py`. 
-        rng (random.Random): See `RunState` in `config.py`. 
+        graph (nx.Graph): See `KmerGraph.graph`.
+        penalty_th (float): See `Config` in `config.py`.
+        min_nodes (int): See `Config` in `config.py`.
+        max_nodes (int | None): See `Config` in `config.py`.
+        rng (random.Random): See `RunState` in `config.py`.
 
     Returns:
         tuple: A tuple containing
-            1. tuple[frozenset[np.uint64], ...]: See `KmerGraph.subgraphs`. 
-            2. frozenset[np.uint64]: Union of k-mer hash values in all subgraphs. 
+            1. tuple[frozenset[np.uint64], ...]: See `KmerGraph.subgraphs`.
+            2. frozenset[np.uint64]: Union of k-mer hash values in all subgraphs.
     """
     # a dict mapping node to penalty for faster lookup
     node_penalty: dict[int, float] = dict(
@@ -159,9 +159,9 @@ def get_subgraphs(
         logger.info(f' - Found {len(subgraphs)} low-penalty subgraphs')
     else:
         log_and_raise(
-            RuntimeError, 
+            RuntimeError,
             ('No low-penalty subgraph was found. '
-            'Try decrease --stringency, or increase --penalty-th (penalty threshold, check log for the calculated value).')
+            'Try decrease --stringency, or increase --penalty-th (penalty threshold, check log for the calculated value)')
         )
 
     # due to the greedy nature of node expansion, subgraphs created first are usually larger

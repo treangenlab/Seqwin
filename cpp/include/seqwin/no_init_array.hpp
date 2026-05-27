@@ -7,7 +7,7 @@
 namespace seqwin {
 
 /**
- * A fixed-size owning array.
+ * @brief Fixed-size owning array that avoids value-initializing elements.
  *
  * Unlike `std::vector<T>(n) or std::make_unique<T[]>(n)`, this class allocates
  * with `new T[n]`. For scalar and trivially default-initialized element types,
