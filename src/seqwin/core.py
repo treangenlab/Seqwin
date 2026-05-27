@@ -6,6 +6,7 @@ Seqwin entry point.
 
 Dependencies:
 -------------
+- numpy
 - pandas
 - .assemblies
 - .kmers
@@ -32,6 +33,7 @@ from random import Random
 
 logger = logging.getLogger(__name__)
 
+import numpy as np
 import pandas as pd
 
 from .assemblies import Assemblies, get_assemblies
@@ -126,25 +128,35 @@ class Seqwin(object):
         assemblies = self.assemblies
 
         overwrite = config.overwrite
+        no_filter = config.no_filter
         working_dir = state.working_dir
 
         kmers, jaccard = get_kmers(assemblies, config, state)
 
-        if kmers.subgraphs is None:
-            # if config.no_filter is True (debug only)
-            markers = None
+        if no_filter:
+            graph_path = working_dir / WORKINGDIR.graph
+            file_to_write(graph_path, overwrite)
+            np.savez(
+                graph_path,
+                allow_pickle=False,
+                kmers=kmers.kmers,
+                idx=kmers.idx,
+                nodes=kmers.nodes,
+                edges=kmers.edges,
+            )
+            logger.info(f'Filtering is turned off. Raw minimizer graph is saved as {graph_path}')
         else:
             markers = get_markers(kmers, assemblies, config, state)
 
-        self.kmers = kmers
-        self.mash = jaccard
-        self.markers = markers
+            self.kmers = kmers
+            self.mash = jaccard
+            self.markers = markers
 
-        # save run instance
-        results_path = working_dir / WORKINGDIR.results
-        file_to_write(results_path, overwrite)
-        results_path.write_bytes(pickle.dumps(self))
-        logger.info(f'Run instance (includes all run data) saved as {results_path}')
+            # save run instance
+            results_path = working_dir / WORKINGDIR.results
+            file_to_write(results_path, overwrite)
+            results_path.write_bytes(pickle.dumps(self))
+            logger.info(f'Run instance (includes all run data) saved as {results_path}')
 
 
 def run(config: Config) -> Seqwin:

@@ -94,9 +94,9 @@ class Config(BaseModel):
         min_len (int): Minimum length of output signatures. [200]
         max_len (int | None): Estimated maximum length of output signatures. If None, no explicit limit is applied (capped by `max_nodes_cap`). [None]
         run_blast (bool): If True, evaluate signature sequences with BLAST. [True]
+        no_filter (bool): If True, skip filtering k-mers and save the raw k-mer graph. [False]
         blast_neg_only (bool, deprecated): If True, only include non-target assemblies in the BLAST database. [False]
 
-        no_filter (bool): If True, skip filtering k-mers (debug only). [False]
         penalty_th_cap (float): If `penalty_th` is None, penalty threshold cannot be higher than this value. [0.2]
         edge_w_th_mul (float): Multiplier for determining the threshold for low-weight edges. [0.3]
         min_nodes_floor (int): Lowest possible value for `min_nodes` (see `RunState`), regardless of `min_len`. [3]
@@ -138,10 +138,10 @@ class Config(BaseModel):
     min_len: int = 200
     max_len: int | None = None
     run_blast: bool = True
+    no_filter: bool = False
     blast_neg_only: bool = False # NOTE: need to fix when this is turned on
 
     # Graph filtering options (not included in CLI)
-    no_filter: bool = False
     penalty_th_cap: float = 0.2
     edge_w_th_mul: float = 0.3
     min_nodes_floor: int = 3
@@ -255,6 +255,7 @@ class WorkingDir:
         config (str): The `Config` instance saved as JSON. ['config.json']
         assemblies_dir (str): Directory for downloaded assemblies. ['assemblies']
         assemblies_csv (str): The `Assemblies` instance (`assemblies.py`) saved as CSV. ['assemblies.csv']
+        graph (str): NumPy arrays representing the k-mer graph (`kmers`, `idx`, `nodes` and `edges`). ['graph.npz']
         mash (str): Mash sketch of all assemblies (.msh will be added by Mash). ['sketches']
         blast_dir (str): Directory for the BLAST database. ['blastdb']
         blast_log (str): Console output of the makeblastdb command, inside `blast_dir`. ['makeblastdb.log']
@@ -266,6 +267,7 @@ class WorkingDir:
     config: str = 'config.json'
     assemblies_dir: str = 'assemblies'
     assemblies_csv: str = 'assemblies.csv'
+    graph: str = 'graph.npz'
     mash: str = 'sketches'
     blast_dir: str = 'blastdb'
     blast_log: str = 'makeblastdb.log'
