@@ -31,12 +31,12 @@ Python_add_library(_core MODULE WITH_SOABI
   src/bindings/python_bindings.cpp
   src/seqwin/graph.cpp
   src/seqwin/helpers.cpp
-  src/btllib/minimizer.cpp
+  vendor/btllib/minimizer.cpp
   src/seqwin/fasta_reader.cpp
-  src/btllib/status.cpp
+  vendor/btllib/status.cpp
 )
 
-target_include_directories(_core PRIVATE include "${PYBIND11_INCLUDE}")
+target_include_directories(_core PRIVATE include vendor "${PYBIND11_INCLUDE}")
 target_link_libraries(_core PRIVATE Python::Module zlibstatic)
 target_compile_definitions(_core PRIVATE PYBIND11_DETAILED_ERROR_MESSAGES)
 
