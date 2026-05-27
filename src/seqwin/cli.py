@@ -140,6 +140,9 @@ def main(
         help='Do not evaluate signature sequences with BLAST.',
         rich_help_panel='Signature options'
     ),
+    no_filter: bool = typer.Option(
+        False, '--no-filter', show_default=False, hidden=True
+    ),
     # blast_neg_only: bool = typer.Option(
     #     False, '--fast-blast', is_flag=True, flag_value=True, show_default=False,
     #     help='Only evaluate (BLAST) against non-target assemblies.'
@@ -227,6 +230,7 @@ def main(
         min_len=min_len,
         max_len=max_len,
         run_blast=not no_blast,
+        no_filter=no_filter,
         #blast_neg_only=blast_neg_only,
         seed=seed,
         n_cpu=n_cpu,

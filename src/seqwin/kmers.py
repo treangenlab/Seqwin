@@ -271,17 +271,7 @@ def get_kmers(
     kmers = KmerGraph(assemblies, kmerlen, windowsize, n_cpu)
 
     if no_filter:
-        # skip kmers.filter(), debug only
-        kmers_path = working_dir / 'kmers.npz'
-        np.savez(
-            kmers_path,
-            kmers=kmers.kmers,
-            idx=kmers.idx,
-            nodes=kmers.nodes,
-            edges=kmers.edges,
-            allow_pickle=False
-        )
-        log_and_raise(SystemExit, f'Filtering is turned off. Raw k-mers are saved to {kmers_path}')
+        return kmers, None
 
     # calculate filter params
     # 1. calculate penalty threshold
