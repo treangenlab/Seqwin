@@ -38,3 +38,8 @@ def non_targets_txt(fixtures_dir: Path) -> Path:
 @pytest.fixture(scope='session')
 def expected_fasta(fixtures_dir: Path) -> str:
     return read_text(fixtures_dir / 'expected' / 'signatures.fasta')
+
+
+@pytest.fixture(scope='session')
+def expected_graph(fixtures_dir: Path) -> Path:
+    return fixtures_dir / 'expected' / 'graph.npz'
