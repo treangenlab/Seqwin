@@ -1,16 +1,21 @@
+import re
 from pathlib import Path
 
-from click import unstyle
 from typer.testing import CliRunner
 
 from seqwin import __version__
 from seqwin import cli
 
+ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 runner = CliRunner()
 
 
+def unstyle(text: str) -> str:
+    return ANSI_RE.sub("", text)
+
+
 def test_help_shows_key_options() -> None:
-    result = runner.invoke(cli.app, ['--help'], terminal_width=120)
+    result = runner.invoke(cli.app, ['--help'], terminal_width=120, color=False)
     output = unstyle(result.output)
 
     assert result.exit_code == 0
