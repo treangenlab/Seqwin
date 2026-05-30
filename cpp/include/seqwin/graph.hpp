@@ -15,10 +15,8 @@ namespace seqwin {
 struct Kmer {
     /** 0-based position of the minimizer within its FASTA record. */
     std::uint32_t pos;
-    /** 0-based index of the FASTA record within the assembly. */
-    std::uint16_t record_idx;
-    /** Assembly index assigned to the source assembly. */
-    std::uint16_t assembly_idx;
+    /** 0-based global index of the FASTA record. */
+    std::uint32_t record_idx;
 };
 
 /**
@@ -70,6 +68,8 @@ struct Graph {
     NoInitArray<Node> nodes;
     /** Sorted by hash. */
     NoInitArray<Edge> edges;
+    /** Cumulative global FASTA record offsets by assembly. */
+    std::vector<std::uint64_t> record_offsets;
     /** FASTA record IDs of each assembly. */
     std::vector<std::vector<std::string>> ids_by_assembly;
 };
@@ -77,22 +77,20 @@ struct Graph {
 /**
  * @brief Build a minimizer graph from assembly FASTA files.
  *
- * `assembly_paths`, `assembly_indices`, and `is_targets` are parallel lists.
+ * `assembly_paths` and `is_targets` are parallel lists.
  *
  * @param assembly_paths Paths to input assemblies in FASTA format (plain or gzipped).
  * @param kmerlen K-mer length for minimizer sketch.
  * @param windowsize Window size for minimizer sketch.
- * @param assembly_indices Assembly indices, expected to be `0..N-1`.
  * @param is_targets Whether each assembly is a target assembly.
  * @param n_cpu Number of worker threads to use.
  * @return Minimizer graph.
- * @throws `std::runtime_error` If input sizes are inconsistent or indices exceed supported ranges.
+ * @throws `std::runtime_error` If input sizes are inconsistent or counts exceed supported ranges.
  */
 Graph build(
     const std::vector<std::string>& assembly_paths,
     std::size_t kmerlen,
     std::size_t windowsize,
-    const std::vector<std::size_t>& assembly_indices,
     const std::vector<bool>& is_targets,
     std::size_t n_cpu
 );

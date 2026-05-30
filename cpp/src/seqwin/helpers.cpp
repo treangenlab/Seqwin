@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
+#include <stdexcept>
 #include <vector>
 
 #include <pybind11/pybind11.h>
@@ -181,6 +183,7 @@ static NoInitArray<Kmer> merge_kmers(
     const std::vector<IdxSegment>& idx_segments,
     std::vector<ThreadGraph>& graphs,
     std::size_t total_kmers,
+    const std::vector<std::uint64_t>& thread_record_offsets,
     ThreadPool& pool
 ) {
     NoInitArray<Kmer> kmers(total_kmers);
@@ -190,10 +193,13 @@ static NoInitArray<Kmer> merge_kmers(
             const auto& segment = idx_segments[s];
             const auto& local_idx = graphs[segment.thread_id].idx;
             const auto& local_kmers = graphs[segment.thread_id].kmers;
+            const auto offset = thread_record_offsets[segment.thread_id];
 
             for (std::size_t k = 0; k < segment.length; ++k) {
                 const auto local_kmer_i = local_idx[segment.local_start + k];
-                kmers[segment.out_start + k] = local_kmers[static_cast<std::size_t>(local_kmer_i)];
+                auto kmer = local_kmers[static_cast<std::size_t>(local_kmer_i)];
+                kmer.record_idx += static_cast<std::uint32_t>(offset);
+                kmers[segment.out_start + k] = kmer;
             }
         }
     });
@@ -333,14 +339,19 @@ Graph merge_thread_graphs(
 ) {
     if (graphs.size() == 1) {
         auto& graph = graphs[0];
+        if (graph.record_offsets.back() > std::numeric_limits<std::uint32_t>::max()) {
+            throw std::runtime_error("Total number of FASTA records exceeds uint32 range");
+        }
 
         merge_edges(graph.edges, pool);
         auto idx_segments = merge_nodes(graph.nodes, pool);
 
+        std::vector<std::uint64_t> thread_record_offsets{0};
         auto kmers = merge_kmers(
             idx_segments,
             graphs,
             graph.n_kmers,
+            thread_record_offsets,
             pool
         );
         std::vector<Kmer>().swap(graph.kmers);
@@ -360,11 +371,35 @@ Graph merge_thread_graphs(
             std::move(idx),
             std::move(graph.nodes),
             std::move(graph.edges),
+            std::move(graph.record_offsets),
             std::move(graph.ids_by_assembly)
         };
     }
 
     log_python(" - Merging from " + std::to_string(graphs.size()) + " threads...");
+
+    // Merge record offsets
+    std::vector<std::uint64_t> thread_record_offsets(graphs.size());
+    std::vector<std::uint64_t> record_offsets;
+    record_offsets.reserve(n_assemblies + 1);
+    record_offsets.push_back(0);
+
+    std::uint64_t total_records = 0;
+    for (std::size_t t = 0; t < graphs.size(); ++t) {
+        auto& local_offsets = graphs[t].record_offsets;
+
+        const auto base = total_records;
+        thread_record_offsets[t] = base;
+        total_records += local_offsets.back();
+
+        for (std::size_t i = 1; i < local_offsets.size(); ++i) {
+            record_offsets.push_back(base + local_offsets[i]);
+        }
+        std::vector<std::uint64_t>().swap(local_offsets);
+    }
+    if (total_records > std::numeric_limits<std::uint32_t>::max()) {
+        throw std::runtime_error("Total number of FASTA records exceeds uint32 range");
+    }
 
     // Merge edges and nodes first to reduce peak memory
     auto edges = concat_edges(graphs, pool);
@@ -375,12 +410,12 @@ Graph merge_thread_graphs(
 
     std::vector<std::uint64_t> kmer_offsets(graphs.size());
     std::uint64_t total_kmers = 0;
-    for (std::size_t r = 0; r < graphs.size(); ++r) {
-        kmer_offsets[r] = total_kmers;
-        total_kmers += graphs[r].n_kmers;
+    for (std::size_t t = 0; t < graphs.size(); ++t) {
+        kmer_offsets[t] = total_kmers;
+        total_kmers += graphs[t].n_kmers;
     }
 
-    auto kmers = merge_kmers(idx_segments, graphs, total_kmers, pool);
+    auto kmers = merge_kmers(idx_segments, graphs, total_kmers, thread_record_offsets, pool);
     for (auto& graph : graphs) {
         std::vector<Kmer>().swap(graph.kmers);
     }
@@ -404,6 +439,7 @@ Graph merge_thread_graphs(
         std::move(idx),
         std::move(nodes),
         std::move(edges),
+        std::move(record_offsets),
         std::move(ids_by_assembly)
     };
 }

@@ -13,7 +13,7 @@
 namespace py = pybind11;
 
 PYBIND11_MODULE(_core, m) {
-    PYBIND11_NUMPY_DTYPE(seqwin::Kmer, pos, record_idx, assembly_idx);
+    PYBIND11_NUMPY_DTYPE(seqwin::Kmer, pos, record_idx);
     PYBIND11_NUMPY_DTYPE(seqwin::Node, hash, start, stop, n_tar, n_neg, penalty);
     PYBIND11_NUMPY_DTYPE(seqwin::Edge, first, second, weight);
 
@@ -23,7 +23,6 @@ PYBIND11_MODULE(_core, m) {
         [](const std::vector<std::string>& assembly_paths,
            std::size_t kmerlen,
            std::size_t windowsize,
-           const std::vector<std::size_t>& assembly_indices,
            const std::vector<bool>& is_targets,
            std::size_t n_cpu
         ) {
@@ -34,7 +33,6 @@ PYBIND11_MODULE(_core, m) {
                     assembly_paths,
                     kmerlen,
                     windowsize,
-                    assembly_indices,
                     is_targets,
                     n_cpu
                 );
@@ -71,6 +69,12 @@ PYBIND11_MODULE(_core, m) {
                 owner->edges.data(),
                 capsule
             );
+            auto record_offsets = py::array_t<std::uint64_t>(
+                {static_cast<py::ssize_t>(owner->record_offsets.size())},
+                {static_cast<py::ssize_t>(sizeof(std::uint64_t))},
+                owner->record_offsets.data(),
+                capsule
+            );
             py::list ids_by_assembly;
             for (const auto& ids : owner->ids_by_assembly) {
                 py::tuple ids_tuple(ids.size());
@@ -80,12 +84,11 @@ PYBIND11_MODULE(_core, m) {
                 ids_by_assembly.append(ids_tuple);
             }
 
-            return py::make_tuple(kmers, idx, nodes, edges, ids_by_assembly);
+            return py::make_tuple(kmers, idx, nodes, edges, record_offsets, ids_by_assembly);
         },
         py::arg("assembly_paths"),
         py::arg("kmerlen"),
         py::arg("windowsize"),
-        py::arg("assembly_indices"),
         py::arg("is_targets"),
         py::arg("n_cpu") = 1
     );

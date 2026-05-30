@@ -47,7 +47,6 @@ ThreadGraph build_worker(
     const std::vector<std::string>& assembly_paths,
     std::size_t kmerlen,
     std::size_t windowsize,
-    const std::vector<std::size_t>& assembly_indices,
     const std::vector<bool>& is_targets,
     std::size_t start_assembly,
     std::size_t end_assembly,
@@ -64,7 +63,9 @@ ThreadGraph build_worker(
 
     ThreadGraph graph;
     graph.kmers.reserve(n_kmers_est);
-    graph.ids_by_assembly.resize(end_assembly - start_assembly);
+    graph.ids_by_assembly.reserve(end_assembly - start_assembly);
+    graph.record_offsets.reserve(end_assembly - start_assembly + 1);
+    graph.record_offsets.push_back(0);
     graph.start_assembly = start_assembly;
 
     std::vector<std::uint64_t> hashes; // Used to build ThreadGraph.idx
@@ -78,31 +79,29 @@ ThreadGraph build_worker(
     edge_map.reserve(n_map_entries_est);
 
     for (std::size_t assembly_i = start_assembly; assembly_i < end_assembly; ++assembly_i) {
-        const auto assembly_idx = assembly_indices[assembly_i];
         const bool is_target = is_targets[assembly_i];
 
         auto records = seqwin::read_fasta(assembly_paths[assembly_i]);
-        auto& record_ids = graph.ids_by_assembly[assembly_i - start_assembly];
-        record_ids.resize(records.size());
+        std::vector<std::string> record_ids;
+        record_ids.reserve(records.size());
 
-        for (std::size_t record_idx = 0; record_idx < records.size(); ++record_idx) {
-            if (record_idx > std::numeric_limits<std::uint16_t>::max()) {
-                throw std::runtime_error("Number of FASTA records exceeds uint16 range");
+        for (std::size_t record_i = 0; record_i < records.size(); ++record_i) {
+            const auto record_idx = graph.record_offsets.back() + record_i;
+            auto& record = records[record_i];
+            if (record.sequence.size() > std::numeric_limits<std::uint32_t>::max()) {
+                throw std::runtime_error(
+                    "Sequence length exceeds uint32 range for record " +
+                    record.id + " in assembly " + assembly_paths[assembly_i]);
             }
-            auto& record = records[record_idx];
-            record_ids[record_idx] = std::move(record.id);
+            record_ids.push_back(std::move(record.id));
 
             // Generate minimizers for the current record
             const auto mins = btllib::minimize_sequence(record.sequence, kmerlen, windowsize);
 
             for (const auto& m : mins) {
-                if (m.pos > std::numeric_limits<std::uint32_t>::max()) {
-                    throw std::runtime_error("Minimizer position exceeds uint32 range");
-                }
                 graph.kmers.push_back(Kmer{
                     static_cast<std::uint32_t>(m.pos),
-                    static_cast<std::uint16_t>(record_idx),
-                    static_cast<std::uint16_t>(assembly_idx)
+                    static_cast<std::uint32_t>(record_idx)
                 });
                 hashes.push_back(m.out_hash);
 
@@ -140,6 +139,8 @@ ThreadGraph build_worker(
                 }
             }
         }
+        graph.record_offsets.push_back(graph.record_offsets.back() + records.size());
+        graph.ids_by_assembly.push_back(std::move(record_ids));
     }
 
     // Materialize edges first to reduce peak memory
@@ -164,6 +165,7 @@ ThreadGraph build_worker(
         auto node_it = node_map.find(hash);
         graph.idx[node_it->second.cursor++] = static_cast<std::uint64_t>(i);
     }
+    std::vector<std::uint64_t>().swap(hashes);
 
     graph.nodes = NoInitArray<Node>(node_map.size());
     std::size_t node_i = 0;
@@ -188,19 +190,14 @@ Graph build(
     const std::vector<std::string>& assembly_paths,
     std::size_t kmerlen,
     std::size_t windowsize,
-    const std::vector<std::size_t>& assembly_indices,
     const std::vector<bool>& is_targets,
     std::size_t n_cpu
 ) {
-    if (assembly_paths.size() != assembly_indices.size() ||
-        assembly_paths.size() != is_targets.size()) {
-        throw std::runtime_error(
-            "assembly_paths, assembly_indices, and is_targets must have the same length");
+    if (assembly_paths.size() != is_targets.size()) {
+        throw std::runtime_error("assembly_paths and is_targets must have the same length");
     }
-    for (std::size_t i = 0; i < assembly_indices.size(); ++i) {
-        if (assembly_indices[i] > std::numeric_limits<std::uint16_t>::max()) {
-            throw std::runtime_error("Assembly index exceeds uint16 range");
-        }
+    if (assembly_paths.size() > std::numeric_limits<std::uint32_t>::max()) {
+        throw std::runtime_error("Number of input assemblies exceeds uint32 range");
     }
 
     const auto n_assemblies = assembly_paths.size();
@@ -223,7 +220,6 @@ Graph build(
                 assembly_paths,
                 kmerlen,
                 windowsize,
-                assembly_indices,
                 is_targets,
                 chunk_start,
                 chunk_end,
