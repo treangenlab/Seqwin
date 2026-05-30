@@ -1,6 +1,8 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 #include <pybind11/numpy.h>
@@ -11,6 +13,30 @@
 #include "seqwin/helpers.hpp"
 
 namespace py = pybind11;
+
+namespace {
+
+template <typename Array>
+auto array_to_numpy(Array&& values) {
+    using Owner = typename std::decay<Array>::type;
+    using T = typename std::remove_cv<
+        typename std::remove_pointer<decltype(std::declval<Owner&>().data())>::type
+    >::type;
+
+    auto* owner = new Owner(std::forward<Array>(values));
+    auto capsule = py::capsule(owner, [](void* ptr) {
+        delete static_cast<Owner*>(ptr);
+    });
+
+    return py::array_t<T>(
+        {static_cast<py::ssize_t>(owner->size())},
+        {static_cast<py::ssize_t>(sizeof(T))},
+        owner->data(),
+        capsule
+    );
+}
+
+}  // namespace
 
 PYBIND11_MODULE(_core, m) {
     PYBIND11_NUMPY_DTYPE(seqwin::Kmer, pos, record_idx);
@@ -37,46 +63,15 @@ PYBIND11_MODULE(_core, m) {
                     n_cpu
                 );
             }
-            auto owner = std::make_shared<seqwin::Graph>(std::move(graph));
-            auto capsule = py::capsule(
-                new std::shared_ptr<seqwin::Graph>(owner),
-                [](void* ptr) {
-                    delete static_cast<std::shared_ptr<seqwin::Graph>*>(ptr);
-                }
-            );
 
-            auto kmers = py::array_t<seqwin::Kmer>(
-                {static_cast<py::ssize_t>(owner->kmers.size())},
-                {static_cast<py::ssize_t>(sizeof(seqwin::Kmer))},
-                owner->kmers.data(),
-                capsule
-            );
-            auto idx = py::array_t<std::uint64_t>(
-                {static_cast<py::ssize_t>(owner->idx.size())},
-                {static_cast<py::ssize_t>(sizeof(std::uint64_t))},
-                owner->idx.data(),
-                capsule
-            );
-            auto nodes = py::array_t<seqwin::Node>(
-                {static_cast<py::ssize_t>(owner->nodes.size())},
-                {static_cast<py::ssize_t>(sizeof(seqwin::Node))},
-                owner->nodes.data(),
-                capsule
-            );
-            auto edges = py::array_t<seqwin::Edge>(
-                {static_cast<py::ssize_t>(owner->edges.size())},
-                {static_cast<py::ssize_t>(sizeof(seqwin::Edge))},
-                owner->edges.data(),
-                capsule
-            );
-            auto record_offsets = py::array_t<std::uint64_t>(
-                {static_cast<py::ssize_t>(owner->record_offsets.size())},
-                {static_cast<py::ssize_t>(sizeof(std::uint64_t))},
-                owner->record_offsets.data(),
-                capsule
-            );
+            auto kmers = array_to_numpy(std::move(graph.kmers));
+            auto idx = array_to_numpy(std::move(graph.idx));
+            auto nodes = array_to_numpy(std::move(graph.nodes));
+            auto edges = array_to_numpy(std::move(graph.edges));
+            auto record_offsets = array_to_numpy(std::move(graph.record_offsets));
+
             py::list ids_by_assembly;
-            for (const auto& ids : owner->ids_by_assembly) {
+            for (const auto& ids : graph.ids_by_assembly) {
                 py::tuple ids_tuple(ids.size());
                 for (std::size_t i = 0; i < ids.size(); ++i) {
                     ids_tuple[i] = ids[i];
@@ -119,32 +114,10 @@ PYBIND11_MODULE(_core, m) {
                     used_hashes
                 );
             }
-            auto owner = std::make_shared<seqwin::Graph>(std::move(graph));
-            auto capsule = py::capsule(
-                new std::shared_ptr<seqwin::Graph>(owner),
-                [](void* ptr) {
-                    delete static_cast<std::shared_ptr<seqwin::Graph>*>(ptr);
-                }
-            );
 
-            auto kmers_new = py::array_t<seqwin::Kmer>(
-                {static_cast<py::ssize_t>(owner->kmers.size())},
-                {static_cast<py::ssize_t>(sizeof(seqwin::Kmer))},
-                owner->kmers.data(),
-                capsule
-            );
-            auto idx_new = py::array_t<std::uint64_t>(
-                {static_cast<py::ssize_t>(owner->idx.size())},
-                {static_cast<py::ssize_t>(sizeof(std::uint64_t))},
-                owner->idx.data(),
-                capsule
-            );
-            auto nodes_new = py::array_t<seqwin::Node>(
-                {static_cast<py::ssize_t>(owner->nodes.size())},
-                {static_cast<py::ssize_t>(sizeof(seqwin::Node))},
-                owner->nodes.data(),
-                capsule
-            );
+            auto kmers_new = array_to_numpy(std::move(graph.kmers));
+            auto idx_new = array_to_numpy(std::move(graph.idx));
+            auto nodes_new = array_to_numpy(std::move(graph.nodes));
 
             return py::make_tuple(kmers_new, idx_new, nodes_new);
         },
