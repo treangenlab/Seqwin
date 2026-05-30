@@ -63,9 +63,9 @@ ThreadGraph build_worker(
 
     ThreadGraph graph;
     graph.kmers.reserve(n_kmers_est);
-    graph.ids_by_assembly.reserve(end_assembly - start_assembly);
     graph.record_offsets.reserve(end_assembly - start_assembly + 1);
     graph.record_offsets.push_back(0);
+    graph.ids_by_assembly.reserve(end_assembly - start_assembly);
     graph.start_assembly = start_assembly;
 
     std::vector<std::uint64_t> hashes; // Used to build ThreadGraph.idx
