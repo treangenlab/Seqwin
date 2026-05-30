@@ -25,7 +25,7 @@ def _assert_graph_matches_expected(actual_path: Path, expected_path: Path) -> No
 
     actual_keys = set(actual.files)
     expected_keys = set(expected.files)
-    required_keys = {'kmers', 'idx', 'nodes', 'edges'}
+    required_keys = {'kmers', 'idx', 'nodes', 'edges', 'record_offsets'}
 
     assert actual_keys == expected_keys, f'graph arrays mismatch: actual={sorted(actual_keys)}, expected={sorted(expected_keys)}'
     assert actual_keys == required_keys, f'graph arrays must be exactly {sorted(required_keys)}, got {sorted(actual_keys)}'

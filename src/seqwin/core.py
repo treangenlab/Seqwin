@@ -143,6 +143,7 @@ class Seqwin(object):
                 idx=kmers.idx,
                 nodes=kmers.nodes,
                 edges=kmers.edges,
+                record_offsets=kmers.record_offsets,
             )
             logger.info(f'Filtering is turned off. Raw minimizer graph is saved as {graph_path}')
         else:
