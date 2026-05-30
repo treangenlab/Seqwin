@@ -44,6 +44,7 @@ logger = logging.getLogger(__name__)
 import numpy as np
 import pandas as pd
 import networkx as nx
+from numpy.typing import NDArray
 
 from .assemblies import Assemblies
 from .kmers import KmerGraph
@@ -58,8 +59,6 @@ _BAD_WARNINGS = frozenset((
     'dup', # has duplicate k-mers
     'rev' # k-mer ordering is reversible
 ))
-# Translation table for complement k-mer strands, deprecated. ['+' -> '-', '-' -> '+']
-_KMER_STRAND_COMP = str.maketrans('+-', '-+')
 
 
 @dataclass(slots=True, frozen=True)
@@ -354,7 +353,13 @@ class ConnectedKmers(object):
 
 
 def _create_ck(
-    graph: nx.Graph, nodes: tuple[np.uint64], kmers: tuple, idx: tuple, n_tar: int, kmerlen: int
+    graph: nx.Graph,
+    nodes: tuple[np.uint64],
+    kmers: tuple,
+    idx: tuple,
+    record_offsets: NDArray[np.uint64],
+    n_tar: int,
+    kmerlen: int
 ) -> ConnectedKmers:
     """Create a ConnectedKmers instance by taking the outputs of `_get_create_ck_args()`.
     """
@@ -363,10 +368,19 @@ def _create_ck(
     for h, kmer_group, idx_group in zip(nodes, kmers, idx):
         df = pd.DataFrame(kmer_group, index=idx_group)
         df['hash'] = h
-        df['is_target'] = df['assembly_idx'] < n_tar
         kmers_df.append(df)
 
+    # recover assembly_idx
     kmers_df = pd.concat(kmers_df, ignore_index=False)
+    record_idx = kmers_df['record_idx'].to_numpy()
+    assembly_idx = np.searchsorted(
+        record_offsets,
+        record_idx,
+        side='right',
+    ) - 1
+    kmers_df['record_idx'] = record_idx - record_offsets[assembly_idx]
+    kmers_df['assembly_idx'] = assembly_idx
+    kmers_df['is_target'] = assembly_idx < n_tar
 
     return ConnectedKmers(graph, kmers_df, kmerlen)
 
@@ -389,6 +403,7 @@ def _get_create_ck_args(
     nodes = kg.nodes
     graph = kg.graph
     subgraphs = kg.subgraphs
+    record_offsets = kg.record_offsets
 
     # create a dict of hash -> k-mer group
     kmer_groups = dict()
@@ -411,7 +426,7 @@ def _get_create_ck_args(
             idx_groups.pop(h) for h in arg_nodes
         )
 
-        yield arg_graph, arg_nodes, arg_kmers, arg_idx, n_tar, kmerlen
+        yield arg_graph, arg_nodes, arg_kmers, arg_idx, record_offsets, n_tar, kmerlen
 
 
 def _fetch_cks_seq(

@@ -1,6 +1,10 @@
+from pathlib import Path
+
+import networkx as nx
 import numpy as np
 
 from seqwin.graph import KMER_DTYPE, NODE_DTYPE, EDGE_DTYPE, build, _filter_kmers
+from seqwin.markers import _create_ck
 
 
 def _sorted_edges(edges: np.ndarray) -> np.ndarray:
@@ -26,8 +30,8 @@ def _assert_idx_invariants(kmers: np.ndarray, idx: np.ndarray, nodes: np.ndarray
 
 def test_dtype_layouts() -> None:
     assert KMER_DTYPE.itemsize == 8
-    assert KMER_DTYPE.names == ('pos', 'record_idx', 'assembly_idx')
-    assert KMER_DTYPE['assembly_idx'] == np.dtype(np.uint16)
+    assert KMER_DTYPE.names == ('pos', 'record_idx')
+    assert KMER_DTYPE['record_idx'] == np.dtype(np.uint32)
 
     assert NODE_DTYPE.names == ('hash', 'start', 'stop', 'n_tar', 'n_neg', 'penalty')
     assert NODE_DTYPE["n_tar"] == np.dtype(np.uint32)
@@ -48,44 +52,41 @@ def test_build_threading_equivalence(targets_dir, non_targets_dir) -> None:
         non_targets_dir / 'non-target-1.fasta',
         non_targets_dir / 'non-target-2.fasta',
     ]
-    assembly_indices = [0, 1, 2, 3]
     is_targets = [True, True, False, False]
 
-    kmers_1, idx_1, nodes_1, edges_1, record_ids_1 = build(
+    kmers_1, idx_1, nodes_1, edges_1, record_offsets_1, record_ids_1 = build(
         assembly_paths,
         kmerlen=7,
         windowsize=10,
-        assembly_indices=assembly_indices,
         is_targets=is_targets,
         n_cpu=1,
     )
-    kmers_2, idx_2, nodes_2, edges_2, record_ids_2 = build(
+    kmers_2, idx_2, nodes_2, edges_2, record_offsets_2, record_ids_2 = build(
         assembly_paths,
         kmerlen=7,
         windowsize=10,
-        assembly_indices=assembly_indices,
         is_targets=is_targets,
         n_cpu=2,
     )
-    kmers_many, idx_many, nodes_many, edges_many, record_ids_many = build(
+    kmers_many, idx_many, nodes_many, edges_many, record_offsets_many, record_ids_many = build(
         assembly_paths,
         kmerlen=7,
         windowsize=10,
-        assembly_indices=assembly_indices,
         is_targets=is_targets,
         n_cpu=99,
     )
 
     assert kmers_1.dtype == KMER_DTYPE
     assert kmers_1.dtype.itemsize == 8
-    assert kmers_1.dtype.names == ('pos', 'record_idx', 'assembly_idx')
+    assert kmers_1.dtype.names == ('pos', 'record_idx')
     for node in nodes_1:
         start = int(node['start'])
         stop = int(node['stop'])
         assert stop > start
         assert len(kmers_1[start:stop]) == (stop - start)
 
-    assert set(np.unique(kmers_1['assembly_idx']).tolist()) == {0, 1, 2, 3}
+    assert np.array_equal(record_offsets_1, np.array([0, 1, 2, 3, 4], dtype=np.uint64))
+    assert np.array_equal(np.unique(kmers_1['record_idx']), np.arange(4, dtype=np.uint32))
     assert np.all(nodes_1['n_tar'] + nodes_1['n_neg'] > 0)
 
     assert edges_1.ndim == 1
@@ -110,19 +111,73 @@ def test_build_threading_equivalence(targets_dir, non_targets_dir) -> None:
     assert record_ids_1 == record_ids_2
     assert record_ids_1 == record_ids_many
     assert len(record_ids_1) == len(assembly_paths)
+    assert np.array_equal(record_offsets_1, record_offsets_2)
+    assert np.array_equal(record_offsets_1, record_offsets_many)
 
     assert np.array_equal(_sorted_edges(edges_1), _sorted_edges(edges_2))
     assert np.array_equal(_sorted_edges(edges_1), _sorted_edges(edges_many))
 
 
+def test_multi_thread_record_offsets_and_global_record_indices(tmp_path: Path) -> None:
+    def write_fasta(path: Path, n_records: int) -> None:
+        seq = 'ACGT' * 20
+        path.write_text(''.join(f'>r{i}\n{seq}\n' for i in range(n_records)))
+
+    assembly_paths = []
+    for i, n_records in enumerate([2, 1, 3, 1]):
+        path = tmp_path / f'a{i}.fasta'
+        write_fasta(path, n_records)
+        assembly_paths.append(path)
+
+    kmers, _, _, _, record_offsets, record_ids = build(
+        assembly_paths,
+        kmerlen=7,
+        windowsize=10,
+        is_targets=[True, True, False, False],
+        n_cpu=2,
+    )
+
+    assert [len(ids) for ids in record_ids] == [2, 1, 3, 1]
+    assert np.array_equal(record_offsets, np.array([0, 2, 3, 6, 7], dtype=np.uint64))
+    assert np.array_equal(np.unique(kmers['record_idx']), np.arange(7, dtype=np.uint32))
+
+
+def test_create_ck_reconstructs_assembly_and_local_record_indices(monkeypatch) -> None:
+    captured = {}
+
+    class FakeConnectedKmers:
+        def __init__(self, graph, kmers_df, kmerlen):
+            captured['graph'] = graph
+            captured['kmers_df'] = kmers_df.copy()
+            captured['kmerlen'] = kmerlen
+
+    monkeypatch.setattr('seqwin.markers.ConnectedKmers', FakeConnectedKmers)
+
+    graph = nx.Graph()
+    kmers = (
+        np.array([(5, 0), (6, 2), (7, 5)], dtype=KMER_DTYPE),
+    )
+    idx = (np.array([10, 20, 30], dtype=np.uint64),)
+    record_offsets = np.array([0, 2, 5, 6], dtype=np.uint64)
+
+    _create_ck(graph, (np.uint64(123),), kmers, idx, record_offsets, n_tar=2, kmerlen=7)
+
+    df = captured['kmers_df'].sort_index()
+    assert df['assembly_idx'].tolist() == [0, 1, 2]
+    assert df['record_idx'].tolist() == [0, 0, 0]
+    assert df['is_target'].tolist() == [True, True, False]
+    assert df['hash'].tolist() == [123, 123, 123]
+    assert captured['kmerlen'] == 7
+
+
 def test_filter_kmers() -> None:
     kmers = np.array([
-        (10, 0, 0),
-        (11, 0, 0),
-        (20, 0, 1),
-        (30, 1, 1),
-        (31, 1, 1),
-        (32, 1, 1),
+        (10, 0),
+        (11, 0),
+        (20, 1),
+        (30, 2),
+        (31, 2),
+        (32, 2),
     ], dtype=KMER_DTYPE)
     idx = np.array([100, 101, 200, 300, 301, 302], dtype=np.uint64)
     nodes = np.array([
@@ -138,11 +193,11 @@ def test_filter_kmers() -> None:
     assert np.array_equal(nodes_new['stop'], np.array([2, 5], dtype=np.uint64))
 
     expected_kmers = np.array([
-        (10, 0, 0),
-        (11, 0, 0),
-        (30, 1, 1),
-        (31, 1, 1),
-        (32, 1, 1),
+        (10, 0),
+        (11, 0),
+        (30, 2),
+        (31, 2),
+        (32, 2),
     ], dtype=KMER_DTYPE)
     expected_idx = np.array([100, 101, 300, 301, 302], dtype=np.uint64)
 

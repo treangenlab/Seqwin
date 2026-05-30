@@ -7,15 +7,8 @@ Core functions and dtypes for Seqwin minimizer graphs.
 Usage:
 ------
 ```python
->>> from pathlib import Path
 >>> from seqwin.graph import build
->>> kmers, idx, nodes, edges, record_ids = build(
->>>     assembly_paths=[Path('example1.fa'), Path('example2.fa.gz')],
->>>     kmerlen=21,
->>>     windowsize=200,
->>>     assembly_idx=[0, 1],
->>>     is_target=[True, False],
->>> )
+>>> help(build)
 ```
 
 Dependencies:
@@ -46,8 +39,7 @@ from .utils import OrderedKmers
 
 KMER_DTYPE = np.dtype([
     ('pos', np.uint32),
-    ('record_idx', np.uint16),
-    ('assembly_idx', np.uint16)
+    ('record_idx', np.uint32),
 ])
 
 NODE_DTYPE = np.dtype([
@@ -70,7 +62,6 @@ def build(
     assembly_paths: Iterable[Path],
     kmerlen: int,
     windowsize: int,
-    assembly_indices: Iterable[int],
     is_targets: Iterable[bool],
     n_cpu: int = 1
 ) -> tuple[
@@ -78,6 +69,7 @@ def build(
     NDArray[np.uint64],
     NDArray[np.void],
     NDArray[np.void],
+    NDArray[np.uint64],
     list[tuple[str, ...]]
 ]:
     """Build a Seqwin minimizer graph.
@@ -85,16 +77,15 @@ def build(
     Example usage:
     ```python
     >>> from seqwin.graph import build
-    >>> kmers, idx, nodes, edges, record_ids = build(
+    >>> kmers, idx, nodes, edges, record_offsets, record_ids = build(
     >>>     assembly_paths = ...,
     >>>     kmerlen = 21,
     >>>     windowsize = 200,
-    >>>     assembly_indices = ...,
     >>>     is_targets = ...,
     >>>     n_cpu = 4,
     >>> )
     ```
-    - `assembly_paths`, `assembly_indices`, and `is_targets` are parallel lists.
+    - `assembly_paths` and `is_targets` are parallel lists.
     - `kmers` stores minimizer occurrences in all assemblies, grouped and sorted by hash.
     - `idx` is parallel to `kmers` and stores each minimizer's original generation index, ordered by genomic position.
     - `nodes` and `edges` are sorted by hash.
@@ -106,11 +97,21 @@ def build(
     >>> original_indices = idx[node['start']:node['stop']] # strictly increasing
     ```
 
+    Use `record_offsets` to recover the original assembly and record index of each minimizer.
+    ```python
+    >>> import numpy as np
+    >>> assembly_idx = np.searchsorted(
+    >>>     record_offsets,
+    >>>     kmers['record_idx'],
+    >>>     side='right',
+    >>> ) - 1
+    >>> record_idx = kmers['record_idx'] - record_offsets[assembly_idx]
+    ```
+
     Args:
         assembly_paths (Iterable[Path]): Paths to input assemblies in FASTA format (plain or gzipped).
         kmerlen (int): K-mer length for minimizer sketch.
         windowsize (int): Window size for minimizer sketch.
-        assembly_indices (Iterable[int]): Assembly indices.
         is_targets (Iterable[bool]): Whether each assembly is a target assembly.
         n_cpu (int, optional): Number of worker threads to use. [1]
 
@@ -119,8 +120,7 @@ def build(
             1. NDArray[np.void]: A 1-D NumPy structured array of minimizers from all assemblies.
                 Dtype: `KMER_DTYPE`
                 - 'pos' (uint32): 0-based position of the minimizer within its FASTA record.
-                - 'record_idx' (uint16): 0-based index of the FASTA record within the assembly.
-                - 'assembly_idx' (uint16): Assembly index assigned to the source assembly.
+                - 'record_idx' (uint32): 0-based global index of the FASTA record.
             2. NDArray[np.uint64]: The original indices assigned when minimizers are generated (ordered by genomic positions).
             3. NDArray[np.void]: A 1-D NumPy structured array of minimizer nodes.
                 Dtype: `NODE_DTYPE`
@@ -135,13 +135,13 @@ def build(
                 - 'first' (uint64): Smaller endpoint hash of the undirected edge.
                 - 'second' (uint64): Larger endpoint hash of the undirected edge.
                 - 'weight' (uint64): Number of assemblies where the endpoints are adjacent.
-            5. list[tuple[str, ...]]: FASTA record IDs of each assembly.
+            5. NDArray[np.uint64]: Cumulative global FASTA record offsets by assembly.
+            6. list[tuple[str, ...]]: FASTA record IDs of each assembly.
     """
     return _build_native(
         list(str(p) for p in assembly_paths),
         int(kmerlen),
         int(windowsize),
-        list(int(i) for i in assembly_indices),
         list(bool(t) for t in is_targets),
         int(n_cpu)
     )

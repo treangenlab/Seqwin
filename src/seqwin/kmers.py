@@ -56,17 +56,19 @@ class KmerGraph(object):
             For each node, `kmers[node['start']:node['stop']]` is the k-mer group with `node['hash']`.
         edges (NDArray[np.void]): A 1-D NumPy structured array of weighted, undirected edges.
             Edge weight is the number of assemblies where the two k-mers are adjacent.
+        record_offsets (NDArray[np.uint64]): Cumulative global FASTA record offsets by assembly.
         graph (nx.Graph): The graph instance built from filtered nodes and edges.
         subgraphs (tuple[frozenset[np.uint64], ...] | None): Low-penalty subgraphs. Each subgraph is a set of k-mer hash values.
             Generated with `self.filter()`.
     """
     __slots__ = (
-        'kmers', 'idx', 'nodes', 'edges', 'graph', 'subgraphs', '_filtered_flag'
+        'kmers', 'idx', 'nodes', 'edges', 'record_offsets', 'graph', 'subgraphs', '_filtered_flag'
     )
     kmers: NDArray[np.void]
     idx: NDArray[np.uint64]
     nodes: NDArray[np.void]
     edges: NDArray[np.void]
+    record_offsets: NDArray[np.uint64]
     graph: nx.Graph
     subgraphs: tuple[frozenset[np.uint64], ...] | None
     _filtered_flag: bool # True if `self.filter()` is called
@@ -86,11 +88,10 @@ class KmerGraph(object):
         logger.info(f'Building minimizer graph from {n_assemblies} assemblies...')
         tik = time()
 
-        kmers, idx, nodes, edges, record_ids = build(
+        kmers, idx, nodes, edges, record_offsets, record_ids = build(
             assemblies.path,
             kmerlen,
             windowsize,
-            assemblies.index,
             assemblies.is_target,
             n_cpu=n_cpu,
         )
@@ -113,6 +114,7 @@ class KmerGraph(object):
         self.idx = idx
         self.nodes = nodes
         self.edges = edges
+        self.record_offsets = record_offsets
         self.graph = None # create graph after filtering nodes and edges
         self.subgraphs = None
         self._filtered_flag = False
