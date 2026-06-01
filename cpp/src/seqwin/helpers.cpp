@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <limits>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 #include <pybind11/pybind11.h>
@@ -58,9 +59,9 @@ NoInitArray<T> concat(std::vector<ThreadGraph>& graphs, MemberPtr member, Thread
     return out;
 }
 
-NoInitArray<Node> concat_nodes(std::vector<ThreadGraph>& graphs, ThreadPool& pool)
+NoInitArray<ThreadNode> concat_nodes(std::vector<ThreadGraph>& graphs, ThreadPool& pool)
 {
-    return concat<Node>(graphs, &ThreadGraph::nodes, pool);
+    return concat<ThreadNode>(graphs, &ThreadGraph::nodes, pool);
 }
 
 NoInitArray<Edge> concat_edges(std::vector<ThreadGraph>& graphs, ThreadPool& pool)
@@ -68,56 +69,43 @@ NoInitArray<Edge> concat_edges(std::vector<ThreadGraph>& graphs, ThreadPool& poo
     return concat<Edge>(graphs, &ThreadGraph::edges, pool);
 }
 
-/**
- * @brief Sort and merge nodes with identical hashes.
- *
- * 1. Parallel LSD radix sort on node hash.
- * 2. Merge nodes with the same hash.
- * 3. Return local `idx` segment metadata to materialize `kmers`.
- *
- * @param nodes Node array to sort and merge.
- * @param pool Thread pool used for radix sorting.
- * @return Segment metadata for rebuilding `kmers` and `idx`.
- */
-static std::vector<IdxSegment> merge_nodes(
-    NoInitArray<Node>& nodes,
+template <typename T, typename KeyPtr>
+static void lsd_radix_sort_key(
+    T*& src,
+    T*& dst,
+    std::size_t n,
+    KeyPtr key,
+    std::vector<std::uint64_t>& counts,
     ThreadPool& pool
 ) {
-    const std::size_t n_nodes = nodes.size();
-    if (n_nodes == 0) {
-        return {};
-    }
-
-    NoInitArray<Node> buf(nodes.size());
-    auto* src = nodes.data();
-    auto* dst = buf.data();
-    std::vector<std::uint64_t> counts(pool.size() * 65536);
+    static constexpr std::size_t bucket_count = 65536;
+    static constexpr std::uint64_t bucket_mask = bucket_count - 1;
 
     for (std::size_t shift = 0; shift < 64; shift += 16) {
         std::fill(counts.begin(), counts.end(), 0);
 
-        pool.parallel_for(n_nodes, [&](std::size_t start, std::size_t end, std::size_t t) {
-            auto* local_counts = counts.data() + t * 65536;
+        pool.parallel_for(n, [&](std::size_t start, std::size_t end, std::size_t t) {
+            auto* local_counts = counts.data() + t * bucket_count;
             for (std::size_t i = start; i < end; ++i) {
-                const auto bucket = (src[i].hash >> shift) & 0xFFFFULL;
+                const auto bucket = ((src[i].*key) >> shift) & bucket_mask;
                 ++local_counts[static_cast<std::size_t>(bucket)];
             }
         });
 
         std::uint64_t current = 0;
-        for (std::size_t bucket = 0; bucket < 65536; ++bucket) {
+        for (std::size_t bucket = 0; bucket < bucket_count; ++bucket) {
             for (std::size_t t = 0; t < pool.size(); ++t) {
-                auto& value = counts[t * 65536 + bucket];
+                auto& value = counts[t * bucket_count + bucket];
                 const auto c = value;
                 value = current;
                 current += c;
             }
         }
 
-        pool.parallel_for(n_nodes, [&](std::size_t start, std::size_t end, std::size_t t) {
-            auto* local_offsets = counts.data() + t * 65536;
+        pool.parallel_for(n, [&](std::size_t start, std::size_t end, std::size_t t) {
+            auto* local_offsets = counts.data() + t * bucket_count;
             for (std::size_t i = start; i < end; ++i) {
-                const auto bucket = (src[i].hash >> shift) & 0xFFFFULL;
+                const auto bucket = ((src[i].*key) >> shift) & bucket_mask;
                 const auto pos = local_offsets[static_cast<std::size_t>(bucket)]++;
                 dst[pos] = src[i];
             }
@@ -125,19 +113,65 @@ static std::vector<IdxSegment> merge_nodes(
 
         std::swap(src, dst);
     }
+}
+
+/**
+ * @brief Stable parallel LSD radix sort over one or more 64-bit member keys.
+ *
+ * Keys should be supplied in least-significant to most-significant order.
+ */
+template <typename T, typename... KeyPtrs>
+static void lsd_radix_sort(
+    NoInitArray<T>& values,
+    ThreadPool& pool,
+    KeyPtrs... keys
+) {
+    const std::size_t n = values.size();
+    if (n == 0) {
+        return;
+    }
+
+    NoInitArray<T> buf(n);
+    auto* src = values.data();
+    auto* dst = buf.data();
+    std::vector<std::uint64_t> counts(pool.size() * 65536);
+
+    (lsd_radix_sort_key(src, dst, n, keys, counts, pool), ...);
+}
+
+/**
+ * @brief Sort and merge thread-local nodes with identical hashes.
+ *
+ * 1. Sort nodes by hash.
+ * 2. Merge nodes with the same hash into final graph nodes.
+ * 3. Return local `idx` segment metadata to materialize `kmers`.
+ *
+ * @param nodes Thread-local node array to sort and merge.
+ * @param pool Thread pool used for radix sorting.
+ * @return Final merged nodes and segment metadata for rebuilding `kmers` and `idx`.
+ */
+static std::pair<NoInitArray<Node>, std::vector<IdxSegment>> merge_nodes(
+    NoInitArray<ThreadNode>& nodes,
+    ThreadPool& pool
+) {
+    const std::size_t n_nodes = nodes.size();
+    if (n_nodes == 0) {
+        return {};
+    }
+
+    lsd_radix_sort(nodes, pool, &ThreadNode::hash);
 
     // Determine final node count
     std::size_t unique_count = 0;
     std::size_t i = 0;
     while (i < n_nodes) {
-        const auto hash = src[i].hash;
-        while (i < n_nodes && src[i].hash == hash) {
+        const auto hash = nodes[i].hash;
+        while (i < n_nodes && nodes[i].hash == hash) {
             ++i;
         }
         ++unique_count;
     }
-    buf.reset();
-    buf = NoInitArray<Node>(unique_count);
+    NoInitArray<Node> merged(unique_count);
 
     // Aggregate nodes and keep idx ranges
     std::vector<IdxSegment> idx_segments;
@@ -147,22 +181,22 @@ static std::vector<IdxSegment> merge_nodes(
     std::size_t write_i = 0;
     i = 0;
     while (i < n_nodes) {
-        const auto hash = src[i].hash;
+        const auto hash = nodes[i].hash;
         std::uint32_t n_tar = 0;
         std::uint32_t n_neg = 0;
         const auto start = n_kmers;
 
-        while (i < n_nodes && src[i].hash == hash) {
-            n_tar += src[i].n_tar;
-            n_neg += src[i].n_neg;
+        while (i < n_nodes && nodes[i].hash == hash) {
+            n_tar += nodes[i].n_tar;
+            n_neg += nodes[i].n_neg;
 
-            const auto local_start = src[i].start;
-            const auto local_stop = src[i].stop;
+            const auto local_start = nodes[i].start;
+            const auto local_stop = nodes[i].stop;
             const auto length = local_stop - local_start;
 
             if (length != 0) {
                 idx_segments.push_back(IdxSegment{
-                    static_cast<std::size_t>(src[i].penalty), // thread_id
+                    nodes[i].thread_id,
                     static_cast<std::size_t>(local_start),
                     static_cast<std::size_t>(n_kmers),
                     static_cast<std::size_t>(length)
@@ -173,16 +207,15 @@ static std::vector<IdxSegment> merge_nodes(
         }
 
         const auto stop = n_kmers;
-        buf[write_i++] = Node{hash, start, stop, n_tar, n_neg, 0.0};
+        merged[write_i++] = Node{hash, start, stop, n_tar, n_neg};
     }
-    nodes = std::move(buf);
-    return idx_segments;
+    return {std::move(merged), std::move(idx_segments)};
 }
 
 static NoInitArray<Kmer> merge_kmers(
-    const std::vector<IdxSegment>& idx_segments,
-    std::vector<ThreadGraph>& graphs,
+    const std::vector<ThreadGraph>& graphs,
     std::size_t total_kmers,
+    const std::vector<IdxSegment>& idx_segments,
     const std::vector<std::uint64_t>& thread_record_offsets,
     ThreadPool& pool
 ) {
@@ -207,10 +240,10 @@ static NoInitArray<Kmer> merge_kmers(
 }
 
 static NoInitArray<std::uint64_t> merge_idx(
-    const std::vector<IdxSegment>& idx_segments,
-    const std::vector<std::uint64_t>& kmer_offsets,
     const std::vector<ThreadGraph>& graphs,
     std::size_t total_kmers,
+    const std::vector<IdxSegment>& idx_segments,
+    const std::vector<std::uint64_t>& kmer_offsets,
     ThreadPool& pool
 ) {
     NoInitArray<std::uint64_t> idx(total_kmers);
@@ -237,69 +270,30 @@ static void merge_edges(NoInitArray<Edge>& edges, ThreadPool& pool)
         return;
     }
 
-    NoInitArray<Edge> buf(edges.size());
-    auto* src = edges.data();
-    auto* dst = buf.data();
-    std::vector<std::uint64_t> counts(pool.size() * 65536);
-
-    for (auto key : {&Edge::second, &Edge::first}) {
-        for (std::size_t shift = 0; shift < 64; shift += 16) {
-            std::fill(counts.begin(), counts.end(), 0);
-
-            pool.parallel_for(n_edges, [&](std::size_t start, std::size_t end, std::size_t t) {
-                auto* local_counts = counts.data() + t * 65536;
-                for (std::size_t i = start; i < end; ++i) {
-                    const auto bucket = ((src[i].*key) >> shift) & 0xFFFFULL;
-                    ++local_counts[static_cast<std::size_t>(bucket)];
-                }
-            });
-
-            std::uint64_t current = 0;
-            for (std::size_t bucket = 0; bucket < 65536; ++bucket) {
-                for (std::size_t t = 0; t < pool.size(); ++t) {
-                    auto& value = counts[t * 65536 + bucket];
-                    const auto c = value;
-                    value = current;
-                    current += c;
-                }
-            }
-
-            pool.parallel_for(n_edges, [&](std::size_t start, std::size_t end, std::size_t t) {
-                auto* local_offsets = counts.data() + t * 65536;
-                for (std::size_t i = start; i < end; ++i) {
-                    const auto bucket = ((src[i].*key) >> shift) & 0xFFFFULL;
-                    const auto pos = local_offsets[static_cast<std::size_t>(bucket)]++;
-                    dst[pos] = src[i];
-                }
-            });
-
-            std::swap(src, dst);
-        }
-    }
+    lsd_radix_sort(edges, pool, &Edge::second, &Edge::first);
 
     // Determine final edge count
     std::size_t unique_count = 0;
     std::size_t i = 0;
     while (i < n_edges) {
-        const auto first = src[i].first;
-        const auto second = src[i].second;
-        while (i < n_edges && src[i].first == first && src[i].second == second) {
+        const auto first = edges[i].first;
+        const auto second = edges[i].second;
+        while (i < n_edges && edges[i].first == first && edges[i].second == second) {
             ++i;
         }
         ++unique_count;
     }
-    buf.reset();
-    buf = NoInitArray<Edge>(unique_count);
+    NoInitArray<Edge> buf(unique_count);
 
     std::size_t write_i = 0;
     i = 0;
     while (i < n_edges) {
-        const auto first = src[i].first;
-        const auto second = src[i].second;
+        const auto first = edges[i].first;
+        const auto second = edges[i].second;
         std::uint64_t weight = 0;
 
-        while (i < n_edges && src[i].first == first && src[i].second == second) {
-            weight += src[i].weight;
+        while (i < n_edges && edges[i].first == first && edges[i].second == second) {
+            weight += edges[i].weight;
             ++i;
         }
 
@@ -343,14 +337,15 @@ Graph merge_thread_graphs(
             throw std::runtime_error("Total number of FASTA records exceeds uint32 range");
         }
 
-        merge_edges(graph.edges, pool);
-        auto idx_segments = merge_nodes(graph.nodes, pool);
+        merge_edges(graph.edges, pool); // Sort only
+        auto [nodes, idx_segments] = merge_nodes(graph.nodes, pool);
+        graph.nodes.reset();
 
         std::vector<std::uint64_t> thread_record_offsets{0};
         auto kmers = merge_kmers(
-            idx_segments,
             graphs,
             graph.n_kmers,
+            idx_segments,
             thread_record_offsets,
             pool
         );
@@ -358,18 +353,19 @@ Graph merge_thread_graphs(
 
         std::vector<std::uint64_t> kmer_offsets{0};
         auto idx = merge_idx(
-            idx_segments,
-            kmer_offsets,
             graphs,
             graph.n_kmers,
+            idx_segments,
+            kmer_offsets,
             pool
         );
         graph.idx.reset();
+        std::vector<IdxSegment>().swap(idx_segments);
 
         return {
             std::move(kmers),
             std::move(idx),
-            std::move(graph.nodes),
+            std::move(nodes),
             std::move(graph.edges),
             std::move(graph.record_offsets),
             std::move(graph.ids_by_assembly)
@@ -405,8 +401,9 @@ Graph merge_thread_graphs(
     auto edges = concat_edges(graphs, pool);
     merge_edges(edges, pool);
 
-    auto nodes = concat_nodes(graphs, pool);
-    auto idx_segments = merge_nodes(nodes, pool);
+    auto thread_nodes = concat_nodes(graphs, pool);
+    auto [nodes, idx_segments] = merge_nodes(thread_nodes, pool);
+    thread_nodes.reset();
 
     std::vector<std::uint64_t> kmer_offsets(graphs.size());
     std::uint64_t total_kmers = 0;
@@ -415,20 +412,22 @@ Graph merge_thread_graphs(
         total_kmers += graphs[t].n_kmers;
     }
 
-    auto kmers = merge_kmers(idx_segments, graphs, total_kmers, thread_record_offsets, pool);
+    auto kmers = merge_kmers(graphs, total_kmers, idx_segments, thread_record_offsets, pool);
     for (auto& graph : graphs) {
         std::vector<Kmer>().swap(graph.kmers);
     }
 
-    auto idx = merge_idx(idx_segments, kmer_offsets, graphs, total_kmers, pool);
+    auto idx = merge_idx(graphs, total_kmers, idx_segments, kmer_offsets, pool);
     for (auto& graph : graphs) {
         graph.idx.reset();
     }
+    std::vector<IdxSegment>().swap(idx_segments);
 
-    std::vector<std::vector<std::string>> ids_by_assembly(n_assemblies);
+    std::vector<std::vector<std::string>> ids_by_assembly;
+    ids_by_assembly.reserve(n_assemblies);
     for (auto& graph : graphs) {
-        for (std::size_t i = 0; i < graph.ids_by_assembly.size(); ++i) {
-            ids_by_assembly[graph.start_assembly + i] = std::move(graph.ids_by_assembly[i]);
+        for (auto& ids : graph.ids_by_assembly) {
+            ids_by_assembly.push_back(std::move(ids));
         }
     }
 
