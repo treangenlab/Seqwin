@@ -167,17 +167,17 @@ ThreadGraph build_worker(
     }
     std::vector<std::uint64_t>().swap(hashes);
 
-    graph.nodes = NoInitArray<Node>(node_map.size());
+    graph.nodes = NoInitArray<ThreadNode>(node_map.size());
     std::size_t node_i = 0;
     for (const auto& [hash, state] : node_map) {
         const auto stop = state.start + state.count;
-        graph.nodes[node_i++] = Node{
+        graph.nodes[node_i++] = ThreadNode{
             hash,
             state.start,
             stop,
             state.n_tar,
             state.n_neg,
-            static_cast<double>(thread_id) // Use the penalty field to store thread_id
+            thread_id
         };
     }
 

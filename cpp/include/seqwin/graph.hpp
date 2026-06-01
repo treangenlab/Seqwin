@@ -22,12 +22,11 @@ struct Kmer {
 /**
  * @brief Minimizer graph node for one unique minimizer hash.
  *
- * The `[start, stop)` range identifies minimizers with this hash.
- * Before merging, it selects entries in `ThreadGraph.idx`, whose values are indices into `ThreadGraph.kmers`.
- * After merging, it indexes directly into the parallel `Graph.kmers` and `Graph.idx` arrays.
+ * The `[start, stop)` range is a half-open interval into the parallel
+ * `Graph.kmers` and `Graph.idx` arrays for minimizers with this hash.
  */
 struct Node {
-    /** Hash value of the minimizer represented by this node. */
+    /** Hash value of the minimizers represented by this node. */
     std::uint64_t hash;
     /** Start of the half-open range for this node's minimizer entries. */
     std::uint64_t start;
@@ -37,11 +36,8 @@ struct Node {
     std::uint32_t n_tar;
     /** Number of non-target assemblies containing this minimizer hash. */
     std::uint32_t n_neg;
-    /**
-     * Node penalty score used for downstream graph filtering (set to 0.0).
-     * Temporarily stores thread ID before thread-local graphs are merged.
-     */
-    double penalty;
+    /** Placeholder for node penalty score, for downstream graph filtering. */
+    double penalty = 0.0;
 };
 
 /**
