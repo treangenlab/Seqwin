@@ -23,7 +23,7 @@ struct IdxSegment {
     std::size_t thread_id;
     std::size_t local_start;
     std::size_t out_start;
-    std::size_t length;
+    std::size_t count;
 };
 
 template <typename T, typename MemberPtr>
@@ -189,19 +189,16 @@ static std::pair<NoInitArray<Node>, std::vector<IdxSegment>> merge_nodes(
         while (i < n_nodes && nodes[i].hash == hash) {
             n_tar += nodes[i].n_tar;
             n_neg += nodes[i].n_neg;
+            const auto count = nodes[i].count;
 
-            const auto local_start = nodes[i].start;
-            const auto local_stop = nodes[i].stop;
-            const auto length = local_stop - local_start;
-
-            if (length != 0) {
+            if (count != 0) {
                 idx_segments.push_back(IdxSegment{
                     nodes[i].thread_id,
-                    static_cast<std::size_t>(local_start),
+                    static_cast<std::size_t>(nodes[i].start),
                     static_cast<std::size_t>(n_kmers),
-                    static_cast<std::size_t>(length)
+                    static_cast<std::size_t>(count)
                 });
-                n_kmers += length;
+                n_kmers += count;
             }
             ++i;
         }
@@ -228,7 +225,7 @@ static NoInitArray<Kmer> merge_kmers(
             const auto& local_kmers = graphs[segment.thread_id].kmers;
             const auto offset = thread_record_offsets[segment.thread_id];
 
-            for (std::size_t k = 0; k < segment.length; ++k) {
+            for (std::size_t k = 0; k < segment.count; ++k) {
                 const auto local_kmer_i = local_idx[segment.local_start + k];
                 auto kmer = local_kmers[static_cast<std::size_t>(local_kmer_i)];
                 kmer.record_idx += static_cast<std::uint32_t>(offset);
@@ -254,7 +251,7 @@ static NoInitArray<std::uint64_t> merge_idx(
             const auto offset = kmer_offsets[segment.thread_id];
             const auto& local_idx = graphs[segment.thread_id].idx;
 
-            for (std::size_t k = 0; k < segment.length; ++k) {
+            for (std::size_t k = 0; k < segment.count; ++k) {
                 idx[segment.out_start + k] = local_idx[segment.local_start + k] + offset;
             }
         }

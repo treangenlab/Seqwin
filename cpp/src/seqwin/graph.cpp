@@ -170,11 +170,10 @@ ThreadGraph build_worker(
     graph.nodes = NoInitArray<ThreadNode>(node_map.size());
     std::size_t node_i = 0;
     for (const auto& [hash, state] : node_map) {
-        const auto stop = state.start + state.count;
         graph.nodes[node_i++] = ThreadNode{
             hash,
             state.start,
-            stop,
+            state.count,
             state.n_tar,
             state.n_neg,
             thread_id

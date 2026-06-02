@@ -14,16 +14,16 @@ class ThreadPool;
 /**
  * @brief Thread-local minimizer graph node.
  *
- * The `[start, stop)` range is a half-open interval in `ThreadGraph.idx`.
+ * `start` and `count` define a range in `ThreadGraph.idx`.
  * Values in `ThreadGraph.idx` index into `ThreadGraph.kmers`.
  */
 struct ThreadNode {
     /** Hash value of the minimizers represented by this node. */
     std::uint64_t hash;
-    /** Start of the half-open range in `ThreadGraph.idx`. */
+    /** Start of entries in `ThreadGraph.idx` for this node. */
     std::uint64_t start;
-    /** End of the half-open range in `ThreadGraph.idx`. */
-    std::uint64_t stop;
+    /** Number of entries in `ThreadGraph.idx` for this node. */
+    std::uint64_t count;
     /** Number of target assemblies containing this minimizer hash. */
     std::uint32_t n_tar;
     /** Number of non-target assemblies containing this minimizer hash. */
