@@ -44,8 +44,8 @@ KMER_DTYPE = np.dtype([
 
 NODE_DTYPE = np.dtype([
     ('hash', np.uint64),
-    ('start', np.uint64),
-    ('stop', np.uint64),
+    ('start', np.uintp),
+    ('stop', np.uintp),
     ('n_tar', np.uint32),
     ('n_neg', np.uint32),
     ('penalty', np.float64)
@@ -54,7 +54,7 @@ NODE_DTYPE = np.dtype([
 EDGE_DTYPE = np.dtype([
     ("first", np.uint64),
     ("second", np.uint64),
-    ("weight", np.uint64),
+    ("weight", np.uintp),
 ])
 
 
@@ -66,10 +66,10 @@ def build(
     n_cpu: int = 1
 ) -> tuple[
     NDArray[np.void],
-    NDArray[np.uint64],
+    NDArray[np.uintp],
     NDArray[np.void],
     NDArray[np.void],
-    NDArray[np.uint64],
+    NDArray[np.uintp],
     list[tuple[str, ...]]
 ]:
     """Build a Seqwin minimizer graph.
@@ -121,12 +121,12 @@ def build(
                 Dtype: `KMER_DTYPE`
                 - 'pos' (uint32): 0-based position of the minimizer within its FASTA record.
                 - 'record_idx' (uint32): 0-based global index of the FASTA record.
-            2. NDArray[np.uint64]: The original indices assigned when minimizers are generated (ordered by genomic positions).
+            2. NDArray[np.uintp]: The original indices assigned when minimizers are generated (ordered by genomic positions).
             3. NDArray[np.void]: A 1-D NumPy structured array of minimizer nodes.
                 Dtype: `NODE_DTYPE`
                 - 'hash' (uint64): Hash value of the minimizers represented by this node.
-                - 'start' (uint64): Start of the half-open range for this node's minimizer entries.
-                - 'stop' (uint64): End of the half-open range for this node's minimizer entries.
+                - 'start' (uintp): Start of the half-open range for this node's minimizer entries.
+                - 'stop' (uintp): End of the half-open range for this node's minimizer entries.
                 - 'n_tar' (uint32): Number of target assemblies containing this minimizer hash.
                 - 'n_neg' (uint32): Number of non-target assemblies containing this minimizer hash.
                 - 'penalty' (float64): Node penalty score used for downstream graph filtering.
@@ -134,8 +134,8 @@ def build(
                 Dtype: `EDGE_DTYPE`
                 - 'first' (uint64): Smaller endpoint hash of the undirected edge.
                 - 'second' (uint64): Larger endpoint hash of the undirected edge.
-                - 'weight' (uint64): Number of assemblies where the endpoints are adjacent.
-            5. NDArray[np.uint64]: Cumulative global FASTA record offsets by assembly.
+                - 'weight' (uintp): Number of assemblies where the endpoints are adjacent.
+            5. NDArray[np.uintp]: Cumulative global FASTA record offsets by assembly.
             6. list[tuple[str, ...]]: FASTA record IDs of each assembly.
     """
     return _build_native(
@@ -149,12 +149,12 @@ def build(
 
 def _filter_kmers(
     kmers: NDArray[np.void],
-    idx: NDArray[np.uint64],
+    idx: NDArray[np.uintp],
     nodes: NDArray[np.void],
     used_hashes: frozenset[np.uint64]
 ) -> tuple[
     NDArray[np.void],
-    NDArray[np.uint64],
+    NDArray[np.uintp],
     NDArray[np.void]
 ]:
     """

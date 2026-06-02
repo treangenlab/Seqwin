@@ -14,9 +14,9 @@ def _sorted_edges(edges: np.ndarray) -> np.ndarray:
 
 
 def _assert_idx_invariants(kmers: np.ndarray, idx: np.ndarray, nodes: np.ndarray) -> None:
-    assert idx.dtype == np.uint64
+    assert idx.dtype == np.uintp
     assert len(idx) == len(kmers)
-    assert np.array_equal(np.sort(idx), np.arange(len(kmers), dtype=np.uint64))
+    assert np.array_equal(np.sort(idx), np.arange(len(kmers), dtype=np.uintp))
     for node in nodes:
         start = int(node['start'])
         stop = int(node['stop'])
@@ -25,7 +25,7 @@ def _assert_idx_invariants(kmers: np.ndarray, idx: np.ndarray, nodes: np.ndarray
         assert len(block) == (stop - start)
         node_idx = idx[start:stop]
         assert len(node_idx) == len(block)
-        assert not np.array_equal(node_idx, np.arange(start, stop, dtype=np.uint64))
+        assert not np.array_equal(node_idx, np.arange(start, stop, dtype=np.uintp))
 
 
 def test_dtype_layouts() -> None:
@@ -33,12 +33,17 @@ def test_dtype_layouts() -> None:
     assert KMER_DTYPE.names == ('pos', 'record_idx')
     assert KMER_DTYPE['record_idx'] == np.dtype(np.uint32)
 
+    assert np.dtype(np.uintp).itemsize == 8
+
     assert NODE_DTYPE.names == ('hash', 'start', 'stop', 'n_tar', 'n_neg', 'penalty')
+    assert NODE_DTYPE["start"] == np.dtype(np.uintp)
+    assert NODE_DTYPE["stop"] == np.dtype(np.uintp)
     assert NODE_DTYPE["n_tar"] == np.dtype(np.uint32)
     assert NODE_DTYPE["n_neg"] == np.dtype(np.uint32)
     assert NODE_DTYPE.itemsize == 40
 
     assert EDGE_DTYPE.names == ("first", "second", "weight")
+    assert EDGE_DTYPE["weight"] == np.dtype(np.uintp)
     assert EDGE_DTYPE.itemsize == 24
     assert EDGE_DTYPE.fields["first"][1] == 0
     assert EDGE_DTYPE.fields["second"][1] == 8
@@ -85,7 +90,7 @@ def test_build_threading_equivalence(targets_dir, non_targets_dir) -> None:
         assert stop > start
         assert len(kmers_1[start:stop]) == (stop - start)
 
-    assert np.array_equal(record_offsets_1, np.array([0, 1, 2, 3, 4], dtype=np.uint64))
+    assert np.array_equal(record_offsets_1, np.array([0, 1, 2, 3, 4], dtype=np.uintp))
     assert np.array_equal(np.unique(kmers_1['record_idx']), np.arange(4, dtype=np.uint32))
     assert np.all(nodes_1['n_tar'] + nodes_1['n_neg'] > 0)
 
@@ -138,7 +143,7 @@ def test_multi_thread_record_offsets_and_global_record_indices(tmp_path: Path) -
     )
 
     assert [len(ids) for ids in record_ids] == [2, 1, 3, 1]
-    assert np.array_equal(record_offsets, np.array([0, 2, 3, 6, 7], dtype=np.uint64))
+    assert np.array_equal(record_offsets, np.array([0, 2, 3, 6, 7], dtype=np.uintp))
     assert np.array_equal(np.unique(kmers['record_idx']), np.arange(7, dtype=np.uint32))
 
 
@@ -157,8 +162,8 @@ def test_create_ck_reconstructs_assembly_and_local_record_indices(monkeypatch) -
     kmers = (
         np.array([(5, 0), (6, 2), (7, 5)], dtype=KMER_DTYPE),
     )
-    idx = (np.array([10, 20, 30], dtype=np.uint64),)
-    record_offsets = np.array([0, 2, 5, 6], dtype=np.uint64)
+    idx = (np.array([10, 20, 30], dtype=np.uintp),)
+    record_offsets = np.array([0, 2, 5, 6], dtype=np.uintp)
 
     _create_ck(graph, (np.uint64(123),), kmers, idx, record_offsets, n_tar=2, kmerlen=7)
 
@@ -179,7 +184,7 @@ def test_filter_kmers() -> None:
         (31, 2),
         (32, 2),
     ], dtype=KMER_DTYPE)
-    idx = np.array([100, 101, 200, 300, 301, 302], dtype=np.uint64)
+    idx = np.array([100, 101, 200, 300, 301, 302], dtype=np.uintp)
     nodes = np.array([
         (10, 0, 2, 1, 0, 0.1),
         (20, 2, 3, 1, 0, 0.2),
@@ -189,8 +194,8 @@ def test_filter_kmers() -> None:
     kmers_new, idx_new, nodes_new = _filter_kmers(kmers, idx, nodes, {30, 10})
 
     assert np.array_equal(nodes_new['hash'], np.array([10, 30], dtype=np.uint64))
-    assert np.array_equal(nodes_new['start'], np.array([0, 2], dtype=np.uint64))
-    assert np.array_equal(nodes_new['stop'], np.array([2, 5], dtype=np.uint64))
+    assert np.array_equal(nodes_new['start'], np.array([0, 2], dtype=np.uintp))
+    assert np.array_equal(nodes_new['stop'], np.array([2, 5], dtype=np.uintp))
 
     expected_kmers = np.array([
         (10, 0),
@@ -199,7 +204,7 @@ def test_filter_kmers() -> None:
         (31, 2),
         (32, 2),
     ], dtype=KMER_DTYPE)
-    expected_idx = np.array([100, 101, 300, 301, 302], dtype=np.uint64)
+    expected_idx = np.array([100, 101, 300, 301, 302], dtype=np.uintp)
 
     assert np.array_equal(kmers_new, expected_kmers)
     assert np.array_equal(idx_new, expected_idx)

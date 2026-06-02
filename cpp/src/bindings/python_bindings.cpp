@@ -90,7 +90,7 @@ PYBIND11_MODULE(_core, m) {
 
     m.def("_filter_kmers_native",
         [](py::array_t<seqwin::Kmer, py::array::c_style> kmers,
-           py::array_t<std::uint64_t, py::array::c_style> idx,
+           py::array_t<std::size_t, py::array::c_style> idx,
            py::array_t<seqwin::Node, py::array::c_style> nodes,
            const std::vector<std::uint64_t>& used_hashes
         ) {
@@ -99,7 +99,7 @@ PYBIND11_MODULE(_core, m) {
             auto nodes_buf = nodes.request();
 
             const auto* kmers_ptr = static_cast<const seqwin::Kmer*>(kmers_buf.ptr);
-            const auto* idx_ptr = static_cast<const std::uint64_t*>(idx_buf.ptr);
+            const auto* idx_ptr = static_cast<const std::size_t*>(idx_buf.ptr);
             const auto* nodes_ptr = static_cast<const seqwin::Node*>(nodes_buf.ptr);
             const auto n_nodes = static_cast<std::size_t>(nodes_buf.shape[0]);
 

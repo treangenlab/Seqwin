@@ -20,9 +20,9 @@ namespace {
 constexpr std::size_t map_reserve_divisor = 100;
 
 struct NodeState {
-    std::uint64_t count = 0;
-    std::uint64_t start = 0;
-    std::uint64_t cursor = 0;
+    std::size_t count = 0;
+    std::size_t start = 0;
+    std::size_t cursor = 0;
     std::uint32_t n_tar = 0;
     std::uint32_t n_neg = 0;
     std::size_t last_seen_assembly = std::numeric_limits<std::size_t>::max();
@@ -39,7 +39,7 @@ struct EdgeKeyHash {
 };
 
 struct EdgeState {
-    std::uint64_t weight = 0;
+    std::size_t weight = 0;
     std::size_t last_seen_assembly = std::numeric_limits<std::size_t>::max();
 };
 
@@ -152,8 +152,8 @@ ThreadGraph build_worker(
     std::unordered_map<EdgeKey, EdgeState, EdgeKeyHash>().swap(edge_map);
 
     // Build ThreadGraph.idx (grouped by minimizer hash)
-    graph.idx = NoInitArray<std::uint64_t>(graph.n_kmers);
-    std::uint64_t cursor = 0;
+    graph.idx = NoInitArray<std::size_t>(graph.n_kmers);
+    std::size_t cursor = 0;
     for (auto& [hash, state] : node_map) {
         (void)hash;
         state.start = cursor;
@@ -163,7 +163,7 @@ ThreadGraph build_worker(
     for (std::size_t i = 0; i < graph.n_kmers; ++i) {
         const auto hash = hashes[i];
         auto node_it = node_map.find(hash);
-        graph.idx[node_it->second.cursor++] = static_cast<std::uint64_t>(i);
+        graph.idx[node_it->second.cursor++] = i;
     }
     std::vector<std::uint64_t>().swap(hashes);
 
