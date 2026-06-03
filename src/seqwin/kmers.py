@@ -50,13 +50,13 @@ class KmerGraph(object):
 
     Attributes:
         kmers (NDArray[np.void]): A 1-D NumPy structured array of k-mers from all assemblies, grouped and sorted by k-mer hashes.
-        idx (NDArray[np.uint64] | None): The original indices assigned when k-mers are generated (ordered by genomic positions).
+        idx (NDArray[np.uintp] | None): The original indices assigned when k-mers are generated (ordered by genomic positions).
             Parallel to `kmers`.
         nodes (NDArray[np.void]): A 1-D NumPy structured array of k-mer nodes.
             For each node, `kmers[node['start']:node['stop']]` is the k-mer group with `node['hash']`.
         edges (NDArray[np.void]): A 1-D NumPy structured array of weighted, undirected edges.
             Edge weight is the number of assemblies where the two k-mers are adjacent.
-        record_offsets (NDArray[np.uint64]): Cumulative global FASTA record offsets by assembly.
+        record_offsets (NDArray[np.uintp]): Cumulative global FASTA record offsets by assembly.
         graph (nx.Graph): The graph instance built from filtered nodes and edges.
         subgraphs (tuple[frozenset[np.uint64], ...] | None): Low-penalty subgraphs. Each subgraph is a set of k-mer hash values.
             Generated with `self.filter()`.
@@ -65,10 +65,10 @@ class KmerGraph(object):
         'kmers', 'idx', 'nodes', 'edges', 'record_offsets', 'graph', 'subgraphs', '_filtered_flag'
     )
     kmers: NDArray[np.void]
-    idx: NDArray[np.uint64]
+    idx: NDArray[np.uintp]
     nodes: NDArray[np.void]
     edges: NDArray[np.void]
-    record_offsets: NDArray[np.uint64]
+    record_offsets: NDArray[np.uintp]
     graph: nx.Graph
     subgraphs: tuple[frozenset[np.uint64], ...] | None
     _filtered_flag: bool # True if `self.filter()` is called
@@ -191,7 +191,7 @@ class KmerGraph(object):
         n_nodes, n_edges = len(nodes), len(edges)
 
         # remove low-weight edges
-        th = np.uint64(edge_weight_th) # for faster comparison
+        th = np.uintp(edge_weight_th) # for faster comparison
         edges = edges[edges['weight'] > th]
         edge_values = edges.view(np.uint64).reshape(-1, 3)
         logger.info(f' - Removed {n_edges - len(edges)} edges with weight<{edge_weight_th:.3f}, {len(edges)} edges left')

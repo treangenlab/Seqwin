@@ -357,7 +357,7 @@ def _create_ck(
     nodes: tuple[np.uint64],
     kmers: tuple,
     idx: tuple,
-    record_offsets: NDArray[np.uint64],
+    record_offsets: NDArray[np.uintp],
     n_tar: int,
     kmerlen: int
 ) -> ConnectedKmers:
