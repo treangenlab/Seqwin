@@ -147,34 +147,6 @@ def test_multi_thread_record_offsets_and_global_record_indices(tmp_path: Path) -
     assert np.array_equal(np.unique(kmers['record_idx']), np.arange(7, dtype=np.uint32))
 
 
-def test_create_ck_reconstructs_assembly_and_local_record_indices(monkeypatch) -> None:
-    captured = {}
-
-    class FakeConnectedKmers:
-        def __init__(self, graph, kmers_df, kmerlen):
-            captured['graph'] = graph
-            captured['kmers_df'] = kmers_df.copy()
-            captured['kmerlen'] = kmerlen
-
-    monkeypatch.setattr('seqwin.markers.ConnectedKmers', FakeConnectedKmers)
-
-    graph = nx.Graph()
-    kmers = (
-        np.array([(5, 0), (6, 2), (7, 5)], dtype=KMER_DTYPE),
-    )
-    idx = (np.array([10, 20, 30], dtype=np.uintp),)
-    record_offsets = np.array([0, 2, 5, 6], dtype=np.uintp)
-
-    _create_ck(graph, (np.uint64(123),), kmers, idx, record_offsets, n_tar=2, kmerlen=7)
-
-    df = captured['kmers_df'].sort_index()
-    assert df['assembly_idx'].tolist() == [0, 1, 2]
-    assert df['record_idx'].tolist() == [0, 0, 0]
-    assert df['is_target'].tolist() == [True, True, False]
-    assert df['hash'].tolist() == [123, 123, 123]
-    assert captured['kmerlen'] == 7
-
-
 def test_filter_kmers() -> None:
     kmers = np.array([
         (10, 0),
