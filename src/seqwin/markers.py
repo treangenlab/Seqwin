@@ -51,7 +51,7 @@ from .kmers import KmerGraph
 from .ncbi import blast
 from .graph import OrderedKmers
 from .utils import print_time_delta, log_and_raise, file_to_write, mp_wrapper
-from .config import Config, RunState, HAS_BLAST, WORKINGDIR, BLASTCONFIG, CONSEC_KMER_TH, LEN_TH_MUL
+from .config import Config, RunState, HAS_BLAST, WORKINGDIR, BLASTCONFIG, CONSEC_KMER_MUL
 
 # Set ConnectedKmers.is_bad as True if any of these warnings is present
 _BAD_WARNINGS = frozenset((
@@ -130,7 +130,7 @@ class ConnectedKmers(object):
     warnings: set
     is_bad: bool
 
-    def __init__(self, graph: nx.Graph, kmers: pd.DataFrame, kmerlen: int) -> None:
+    def __init__(self, graph: nx.Graph, kmers: pd.DataFrame, kmerlen: int, windowsize: int) -> None:
         """Given a subgraph of the k-mer graph,
         1. Determine the boundary of the subgraph in each assembly.
         2. Determine the representative k-mer order.
@@ -142,6 +142,7 @@ class ConnectedKmers(object):
                 It's a subset of `KmerGraph.kmers`, with index inherited.
                 K-mers with adjacent indices are also adjacent in the assembly sequence.
             kmerlen (int): See `Config` in `config.py`.
+            windowsize (int): See `Config` in `config.py`.
         """
         warnings = set() # passed to methods to add warnings in-place
 
@@ -149,7 +150,7 @@ class ConnectedKmers(object):
         # kmers['strand'] = kmers['strand'].astype(str)
 
         # determine the boundary of the subgraph in each assembly
-        loc = ConnectedKmers.__get_loc(kmers, kmerlen)
+        loc = ConnectedKmers.__get_loc(kmers, kmerlen, windowsize)
 
         # determine the representative k-mer order and the number of targets having this order
         rep_order, n_rep = ConnectedKmers.__get_rep_order(loc, warnings)
@@ -189,7 +190,7 @@ class ConnectedKmers(object):
         self.is_bad = is_bad
 
     @staticmethod
-    def __get_loc(kmers: pd.DataFrame, kmerlen: int) -> pd.DataFrame:
+    def __get_loc(kmers: pd.DataFrame, kmerlen: int, windowsize: int) -> pd.DataFrame:
         """Determine the location / boundary of the subgraph in each assembly.
         1. Find consecutive k-mers for each assembly.
         2. Determine the boundaries (start & stop) of each group of consecutive k-mers.
@@ -198,22 +199,22 @@ class ConnectedKmers(object):
         Args:
             kmers (pd.DataFrame): See `ConnectedKmers.__init__()`.
             kmerlen (int): See `Config` in `config.py`.
+            windowsize (int): See `Config` in `config.py`.
 
         Returns:
             pd.DataFrame: See `ConnectedKmers.loc`.
         """
-        # sort by k-mer index
-        # essentially the same as sorting by k-mer position ['assembly_idx', 'record_idx', 'pos']
-        kmers.sort_index(inplace=True)
+        # sort by genomic position
+        kmers.sort_values(
+            by=['assembly_idx', 'record_idx', 'pos'],
+            inplace=True, ignore_index=True
+        )
 
         # since a subgraph might be repetitive in an assembly, we cannot simply groupby ['assembly_idx', 'record_idx']
-        # we need to find runs of consecutive k-mers, by their indices (index is sorted)
-        # if two k-mers have consecutive index, then they are also adjacent on the assembly (if on the same sequence record)
-        # check KmerGraph.kmers for more info
+        # we need to find runs of consecutive k-mers, by their genomic positions (sorted)
         # consec_gp: consecutive group
-        # the definition of "consecutive" can be adjusted by changing CONSEC_KMER_TH
-        # we are doing this because the subgraph might occur more than one time in the same assembly
-        kmers['consec_gp'] = (kmers.index.diff() > CONSEC_KMER_TH).cumsum()
+        # the definition of "consecutive" can be adjusted by changing CONSEC_KMER_MUL
+        kmers['consec_gp'] = (kmers['pos'].diff() > CONSEC_KMER_MUL * windowsize).cumsum()
 
         # find the start and stop of each consecutive group
         # df.groupby preserves the order of rows within each group
@@ -356,22 +357,22 @@ def _create_ck(
     graph: nx.Graph,
     nodes: tuple[np.uint64],
     kmers: tuple,
-    idx: tuple,
     record_offsets: NDArray[np.uintp],
     n_tar: int,
-    kmerlen: int
+    kmerlen: int,
+    windowsize: int
 ) -> ConnectedKmers:
     """Create a ConnectedKmers instance by taking the outputs of `_get_create_ck_args()`.
     """
-    # add hash and idx to each group
+    # add hash to each group
     kmers_df = list()
-    for h, kmer_group, idx_group in zip(nodes, kmers, idx):
-        df = pd.DataFrame(kmer_group, index=idx_group)
+    for h, kmer_group in zip(nodes, kmers):
+        df = pd.DataFrame(kmer_group)
         df['hash'] = h
         kmers_df.append(df)
 
     # recover assembly_idx
-    kmers_df = pd.concat(kmers_df, ignore_index=False)
+    kmers_df = pd.concat(kmers_df, ignore_index=True)
     record_idx = kmers_df['record_idx'].to_numpy()
     assembly_idx = np.searchsorted(
         record_offsets,
@@ -382,24 +383,24 @@ def _create_ck(
     kmers_df['assembly_idx'] = assembly_idx
     kmers_df['is_target'] = assembly_idx < n_tar
 
-    return ConnectedKmers(graph, kmers_df, kmerlen)
+    return ConnectedKmers(graph, kmers_df, kmerlen, windowsize)
 
 
 def _get_create_ck_args(
-    kg: KmerGraph, kmerlen: int, n_tar: int
+    kg: KmerGraph, n_tar: int, kmerlen: int, windowsize: int
 ) -> Generator[tuple[nx.Graph, pd.DataFrame, int], None, None]:
     """Generate input arguments for `_create_ck()`.
 
     Args:
         kg (KmerGraph): See `KmerGraph` in `kmers.py`.
-        kmerlen (int): See `Config` in `config.py`.
         n_tar (int): See `RunState` in `config.py`.
+        kmerlen (int): See `Config` in `config.py`.
+        windowsize (int): See `Config` in `config.py`.
 
     Yields:
         tuple: Input arguments of `_create_ck()`.
     """
     kmers = kg.kmers
-    idx = kg.idx
     nodes = kg.nodes
     graph = kg.graph
     subgraphs = kg.subgraphs
@@ -407,11 +408,9 @@ def _get_create_ck_args(
 
     # create a dict of hash -> k-mer group
     kmer_groups = dict()
-    idx_groups = dict()
     for node in nodes:
         h, start, stop = node['hash'], node['start'], node['stop']
         kmer_groups[h] = kmers[start:stop]
-        idx_groups[h] = idx[start:stop]
 
     # yield function args
     for sg in subgraphs:
@@ -422,11 +421,8 @@ def _get_create_ck_args(
         arg_kmers = tuple(
             kmer_groups.pop(h) for h in arg_nodes
         )
-        arg_idx = tuple(
-            idx_groups.pop(h) for h in arg_nodes
-        )
 
-        yield arg_graph, arg_nodes, arg_kmers, arg_idx, record_offsets, n_tar, kmerlen
+        yield arg_graph, arg_nodes, arg_kmers, record_offsets, n_tar, kmerlen, windowsize
 
 
 def _fetch_cks_seq(
@@ -476,7 +472,13 @@ def _fetch_cks_seq(
 
 
 def _get_cks(
-    kmers: KmerGraph, assemblies: Assemblies, kmerlen: int, min_len: int, n_tar: int, n_cpu: int
+    kmers: KmerGraph,
+    n_tar: int,
+    kmerlen: int,
+    windowsize: int,
+    min_len: int,
+    assemblies: Assemblies,
+    n_cpu: int
 ) -> tuple[list[ConnectedKmers], list[str]]:
     """
     1. Create a ConnectedKmers instance for each low-penalty subgraph of the k-mer graph (`KmerGraph.subgraphs`).
@@ -485,10 +487,11 @@ def _get_cks(
 
     Args:
         kmers (KmerGraph): See `KmerGraph` in `kmers.py`.
-        assemblies (Assemblies): See `Assemblies` in `assemblies.py`.
-        kmerlen (int): See `Config` in `config.py`.
-        min_len (int): See `Config` in `config.py`.
         n_tar (int): See `RunState` in `config.py`.
+        kmerlen (int): See `Config` in `config.py`.
+        windowsize (int): See `Config` in `config.py`.
+        min_len (int): See `Config` in `config.py`.
+        assemblies (Assemblies): See `Assemblies` in `assemblies.py`.
         n_cpu (int): See `Config` in `config.py`.
 
     Returns:
@@ -503,7 +506,7 @@ def _get_cks(
     logger.info(' - Processing each subgraph...')
     all_cks: list[ConnectedKmers] = mp_wrapper(
         _create_ck,
-        _get_create_ck_args(kmers, kmerlen, n_tar),
+        _get_create_ck_args(kmers, n_tar, kmerlen, windowsize),
         n_cpu=n_cpu, n_jobs=len(kmers.subgraphs)
     )
 
@@ -740,6 +743,7 @@ def get_markers(
     """
     overwrite = config.overwrite
     kmerlen = config.kmerlen
+    windowsize = config.windowsize
     min_len = config.min_len
     run_blast = config.run_blast
     blast_neg_only = config.blast_neg_only
@@ -751,7 +755,7 @@ def get_markers(
 
     # extract marker from each low-penalty subgraph
     # all_cks: ConnectedKmers (ck) instances; all_reps: representative sequences
-    all_cks, all_reps = _get_cks(kmers, assemblies, kmerlen, min_len, n_tar, n_cpu)
+    all_cks, all_reps = _get_cks(kmers, n_tar, kmerlen, windowsize, min_len, assemblies, n_cpu)
 
     # evaluate each marker with BLAST
     if run_blast and HAS_BLAST:

@@ -30,7 +30,7 @@ Attributes:
 - BLASTCONFIG (BlastConfig)
 - EDGE_W (str)
 - NODE_P (str)
-- CONSEC_KMER_TH (int)
+- CONSEC_KMER_MUL (float)
 - LEN_TH_MUL (float)
 - NO_BLAST_DIV (float)
 """
@@ -347,6 +347,5 @@ BLASTCONFIG = BlastConfig()
 
 EDGE_W: str = 'w' # Key for edge weight, used in networkx graphs. ['w']
 NODE_P: str = 'p' # Key for node penalty, used in networkx graphs. ['p']
-CONSEC_KMER_TH: int = 2 # Max index difference between consecutive k-mers. [2]
-LEN_TH_MUL: float = 1.5 # Deprecated. Multiplier for candidate sequence length threshold. [1.5]
+CONSEC_KMER_MUL: float = 1.5 # Multiplier of windowsize for max position difference between consecutive k-mers. [1.5]
 NO_BLAST_DIV: float = 0.5 # Deprecated. Assumed divergence when there is no BLAST hit. [0.5]
