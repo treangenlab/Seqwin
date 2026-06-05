@@ -140,7 +140,6 @@ class Seqwin(object):
                 graph_path,
                 allow_pickle=False,
                 kmers=kmers.kmers,
-                idx=kmers.idx,
                 nodes=kmers.nodes,
                 edges=kmers.edges,
                 record_offsets=kmers.record_offsets,

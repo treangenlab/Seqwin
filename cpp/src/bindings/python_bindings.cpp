@@ -65,7 +65,6 @@ PYBIND11_MODULE(_core, m) {
             }
 
             auto kmers = array_to_numpy(std::move(graph.kmers));
-            auto idx = array_to_numpy(std::move(graph.idx));
             auto nodes = array_to_numpy(std::move(graph.nodes));
             auto edges = array_to_numpy(std::move(graph.edges));
             auto record_offsets = array_to_numpy(std::move(graph.record_offsets));
@@ -79,7 +78,7 @@ PYBIND11_MODULE(_core, m) {
                 ids_by_assembly.append(ids_tuple);
             }
 
-            return py::make_tuple(kmers, idx, nodes, edges, record_offsets, ids_by_assembly);
+            return py::make_tuple(kmers, nodes, edges, record_offsets, ids_by_assembly);
         },
         py::arg("assembly_paths"),
         py::arg("kmerlen"),
@@ -90,16 +89,13 @@ PYBIND11_MODULE(_core, m) {
 
     m.def("_filter_kmers_native",
         [](py::array_t<seqwin::Kmer, py::array::c_style> kmers,
-           py::array_t<std::size_t, py::array::c_style> idx,
            py::array_t<seqwin::Node, py::array::c_style> nodes,
            const std::vector<std::uint64_t>& used_hashes
         ) {
             auto kmers_buf = kmers.request();
-            auto idx_buf = idx.request();
             auto nodes_buf = nodes.request();
 
             const auto* kmers_ptr = static_cast<const seqwin::Kmer*>(kmers_buf.ptr);
-            const auto* idx_ptr = static_cast<const std::size_t*>(idx_buf.ptr);
             const auto* nodes_ptr = static_cast<const seqwin::Node*>(nodes_buf.ptr);
             const auto n_nodes = static_cast<std::size_t>(nodes_buf.shape[0]);
 
@@ -108,7 +104,6 @@ PYBIND11_MODULE(_core, m) {
                 py::gil_scoped_release release;
                 graph = seqwin::filter_kmers(
                     kmers_ptr,
-                    idx_ptr,
                     nodes_ptr,
                     n_nodes,
                     used_hashes
@@ -116,13 +111,11 @@ PYBIND11_MODULE(_core, m) {
             }
 
             auto kmers_new = array_to_numpy(std::move(graph.kmers));
-            auto idx_new = array_to_numpy(std::move(graph.idx));
             auto nodes_new = array_to_numpy(std::move(graph.nodes));
 
-            return py::make_tuple(kmers_new, idx_new, nodes_new);
+            return py::make_tuple(kmers_new, nodes_new);
         },
         py::arg("kmers").noconvert(),
-        py::arg("idx").noconvert(),
         py::arg("nodes").noconvert(),
         py::arg("used_hashes")
     );

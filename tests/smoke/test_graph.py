@@ -13,19 +13,16 @@ def _sorted_edges(edges: np.ndarray) -> np.ndarray:
     return edge_values[idx]
 
 
-def _assert_idx_invariants(kmers: np.ndarray, idx: np.ndarray, nodes: np.ndarray) -> None:
-    assert idx.dtype == np.uintp
-    assert len(idx) == len(kmers)
-    assert np.array_equal(np.sort(idx), np.arange(len(kmers), dtype=np.uintp))
+
+def _assert_node_ranges(kmers: np.ndarray, nodes: np.ndarray) -> None:
+    total = 0
     for node in nodes:
         start = int(node['start'])
         stop = int(node['stop'])
-        assert stop > start
-        block = kmers[start:stop]
-        assert len(block) == (stop - start)
-        node_idx = idx[start:stop]
-        assert len(node_idx) == len(block)
-        assert not np.array_equal(node_idx, np.arange(start, stop, dtype=np.uintp))
+        assert 0 <= start <= stop <= len(kmers)
+        assert len(kmers[start:stop]) == (stop - start)
+        total += stop - start
+    assert total == len(kmers)
 
 
 def test_dtype_layouts() -> None:
@@ -59,21 +56,21 @@ def test_build_threading_equivalence(targets_dir, non_targets_dir) -> None:
     ]
     is_targets = [True, True, False, False]
 
-    kmers_1, idx_1, nodes_1, edges_1, record_offsets_1, record_ids_1 = build(
+    kmers_1, nodes_1, edges_1, record_offsets_1, record_ids_1 = build(
         assembly_paths,
         kmerlen=7,
         windowsize=10,
         is_targets=is_targets,
         n_cpu=1,
     )
-    kmers_2, idx_2, nodes_2, edges_2, record_offsets_2, record_ids_2 = build(
+    kmers_2, nodes_2, edges_2, record_offsets_2, record_ids_2 = build(
         assembly_paths,
         kmerlen=7,
         windowsize=10,
         is_targets=is_targets,
         n_cpu=2,
     )
-    kmers_many, idx_many, nodes_many, edges_many, record_offsets_many, record_ids_many = build(
+    kmers_many, nodes_many, edges_many, record_offsets_many, record_ids_many = build(
         assembly_paths,
         kmerlen=7,
         windowsize=10,
@@ -84,12 +81,6 @@ def test_build_threading_equivalence(targets_dir, non_targets_dir) -> None:
     assert kmers_1.dtype == KMER_DTYPE
     assert kmers_1.dtype.itemsize == 8
     assert kmers_1.dtype.names == ('pos', 'record_idx')
-    for node in nodes_1:
-        start = int(node['start'])
-        stop = int(node['stop'])
-        assert stop > start
-        assert len(kmers_1[start:stop]) == (stop - start)
-
     assert np.array_equal(record_offsets_1, np.array([0, 1, 2, 3, 4], dtype=np.uintp))
     assert np.array_equal(np.unique(kmers_1['record_idx']), np.arange(4, dtype=np.uint32))
     assert np.all(nodes_1['n_tar'] + nodes_1['n_neg'] > 0)
@@ -102,14 +93,12 @@ def test_build_threading_equivalence(targets_dir, non_targets_dir) -> None:
     assert np.array_equal(edge_values_1[:, 2], edges_1["weight"])
     assert nodes_1.dtype == NODE_DTYPE
 
-    _assert_idx_invariants(kmers_1, idx_1, nodes_1)
-    _assert_idx_invariants(kmers_2, idx_2, nodes_2)
-    _assert_idx_invariants(kmers_many, idx_many, nodes_many)
+    _assert_node_ranges(kmers_1, nodes_1)
+    _assert_node_ranges(kmers_2, nodes_2)
+    _assert_node_ranges(kmers_many, nodes_many)
 
     assert np.array_equal(kmers_1, kmers_2)
     assert np.array_equal(kmers_1, kmers_many)
-    assert np.array_equal(idx_1, idx_2)
-    assert np.array_equal(idx_1, idx_many)
     assert np.array_equal(nodes_1, nodes_2)
     assert np.array_equal(nodes_1, nodes_many)
 
@@ -134,7 +123,7 @@ def test_multi_thread_record_offsets_and_global_record_indices(tmp_path: Path) -
         write_fasta(path, n_records)
         assembly_paths.append(path)
 
-    kmers, _, _, _, record_offsets, record_ids = build(
+    kmers, _, _, record_offsets, record_ids = build(
         assembly_paths,
         kmerlen=7,
         windowsize=10,
@@ -147,34 +136,6 @@ def test_multi_thread_record_offsets_and_global_record_indices(tmp_path: Path) -
     assert np.array_equal(np.unique(kmers['record_idx']), np.arange(7, dtype=np.uint32))
 
 
-def test_create_ck_reconstructs_assembly_and_local_record_indices(monkeypatch) -> None:
-    captured = {}
-
-    class FakeConnectedKmers:
-        def __init__(self, graph, kmers_df, kmerlen):
-            captured['graph'] = graph
-            captured['kmers_df'] = kmers_df.copy()
-            captured['kmerlen'] = kmerlen
-
-    monkeypatch.setattr('seqwin.markers.ConnectedKmers', FakeConnectedKmers)
-
-    graph = nx.Graph()
-    kmers = (
-        np.array([(5, 0), (6, 2), (7, 5)], dtype=KMER_DTYPE),
-    )
-    idx = (np.array([10, 20, 30], dtype=np.uintp),)
-    record_offsets = np.array([0, 2, 5, 6], dtype=np.uintp)
-
-    _create_ck(graph, (np.uint64(123),), kmers, idx, record_offsets, n_tar=2, kmerlen=7)
-
-    df = captured['kmers_df'].sort_index()
-    assert df['assembly_idx'].tolist() == [0, 1, 2]
-    assert df['record_idx'].tolist() == [0, 0, 0]
-    assert df['is_target'].tolist() == [True, True, False]
-    assert df['hash'].tolist() == [123, 123, 123]
-    assert captured['kmerlen'] == 7
-
-
 def test_filter_kmers() -> None:
     kmers = np.array([
         (10, 0),
@@ -184,14 +145,13 @@ def test_filter_kmers() -> None:
         (31, 2),
         (32, 2),
     ], dtype=KMER_DTYPE)
-    idx = np.array([100, 101, 200, 300, 301, 302], dtype=np.uintp)
     nodes = np.array([
         (10, 0, 2, 1, 0, 0.1),
         (20, 2, 3, 1, 0, 0.2),
         (30, 3, 6, 1, 1, 0.3),
     ], dtype=NODE_DTYPE)
 
-    kmers_new, idx_new, nodes_new = _filter_kmers(kmers, idx, nodes, {30, 10})
+    kmers_new, nodes_new = _filter_kmers(kmers, nodes, {30, 10})
 
     assert np.array_equal(nodes_new['hash'], np.array([10, 30], dtype=np.uint64))
     assert np.array_equal(nodes_new['start'], np.array([0, 2], dtype=np.uintp))
@@ -204,7 +164,5 @@ def test_filter_kmers() -> None:
         (31, 2),
         (32, 2),
     ], dtype=KMER_DTYPE)
-    expected_idx = np.array([100, 101, 300, 301, 302], dtype=np.uintp)
-
     assert np.array_equal(kmers_new, expected_kmers)
-    assert np.array_equal(idx_new, expected_idx)
+    _assert_node_ranges(kmers_new, nodes_new)
