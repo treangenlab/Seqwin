@@ -49,9 +49,7 @@ class KmerGraph(object):
     2. Extract low-penalty subgraphs from the k-mer graph with `self.filter()`.
 
     Attributes:
-        kmers (NDArray[np.void]): A 1-D NumPy structured array of k-mers from all assemblies, grouped and sorted by k-mer hashes.
-        idx (NDArray[np.uintp] | None): The original indices assigned when k-mers are generated (ordered by genomic positions).
-            Parallel to `kmers`.
+        kmers (NDArray[np.void]): A 1-D NumPy structured array of k-mers from all assemblies, grouped by node range.
         nodes (NDArray[np.void]): A 1-D NumPy structured array of k-mer nodes.
             For each node, `kmers[node['start']:node['stop']]` is the k-mer group with `node['hash']`.
         edges (NDArray[np.void]): A 1-D NumPy structured array of weighted, undirected edges.
@@ -62,10 +60,9 @@ class KmerGraph(object):
             Generated with `self.filter()`.
     """
     __slots__ = (
-        'kmers', 'idx', 'nodes', 'edges', 'record_offsets', 'graph', 'subgraphs', '_filtered_flag'
+        'kmers', 'nodes', 'edges', 'record_offsets', 'graph', 'subgraphs', '_filtered_flag'
     )
     kmers: NDArray[np.void]
-    idx: NDArray[np.uintp]
     nodes: NDArray[np.void]
     edges: NDArray[np.void]
     record_offsets: NDArray[np.uintp]
@@ -88,7 +85,7 @@ class KmerGraph(object):
         logger.info(f'Building minimizer graph from {n_assemblies} assemblies...')
         tik = time()
 
-        kmers, idx, nodes, edges, record_offsets, record_ids = build(
+        kmers, nodes, edges, record_offsets, record_ids = build(
             assemblies.path,
             kmerlen,
             windowsize,
@@ -111,7 +108,6 @@ class KmerGraph(object):
         print_time_delta(time()-tik)
 
         self.kmers = kmers
-        self.idx = idx
         self.nodes = nodes
         self.edges = edges
         self.record_offsets = record_offsets
@@ -135,7 +131,6 @@ class KmerGraph(object):
             rng (random.Random): See `RunState` in `config.py`.
         """
         kmers = self.kmers
-        idx = self.idx
         nodes = self.nodes
         edges = self.edges
         filtered_flag = self._filtered_flag
@@ -160,12 +155,11 @@ class KmerGraph(object):
 
         # remove unused k-mers
         logger.info(' - Removing k-mers not included in any of the subgraphs...')
-        kmers, idx, nodes = _filter_kmers(kmers, idx, nodes, used_hashes)
+        kmers, nodes = _filter_kmers(kmers, nodes, used_hashes)
         logger.info(f' - {len(kmers)} k-mers left')
 
         print_time_delta(time()-tik)
         self.kmers = kmers
-        self.idx = idx
         self.nodes = nodes
         self.edges = edges
         self.graph = graph

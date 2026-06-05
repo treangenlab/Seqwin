@@ -255,7 +255,7 @@ class WorkingDir:
         config (str): The `Config` instance saved as JSON. ['config.json']
         assemblies_dir (str): Directory for downloaded assemblies. ['assemblies']
         assemblies_csv (str): The `Assemblies` instance (`assemblies.py`) saved as CSV. ['assemblies.csv']
-        graph (str): NumPy arrays representing the k-mer graph (`kmers`, `idx`, `nodes` and `edges`). ['graph.npz']
+        graph (str): NumPy arrays representing the k-mer graph (`kmers`, `nodes` and `edges`). ['graph.npz']
         mash (str): Mash sketch of all assemblies (.msh will be added by Mash). ['sketches']
         blast_dir (str): Directory for the BLAST database. ['blastdb']
         blast_log (str): Console output of the makeblastdb command, inside `blast_dir`. ['makeblastdb.log']

@@ -25,7 +25,7 @@ def _assert_graph_matches_expected(actual_path: Path, expected_path: Path) -> No
 
     actual_keys = set(actual.files)
     expected_keys = set(expected.files)
-    required_keys = {'kmers', 'idx', 'nodes', 'edges', 'record_offsets'}
+    required_keys = {'kmers', 'nodes', 'edges', 'record_offsets'}
 
     assert actual_keys == expected_keys, f'graph arrays mismatch: actual={sorted(actual_keys)}, expected={sorted(expected_keys)}'
     assert actual_keys == required_keys, f'graph arrays must be exactly {sorted(required_keys)}, got {sorted(actual_keys)}'
@@ -36,7 +36,6 @@ def _assert_graph_matches_expected(actual_path: Path, expected_path: Path) -> No
         assert actual_array.dtype == expected_array.dtype, f'{name} dtype mismatch: actual={actual_array.dtype}, expected={expected_array.dtype}'
         assert actual_array.shape == expected_array.shape, f'{name} shape mismatch: actual={actual_array.shape}, expected={expected_array.shape}'
 
-    np.testing.assert_array_equal(actual['idx'], expected['idx'], err_msg='idx array values mismatch')
     np.testing.assert_array_equal(actual['kmers'], expected['kmers'], err_msg='kmers array values mismatch')
     np.testing.assert_array_equal(actual['edges'], expected['edges'], err_msg='edges array values mismatch')
 

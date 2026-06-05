@@ -66,7 +66,6 @@ def build(
     n_cpu: int = 1
 ) -> tuple[
     NDArray[np.void],
-    NDArray[np.uintp],
     NDArray[np.void],
     NDArray[np.void],
     NDArray[np.uintp],
@@ -77,7 +76,7 @@ def build(
     Example usage:
     ```python
     >>> from seqwin.graph import build
-    >>> kmers, idx, nodes, edges, record_offsets, record_ids = build(
+    >>> kmers, nodes, edges, record_offsets, record_ids = build(
     >>>     assembly_paths = ...,
     >>>     kmerlen = 21,
     >>>     windowsize = 200,
@@ -87,14 +86,12 @@ def build(
     ```
     - `assembly_paths` and `is_targets` are parallel lists.
     - `kmers` stores minimizer occurrences in all assemblies, grouped and sorted by hash.
-    - `idx` is parallel to `kmers` and stores each minimizer's original generation index, ordered by genomic position.
     - `nodes` and `edges` are sorted by hash.
 
     The `[start, stop)` range in each node identifies minimizers with this hash.
     ```python
     >>> kmer_group = kmers[node['start']:node['stop']]
     >>> group_hash = node['hash']
-    >>> original_indices = idx[node['start']:node['stop']] # strictly increasing
     ```
 
     Use `record_offsets` to recover the original assembly and record index of each minimizer.
@@ -121,8 +118,7 @@ def build(
                 Dtype: `KMER_DTYPE`
                 - 'pos' (uint32): 0-based position of the minimizer within its FASTA record.
                 - 'record_idx' (uint32): 0-based global index of the FASTA record.
-            2. NDArray[np.uintp]: The original indices assigned when minimizers are generated (ordered by genomic positions).
-            3. NDArray[np.void]: A 1-D NumPy structured array of minimizer nodes.
+            2. NDArray[np.void]: A 1-D NumPy structured array of minimizer nodes.
                 Dtype: `NODE_DTYPE`
                 - 'hash' (uint64): Hash value of the minimizers represented by this node.
                 - 'start' (uintp): Start of the half-open range for this node's minimizer entries.
@@ -130,13 +126,13 @@ def build(
                 - 'n_tar' (uint32): Number of target assemblies containing this minimizer hash.
                 - 'n_neg' (uint32): Number of non-target assemblies containing this minimizer hash.
                 - 'penalty' (float64): Node penalty score used for downstream graph filtering.
-            4. NDArray[np.void]: A 1-D NumPy structured array of weighted, undirected edges.
+            3. NDArray[np.void]: A 1-D NumPy structured array of weighted, undirected edges.
                 Dtype: `EDGE_DTYPE`
                 - 'first' (uint64): Smaller endpoint hash of the undirected edge.
                 - 'second' (uint64): Larger endpoint hash of the undirected edge.
                 - 'weight' (uintp): Number of assemblies where the endpoints are adjacent.
-            5. NDArray[np.uintp]: Cumulative global FASTA record offsets by assembly.
-            6. list[tuple[str, ...]]: FASTA record IDs of each assembly.
+            4. NDArray[np.uintp]: Cumulative global FASTA record offsets by assembly.
+            5. list[tuple[str, ...]]: FASTA record IDs of each assembly.
     """
     return _build_native(
         list(str(p) for p in assembly_paths),
@@ -149,28 +145,24 @@ def build(
 
 def _filter_kmers(
     kmers: NDArray[np.void],
-    idx: NDArray[np.uintp],
     nodes: NDArray[np.void],
     used_hashes: frozenset[np.uint64]
 ) -> tuple[
     NDArray[np.void],
-    NDArray[np.uintp],
     NDArray[np.void]
 ]:
     """
-    1. Remove k-mers (`kmers`, `idx` and `nodes`) not included in `used_hashes`.
+    1. Remove k-mers (`kmers` and `nodes`) not included in `used_hashes`.
     2. Update 'start' and 'stop' in nodes.
 
     Args:
         kmers (NDArray): See `KmerGraph.kmers`.
-        idx (NDArray): See `KmerGraph.idx`.
         nodes (NDArray): See `KmerGraph.nodes`.
         used_hashes (frozenset[np.uint64]): K-mers and nodes with these hash values are kept.
 
     Returns:
         tuple: A tuple containing
             1. NDArray: See `KmerGraph.kmers`.
-            2. NDArray: See `KmerGraph.idx`.
-            3. NDArray: See `KmerGraph.nodes`.
+            2. NDArray: See `KmerGraph.nodes`.
     """
-    return _filter_kmers_native(kmers, idx, nodes, used_hashes)
+    return _filter_kmers_native(kmers, nodes, used_hashes)

@@ -19,6 +19,11 @@ namespace {
 
 constexpr std::size_t map_reserve_divisor = 100;
 
+struct RawKmer {
+    std::uint64_t hash;
+    Kmer kmer;
+};
+
 struct NodeState {
     std::size_t count = 0;
     std::size_t start = 0;
@@ -60,16 +65,14 @@ ThreadGraph build_worker(
         ),
         windowsize
     );
+    std::vector<RawKmer> raw_kmers;
+    raw_kmers.reserve(n_kmers_est);
 
     ThreadGraph graph;
-    graph.kmers.reserve(n_kmers_est);
     graph.record_offsets.reserve(end_assembly - start_assembly + 1);
     graph.record_offsets.push_back(0);
     graph.ids_by_assembly.reserve(end_assembly - start_assembly);
     graph.start_assembly = start_assembly;
-
-    std::vector<std::uint64_t> hashes; // Used to build ThreadGraph.idx
-    hashes.reserve(n_kmers_est);
 
     // Reserving for unordered_map will actually allocate physical memory
     std::unordered_map<std::uint64_t, NodeState> node_map;
@@ -99,11 +102,13 @@ ThreadGraph build_worker(
             const auto mins = btllib::minimize_sequence(record.sequence, kmerlen, windowsize);
 
             for (const auto& m : mins) {
-                graph.kmers.push_back(Kmer{
-                    static_cast<std::uint32_t>(m.pos),
-                    static_cast<std::uint32_t>(record_idx)
+                raw_kmers.push_back(RawKmer{
+                    m.out_hash,
+                    Kmer{
+                        static_cast<std::uint32_t>(m.pos),
+                        static_cast<std::uint32_t>(record_idx)
+                    }
                 });
-                hashes.push_back(m.out_hash);
 
                 // Add this minimizer to an existing node, or create a new node
                 auto [node_it, node_inserted] = node_map.try_emplace(m.out_hash);
@@ -151,8 +156,8 @@ ThreadGraph build_worker(
     }
     std::unordered_map<EdgeKey, EdgeState, EdgeKeyHash>().swap(edge_map);
 
-    // Build ThreadGraph.idx (grouped by minimizer hash)
-    graph.idx = NoInitArray<std::size_t>(graph.n_kmers);
+    // Build ThreadGraph.kmers (grouped by hash)
+    graph.kmers = NoInitArray<Kmer>(graph.n_kmers);
     std::size_t cursor = 0;
     for (auto& [hash, state] : node_map) {
         (void)hash;
@@ -160,12 +165,11 @@ ThreadGraph build_worker(
         state.cursor = cursor;
         cursor += state.count;
     }
-    for (std::size_t i = 0; i < graph.n_kmers; ++i) {
-        const auto hash = hashes[i];
-        auto node_it = node_map.find(hash);
-        graph.idx[node_it->second.cursor++] = i;
+    for (const auto& rk : raw_kmers) {
+        auto node_it = node_map.find(rk.hash);
+        graph.kmers[node_it->second.cursor++] = rk.kmer;
     }
-    std::vector<std::uint64_t>().swap(hashes);
+    std::vector<RawKmer>().swap(raw_kmers);
 
     graph.nodes = NoInitArray<ThreadNode>(node_map.size());
     std::size_t node_i = 0;

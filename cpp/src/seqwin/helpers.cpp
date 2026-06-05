@@ -17,9 +17,9 @@ namespace seqwin {
 namespace {
 
 /**
- * @brief Describes a contiguous local `idx` segment and its output position.
+ * @brief Describes a contiguous thread-local k-mer segment and its output position.
  */
-struct IdxSegment {
+struct KmerSegment {
     std::size_t thread_id;
     std::size_t local_start;
     std::size_t out_start;
@@ -144,13 +144,13 @@ static void lsd_radix_sort(
  *
  * 1. Sort nodes by hash.
  * 2. Merge nodes with the same hash into final graph nodes.
- * 3. Return local `idx` segment metadata to materialize `kmers`.
+ * 3. Return local k-mer segment metadata to materialize final `kmers`.
  *
  * @param nodes Thread-local node array to sort and merge.
  * @param pool Thread pool used for radix sorting.
- * @return Final merged nodes and segment metadata for rebuilding `kmers` and `idx`.
+ * @return Final merged nodes and segment metadata for rebuilding `kmers`.
  */
-static std::pair<NoInitArray<Node>, std::vector<IdxSegment>> merge_nodes(
+static std::pair<NoInitArray<Node>, std::vector<KmerSegment>> merge_nodes(
     NoInitArray<ThreadNode>& nodes,
     ThreadPool& pool
 ) {
@@ -173,9 +173,9 @@ static std::pair<NoInitArray<Node>, std::vector<IdxSegment>> merge_nodes(
     }
     NoInitArray<Node> merged(unique_count);
 
-    // Aggregate nodes and keep idx ranges
-    std::vector<IdxSegment> idx_segments;
-    idx_segments.reserve(n_nodes);
+    // Aggregate nodes and keep k-mer ranges
+    std::vector<KmerSegment> kmer_segments;
+    kmer_segments.reserve(n_nodes);
 
     std::size_t n_kmers = 0;
     std::size_t write_i = 0;
@@ -192,7 +192,7 @@ static std::pair<NoInitArray<Node>, std::vector<IdxSegment>> merge_nodes(
             const auto count = nodes[i].count;
 
             if (count != 0) {
-                idx_segments.push_back(IdxSegment{
+                kmer_segments.push_back(KmerSegment{
                     nodes[i].thread_id,
                     nodes[i].start,
                     n_kmers,
@@ -206,57 +206,32 @@ static std::pair<NoInitArray<Node>, std::vector<IdxSegment>> merge_nodes(
         const auto stop = n_kmers;
         merged[write_i++] = Node{hash, start, stop, n_tar, n_neg};
     }
-    return {std::move(merged), std::move(idx_segments)};
+    return {std::move(merged), std::move(kmer_segments)};
 }
 
 static NoInitArray<Kmer> merge_kmers(
     const std::vector<ThreadGraph>& graphs,
     std::size_t total_kmers,
-    const std::vector<IdxSegment>& idx_segments,
+    const std::vector<KmerSegment>& kmer_segments,
     const std::vector<std::size_t>& thread_record_offsets,
     ThreadPool& pool
 ) {
     NoInitArray<Kmer> kmers(total_kmers);
 
-    pool.parallel_for(idx_segments.size(), [&](std::size_t start, std::size_t end, std::size_t) {
+    pool.parallel_for(kmer_segments.size(), [&](std::size_t start, std::size_t end, std::size_t) {
         for (std::size_t s = start; s < end; ++s) {
-            const auto& segment = idx_segments[s];
-            const auto& local_idx = graphs[segment.thread_id].idx;
+            const auto& segment = kmer_segments[s];
             const auto& local_kmers = graphs[segment.thread_id].kmers;
             const auto offset = thread_record_offsets[segment.thread_id];
 
             for (std::size_t k = 0; k < segment.count; ++k) {
-                const auto local_kmer_i = local_idx[segment.local_start + k];
-                auto kmer = local_kmers[local_kmer_i];
+                auto kmer = local_kmers[segment.local_start + k];
                 kmer.record_idx += static_cast<std::uint32_t>(offset);
                 kmers[segment.out_start + k] = kmer;
             }
         }
     });
     return kmers;
-}
-
-static NoInitArray<std::size_t> merge_idx(
-    const std::vector<ThreadGraph>& graphs,
-    std::size_t total_kmers,
-    const std::vector<IdxSegment>& idx_segments,
-    const std::vector<std::size_t>& kmer_offsets,
-    ThreadPool& pool
-) {
-    NoInitArray<std::size_t> idx(total_kmers);
-
-    pool.parallel_for(idx_segments.size(), [&](std::size_t start, std::size_t end, std::size_t) {
-        for (std::size_t s = start; s < end; ++s) {
-            const auto& segment = idx_segments[s];
-            const auto offset = kmer_offsets[segment.thread_id];
-            const auto& local_idx = graphs[segment.thread_id].idx;
-
-            for (std::size_t k = 0; k < segment.count; ++k) {
-                idx[segment.out_start + k] = local_idx[segment.local_start + k] + offset;
-            }
-        }
-    });
-    return idx;
 }
 
 static void merge_edges(NoInitArray<Edge>& edges, ThreadPool& pool)
@@ -335,33 +310,22 @@ Graph merge_thread_graphs(
         }
 
         merge_edges(graph.edges, pool); // Sort only
-        auto [nodes, idx_segments] = merge_nodes(graph.nodes, pool);
+        auto [nodes, kmer_segments] = merge_nodes(graph.nodes, pool);
         graph.nodes.reset();
 
         std::vector<std::size_t> thread_record_offsets{0};
         auto kmers = merge_kmers(
             graphs,
             graph.n_kmers,
-            idx_segments,
+            kmer_segments,
             thread_record_offsets,
             pool
         );
-        std::vector<Kmer>().swap(graph.kmers);
-
-        std::vector<std::size_t> kmer_offsets{0};
-        auto idx = merge_idx(
-            graphs,
-            graph.n_kmers,
-            idx_segments,
-            kmer_offsets,
-            pool
-        );
-        graph.idx.reset();
-        std::vector<IdxSegment>().swap(idx_segments);
+        graph.kmers.reset();
+        std::vector<KmerSegment>().swap(kmer_segments);
 
         return {
             std::move(kmers),
-            std::move(idx),
             std::move(nodes),
             std::move(graph.edges),
             std::move(graph.record_offsets),
@@ -399,26 +363,19 @@ Graph merge_thread_graphs(
     merge_edges(edges, pool);
 
     auto thread_nodes = concat_nodes(graphs, pool);
-    auto [nodes, idx_segments] = merge_nodes(thread_nodes, pool);
+    auto [nodes, kmer_segments] = merge_nodes(thread_nodes, pool);
     thread_nodes.reset();
 
-    std::vector<std::size_t> kmer_offsets(graphs.size());
     std::size_t total_kmers = 0;
-    for (std::size_t t = 0; t < graphs.size(); ++t) {
-        kmer_offsets[t] = total_kmers;
-        total_kmers += graphs[t].n_kmers;
+    for (const auto& graph : graphs) {
+        total_kmers += graph.n_kmers;
     }
 
-    auto kmers = merge_kmers(graphs, total_kmers, idx_segments, thread_record_offsets, pool);
+    auto kmers = merge_kmers(graphs, total_kmers, kmer_segments, thread_record_offsets, pool);
     for (auto& graph : graphs) {
-        std::vector<Kmer>().swap(graph.kmers);
+        graph.kmers.reset();
     }
-
-    auto idx = merge_idx(graphs, total_kmers, idx_segments, kmer_offsets, pool);
-    for (auto& graph : graphs) {
-        graph.idx.reset();
-    }
-    std::vector<IdxSegment>().swap(idx_segments);
+    std::vector<KmerSegment>().swap(kmer_segments);
 
     std::vector<std::vector<std::string>> ids_by_assembly;
     ids_by_assembly.reserve(n_assemblies);
@@ -432,7 +389,6 @@ Graph merge_thread_graphs(
 
     return {
         std::move(kmers),
-        std::move(idx),
         std::move(nodes),
         std::move(edges),
         std::move(record_offsets),
@@ -442,7 +398,6 @@ Graph merge_thread_graphs(
 
 Graph filter_kmers(
     const Kmer* kmers,
-    const std::size_t* idx,
     const Node* nodes,
     std::size_t n_nodes,
     std::vector<std::uint64_t> used_hashes
@@ -478,7 +433,6 @@ Graph filter_kmers(
 
     graph.nodes = NoInitArray<Node>(used_node_indices.size());
     graph.kmers = NoInitArray<Kmer>(n_kmers);
-    graph.idx = NoInitArray<std::size_t>(n_kmers);
 
     std::size_t new_start = 0;
     for (std::size_t out_node_i = 0; out_node_i < used_node_indices.size(); ++out_node_i) {
@@ -498,7 +452,6 @@ Graph filter_kmers(
             const auto out_i = new_start + k;
             const auto in_i = old_start + k;
             graph.kmers[out_i] = kmers[in_i];
-            graph.idx[out_i] = idx[in_i];
         }
 
         new_start += size;

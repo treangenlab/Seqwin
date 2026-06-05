@@ -22,8 +22,8 @@ struct Kmer {
 /**
  * @brief Minimizer graph node for one unique minimizer hash.
  *
- * The `[start, stop)` range is a half-open interval into the parallel
- * `Graph.kmers` and `Graph.idx` arrays for minimizers with this hash.
+ * The `[start, stop)` range is a half-open interval into `Graph.kmers`
+ * for minimizers with this hash.
  */
 struct Node {
     /** Hash value of the minimizers represented by this node. */
@@ -58,8 +58,6 @@ struct Edge {
 struct Graph {
     /** Minimizer occurrences in all assemblies, grouped and sorted by hash. */
     NoInitArray<Kmer> kmers;
-    /** Parallel to `kmers` and stores each minimizer's original generation index, ordered by genomic position. */
-    NoInitArray<std::size_t> idx;
     /** Sorted by hash. */
     NoInitArray<Node> nodes;
     /** Sorted by hash. */
