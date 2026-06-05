@@ -213,7 +213,7 @@ static NoInitArray<Kmer> merge_kmers(
     const std::vector<ThreadGraph>& graphs,
     std::size_t total_kmers,
     const std::vector<KmerSegment>& kmer_segments,
-    const std::vector<std::size_t>& thread_record_offsets,
+    const std::vector<std::uint32_t>& thread_record_offsets,
     ThreadPool& pool
 ) {
     NoInitArray<Kmer> kmers(total_kmers);
@@ -226,7 +226,7 @@ static NoInitArray<Kmer> merge_kmers(
 
             for (std::size_t k = 0; k < segment.count; ++k) {
                 auto kmer = local_kmers[segment.local_start + k];
-                kmer.record_idx += static_cast<std::uint32_t>(offset);
+                kmer.record_idx += offset;
                 kmers[segment.out_start + k] = kmer;
             }
         }
@@ -313,7 +313,7 @@ Graph merge_thread_graphs(
         auto [nodes, kmer_segments] = merge_nodes(graph.nodes, pool);
         graph.nodes.reset();
 
-        std::vector<std::size_t> thread_record_offsets{0};
+        std::vector<std::uint32_t> thread_record_offsets{0};
         auto kmers = merge_kmers(
             graphs,
             graph.n_kmers,
@@ -336,7 +336,7 @@ Graph merge_thread_graphs(
     log_python(" - Merging from " + std::to_string(graphs.size()) + " threads...");
 
     // Merge record offsets
-    std::vector<std::size_t> thread_record_offsets(graphs.size());
+    std::vector<std::uint32_t> thread_record_offsets(graphs.size());
     std::vector<std::size_t> record_offsets;
     record_offsets.reserve(n_assemblies + 1);
     record_offsets.push_back(0);
@@ -346,7 +346,7 @@ Graph merge_thread_graphs(
         auto& local_offsets = graphs[t].record_offsets;
 
         const auto base = total_records;
-        thread_record_offsets[t] = base;
+        thread_record_offsets[t] = static_cast<std::uint32_t>(base);
         total_records += local_offsets.back();
 
         for (std::size_t i = 1; i < local_offsets.size(); ++i) {
