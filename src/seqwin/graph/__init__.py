@@ -63,6 +63,7 @@ def build(
     kmerlen: int,
     windowsize: int,
     is_targets: Iterable[bool],
+    low_memory: bool = False,
     n_cpu: int = 1
 ) -> tuple[
     NDArray[np.void],
@@ -82,6 +83,7 @@ def build(
     >>>     windowsize = 200,
     >>>     is_targets = ...,
     >>>     n_cpu = 4,
+    >>>     low_memory = False
     >>> )
     ```
     - `assembly_paths` and `is_targets` are parallel lists.
@@ -111,6 +113,7 @@ def build(
         windowsize (int): Window size for minimizer sketch.
         is_targets (Iterable[bool]): Whether each assembly is a target assembly.
         n_cpu (int, optional): Number of worker threads to use. [1]
+        low_memory (bool, optional): Recompute minimizers in a second pass to reduce peak memory. [False]
 
     Returns:
         tuple: A tuple containing
@@ -139,7 +142,8 @@ def build(
         int(kmerlen),
         int(windowsize),
         list(bool(t) for t in is_targets),
-        int(n_cpu)
+        int(n_cpu),
+        bool(low_memory)
     )
 
 
