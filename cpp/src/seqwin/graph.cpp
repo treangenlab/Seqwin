@@ -203,7 +203,7 @@ NoInitArray<Kmer> recompute_kmers(
     std::size_t windowsize,
     const std::vector<ThreadGraph>& graphs,
     const std::vector<std::size_t>& record_offsets,
-    NodeMaps& node_maps,
+    KmerMaps& kmer_maps,
     ThreadPool& pool
 ) {
     std::size_t total_kmers = 0;
@@ -215,7 +215,7 @@ NoInitArray<Kmer> recompute_kmers(
     pool.parallel_for(graphs.size(), [&](std::size_t start, std::size_t end, std::size_t) {
         for (std::size_t thread_id = start; thread_id < end; ++thread_id) {
             const auto& graph = graphs[thread_id];
-            auto& hash_to_cursor = node_maps[thread_id];
+            auto& hash_to_cursor = kmer_maps[thread_id];
 
             for (std::size_t assembly_i = graph.start_assembly;
                  assembly_i < graph.end_assembly;
@@ -304,13 +304,11 @@ Graph build(
         }
     });
 
-    NodeMaps node_maps;
-    auto graph = merge_thread_graphs(
+    auto [graph, kmer_maps] = merge_thread_graphs(
         graphs,
         n_assemblies,
         pool,
-        low_memory,
-        low_memory ? &node_maps : nullptr
+        low_memory
     );
     if (low_memory) {
         log_python(" - Recomputing minimizers for low-memory mode...");
@@ -320,11 +318,11 @@ Graph build(
             windowsize,
             graphs,
             graph.record_offsets,
-            node_maps,
+            kmer_maps,
             pool
         );
     }
-    return graph;
+    return std::move(graph);
 }
 
 } // namespace seqwin

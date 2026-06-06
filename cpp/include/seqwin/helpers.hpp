@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "seqwin/graph.hpp"
@@ -62,7 +63,7 @@ struct ThreadGraph {
  * Each thread/hash pair owns a disjoint segment inside `Graph.kmers`.
  * When building `Graph.kmers` in the low memory mode, these starts are mutated as cursors.
  */
-using NodeMaps = std::vector<std::unordered_map<std::uint64_t, std::size_t>>;
+using KmerMaps = std::vector<std::unordered_map<std::uint64_t, std::size_t>>;
 
 /**
  * @brief Emit a message through Python's logging module.
@@ -81,14 +82,14 @@ void log_python(
  * @param graphs Thread-local graphs produced during parallel graph construction.
  * @param n_assemblies Total number of input assemblies.
  * @param pool Thread pool used for parallel merge steps.
- * @return Fully merged minimizer graph.
+ * @param low_memory If True, return k-mer position metadata to build `kmers` in the second pass.
+ * @return Merged minimizer graph and k-mer maps. The second item is empty in standard mode.
  */
-Graph merge_thread_graphs(
+std::pair<Graph, KmerMaps> merge_thread_graphs(
     std::vector<ThreadGraph>& graphs,
     std::size_t n_assemblies,
     ThreadPool& pool,
-    bool low_memory,
-    NodeMaps* node_maps
+    bool low_memory
 );
 
 Graph filter_kmers(
