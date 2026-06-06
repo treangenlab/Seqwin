@@ -49,6 +49,13 @@ struct EdgeState {
     std::size_t last_seen_assembly = std::numeric_limits<std::size_t>::max();
 };
 
+/**
+ * @brief Builds the thread-local portion of a minimizer graph.
+ *
+ * In standard mode, materializes thread-local `kmers` (grouped by hash).
+ * In low-memory mode, skips k-mer materialization and records only the node metadata
+ * needed for second-pass k-mer recomputation.
+ */
 ThreadGraph build_worker(
     const std::vector<std::string>& assembly_paths,
     std::size_t kmerlen,
@@ -197,6 +204,12 @@ ThreadGraph build_worker(
     return graph;
 }
 
+/**
+ * @brief Recomputes final `kmers` for a merged graph in low-memory mode.
+ *
+ * Replays each worker's assemblies, recomputes minimizers, and writes them directly
+ * into their final `Graph.kmers` positions using the per-thread k-mer maps.
+ */
 NoInitArray<Kmer> recompute_kmers(
     const std::vector<std::string>& assembly_paths,
     std::size_t kmerlen,
