@@ -119,3 +119,18 @@ def test_graph_matches_expected(tmp_path: Path, targets_txt: Path, non_targets_t
     )
 
     _assert_graph_matches_expected(out_dir / WORKINGDIR.graph, expected_graph)
+
+
+def test_low_memory_graph_matches_expected(tmp_path: Path, targets_txt: Path, non_targets_txt: Path, expected_graph: Path) -> None:
+    out_dir = _run_cli(
+        '--tar-paths', str(targets_txt),
+        '--neg-paths', str(non_targets_txt),
+        '--prefix', str(tmp_path),
+        '--threads', '1',
+        '--title', 'no-filter-low-memory',
+        '--no-filter',
+        '--low-memory',
+        *_shared_config,
+    )
+
+    _assert_graph_matches_expected(out_dir / WORKINGDIR.graph, expected_graph)

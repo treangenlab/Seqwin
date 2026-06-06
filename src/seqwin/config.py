@@ -114,6 +114,7 @@ class Config(BaseModel):
 
         seed (int): Random seed for reproducibility. [42]
         n_cpu (int): Number of parallel processes or threads to use. [4]
+        low_memory (bool): If True, reduce peak memory by recomputing minimizers in a second pass. [False]
         version (str): Seqwin version.
     """
     # Inputs
@@ -162,6 +163,7 @@ class Config(BaseModel):
     # Miscellaneous
     seed: int = 42
     n_cpu: int = 4
+    low_memory: bool = False
 
     @computed_field
     @cached_property

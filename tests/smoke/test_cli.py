@@ -28,6 +28,7 @@ def test_help_shows_key_options() -> None:
         '--no-mash',
         '--no-blast',
         '--threads',
+        '--low-memory',
         '--prefix',
     ):
         assert opt in output
@@ -63,6 +64,7 @@ def test_cli_to_config_mapping_txt(monkeypatch, tmp_path: Path, targets_txt: Pat
             '--no-mash',
             '--no-blast',
             '--threads', '2',
+            '--low-memory',
             '--prefix', str(tmp_path),
         ],
     )
@@ -72,6 +74,7 @@ def test_cli_to_config_mapping_txt(monkeypatch, tmp_path: Path, targets_txt: Pat
     assert cfg.run_mash is False
     assert cfg.run_blast is False
     assert cfg.n_cpu == 2
+    assert cfg.low_memory is True
     assert cfg.prefix == tmp_path.resolve(strict=True)
     assert cfg.tar_paths == targets_txt.resolve(strict=True)
     assert cfg.neg_paths == non_targets_txt.resolve(strict=True)
