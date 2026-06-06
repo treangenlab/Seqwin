@@ -193,6 +193,11 @@ def main(
         help='Number of parallel processes or threads to use.',
         rich_help_panel='Miscellaneous'
     ),
+    low_memory: bool = typer.Option(
+        False, '--low-memory', show_default=False,
+        help='Reduce peak memory by recomputing minimizers in a second pass.',
+        rich_help_panel='Miscellaneous'
+    ),
     version: bool = typer.Option(
         False, '--version', callback=print_version, show_default=False, expose_value=False,
         is_eager=True, # run this before any other options
@@ -232,14 +237,15 @@ def main(
         run_blast=not no_blast,
         no_filter=no_filter,
         #blast_neg_only=blast_neg_only,
-        seed=seed,
-        n_cpu=n_cpu,
         level=level,
         source=source,
         annotated=annotated,
         exclude_mag=exclude_mag,
         gzip=not no_gzip,
         api_key=api_key,
-        download_only=download_only
+        download_only=download_only,
+        seed=seed,
+        n_cpu=n_cpu,
+        low_memory=low_memory
     )
     _ = run(config)

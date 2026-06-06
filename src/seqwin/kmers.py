@@ -2,7 +2,7 @@
 K-mer Graph
 ===========
 
-A core module of Seqwin. Create a k-mer graph from k-mers of all input genome assemblies.
+A core module of Seqwin. Build a k-mer graph from minimizers of all input genome assemblies.
 
 Dependencies:
 -------------
@@ -39,14 +39,14 @@ from numpy.typing import NDArray
 from .graph import build, _filter_kmers
 from .assemblies import Assemblies
 from .helpers import get_subgraphs
-from .utils import print_time_delta, log_and_raise
+from .utils import print_time_delta
 from .config import Config, RunState, HAS_MASH, WORKINGDIR, EDGE_W, NODE_P
 
 
 class KmerGraph(object):
     """
-    1. Create a weighted, undirected k-mer graph, and calculate node penalty scores.
-    2. Extract low-penalty subgraphs from the k-mer graph with `self.filter()`.
+    1. Build a weighted, undirected k-mer graph, and calculate node penalty scores.
+    2. Extract low-penalty subgraphs with `self.filter()`.
 
     Attributes:
         kmers (NDArray[np.void]): A 1-D NumPy structured array of k-mers from all assemblies, grouped by node range.
@@ -60,7 +60,7 @@ class KmerGraph(object):
             Generated with `self.filter()`.
     """
     __slots__ = (
-        'kmers', 'nodes', 'edges', 'record_offsets', 'graph', 'subgraphs', '_filtered_flag'
+        'kmers', 'nodes', 'edges', 'record_offsets', 'graph', 'subgraphs', '_is_filtered'
     )
     kmers: NDArray[np.void]
     nodes: NDArray[np.void]
@@ -68,21 +68,22 @@ class KmerGraph(object):
     record_offsets: NDArray[np.uintp]
     graph: nx.Graph
     subgraphs: tuple[frozenset[np.uint64], ...] | None
-    _filtered_flag: bool # True if `self.filter()` is called
+    _is_filtered: bool # True if `self.filter()` is called
 
-    def __init__(self, assemblies: Assemblies, kmerlen: int, windowsize: int, n_cpu: int) -> None:
-        """
-        1. Generate minimizer sketches and weighted edges.
-        2. Generate k-mer nodes and calculate node penalty scores.
+    def __init__(self, assemblies: Assemblies, kmerlen: int, windowsize: int, n_cpu: int, low_memory: bool) -> None:
+        """Build the k-mer graph and calculate node penalty scores.
 
         Args:
             assemblies (Assemblies): See `Assemblies` in `assemblies.py`.
             kmerlen (int): See `Config` in `config.py`.
             windowsize (int): See `Config` in `config.py`.
             n_cpu (int): See `Config` in `config.py`.
+            low_memory (bool): See `Config` in `config.py`.
         """
         n_assemblies = len(assemblies)
         logger.info(f'Building minimizer graph from {n_assemblies} assemblies...')
+        if low_memory:
+            logger.warning(' - Low-memory mode is enabled; graph construction may take longer.')
         tik = time()
 
         kmers, nodes, edges, record_offsets, record_ids = build(
@@ -91,6 +92,7 @@ class KmerGraph(object):
             windowsize,
             assemblies.is_target,
             n_cpu=n_cpu,
+            low_memory=low_memory
         )
         # calculate penalty for each node
         n_tar = sum(assemblies.is_target)
@@ -113,7 +115,7 @@ class KmerGraph(object):
         self.record_offsets = record_offsets
         self.graph = None # create graph after filtering nodes and edges
         self.subgraphs = None
-        self._filtered_flag = False
+        self._is_filtered = False
 
     def filter(
         self, penalty_th: float, edge_weight_th: float, min_nodes: int, max_nodes: int | None, rng: Random
@@ -133,9 +135,9 @@ class KmerGraph(object):
         kmers = self.kmers
         nodes = self.nodes
         edges = self.edges
-        filtered_flag = self._filtered_flag
+        is_filtered = self._is_filtered
 
-        if filtered_flag:
+        if is_filtered:
             logger.error(f'K-mers are already filtered, cannot filter again.')
             return None
 
@@ -164,7 +166,7 @@ class KmerGraph(object):
         self.edges = edges
         self.graph = graph
         self.subgraphs = subgraphs
-        self._filtered_flag = True
+        self._is_filtered = True
 
     @staticmethod
     def __filter_graph(nodes: NDArray, edges: NDArray, edge_weight_th: float) -> tuple[NDArray, NDArray, nx.Graph]:
@@ -258,13 +260,14 @@ def get_kmers(
     max_nodes_cap = config.max_nodes_cap
     sketchsize = config.sketchsize
     n_cpu = config.n_cpu
+    low_memory = config.low_memory
 
     working_dir = state.working_dir
     rng = state.rng
     n_tar = state.n_tar
     n_neg = state.n_neg
 
-    kmers = KmerGraph(assemblies, kmerlen, windowsize, n_cpu)
+    kmers = KmerGraph(assemblies, kmerlen, windowsize, n_cpu, low_memory)
 
     if no_filter:
         return kmers, None
