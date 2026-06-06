@@ -5,6 +5,7 @@
 #include <exception>
 #include <limits>
 #include <stdexcept>
+#include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -48,6 +49,13 @@ struct EdgeState {
     std::size_t last_seen_assembly = std::numeric_limits<std::size_t>::max();
 };
 
+/**
+ * @brief Builds the thread-local portion of a minimizer graph.
+ *
+ * In standard mode, materializes thread-local `kmers` (grouped by hash).
+ * In low-memory mode, skips k-mer materialization and records only the node metadata
+ * needed for second-pass k-mer recomputation.
+ */
 ThreadGraph build_worker(
     const std::vector<std::string>& assembly_paths,
     std::size_t kmerlen,
@@ -55,7 +63,8 @@ ThreadGraph build_worker(
     const std::vector<bool>& is_targets,
     std::size_t start_assembly,
     std::size_t end_assembly,
-    std::size_t thread_id
+    std::size_t thread_id,
+    bool low_memory
 ) {
     // Estimate total minimizer count in all assemblies
     const auto n_kmers_est = seqwin::est_kmer_number(
@@ -66,13 +75,16 @@ ThreadGraph build_worker(
         windowsize
     );
     std::vector<RawKmer> raw_kmers;
-    raw_kmers.reserve(n_kmers_est);
+    if (!low_memory) {
+        raw_kmers.reserve(n_kmers_est);
+    }
 
     ThreadGraph graph;
     graph.record_offsets.reserve(end_assembly - start_assembly + 1);
     graph.record_offsets.push_back(0);
     graph.ids_by_assembly.reserve(end_assembly - start_assembly);
     graph.start_assembly = start_assembly;
+    graph.end_assembly = end_assembly;
 
     // Reserving for unordered_map will actually allocate physical memory
     std::unordered_map<std::uint64_t, NodeState> node_map;
@@ -102,13 +114,15 @@ ThreadGraph build_worker(
             const auto mins = btllib::minimize_sequence(record.sequence, kmerlen, windowsize);
 
             for (const auto& m : mins) {
-                raw_kmers.push_back(RawKmer{
-                    m.out_hash,
-                    Kmer{
-                        static_cast<std::uint32_t>(m.pos),
-                        static_cast<std::uint32_t>(record_idx)
-                    }
-                });
+                if (!low_memory) {
+                    raw_kmers.push_back(RawKmer{
+                        m.out_hash,
+                        Kmer{
+                            static_cast<std::uint32_t>(m.pos),
+                            static_cast<std::uint32_t>(record_idx)
+                        }
+                    });
+                }
 
                 // Add this minimizer to an existing node, or create a new node
                 auto [node_it, node_inserted] = node_map.try_emplace(m.out_hash);
@@ -156,21 +170,24 @@ ThreadGraph build_worker(
     }
     std::unordered_map<EdgeKey, EdgeState, EdgeKeyHash>().swap(edge_map);
 
-    // Build ThreadGraph.kmers (grouped by hash)
-    graph.kmers = NoInitArray<Kmer>(graph.n_kmers);
-    std::size_t cursor = 0;
-    for (auto& [hash, state] : node_map) {
-        (void)hash;
-        state.start = cursor;
-        state.cursor = cursor;
-        cursor += state.count;
+    if (!low_memory) {
+        // Build ThreadGraph.kmers (grouped by hash)
+        graph.kmers = NoInitArray<Kmer>(graph.n_kmers);
+        std::size_t cursor = 0;
+        for (auto& [hash, state] : node_map) {
+            (void)hash;
+            state.start = cursor;
+            state.cursor = cursor;
+            cursor += state.count;
+        }
+        for (const auto& rk : raw_kmers) {
+            auto node_it = node_map.find(rk.hash);
+            graph.kmers[node_it->second.cursor++] = rk.kmer;
+        }
+        std::vector<RawKmer>().swap(raw_kmers);
     }
-    for (const auto& rk : raw_kmers) {
-        auto node_it = node_map.find(rk.hash);
-        graph.kmers[node_it->second.cursor++] = rk.kmer;
-    }
-    std::vector<RawKmer>().swap(raw_kmers);
 
+    graph.n_nodes = node_map.size();
     graph.nodes = NoInitArray<ThreadNode>(node_map.size());
     std::size_t node_i = 0;
     for (const auto& [hash, state] : node_map) {
@@ -187,6 +204,73 @@ ThreadGraph build_worker(
     return graph;
 }
 
+/**
+ * @brief Recomputes final `kmers` for a merged graph in low-memory mode.
+ *
+ * Replays each worker's assemblies, recomputes minimizers, and writes them directly
+ * into their final `Graph.kmers` positions using the per-thread k-mer maps.
+ */
+NoInitArray<Kmer> recompute_kmers(
+    const std::vector<std::string>& assembly_paths,
+    std::size_t kmerlen,
+    std::size_t windowsize,
+    const std::vector<ThreadGraph>& graphs,
+    const std::vector<std::size_t>& record_offsets,
+    KmerMaps& kmer_maps,
+    ThreadPool& pool
+) {
+    std::size_t total_kmers = 0;
+    for (const auto& graph : graphs) {
+        total_kmers += graph.n_kmers;
+    }
+    NoInitArray<Kmer> kmers(total_kmers);
+
+    pool.parallel_for(graphs.size(), [&](std::size_t start, std::size_t end, std::size_t) {
+        for (std::size_t thread_id = start; thread_id < end; ++thread_id) {
+            const auto& graph = graphs[thread_id];
+            auto& hash_to_cursor = kmer_maps[thread_id];
+
+            for (std::size_t assembly_i = graph.start_assembly;
+                 assembly_i < graph.end_assembly;
+                 ++assembly_i) {
+                auto records = seqwin::read_fasta(assembly_paths[assembly_i]);
+
+                for (std::size_t record_i = 0; record_i < records.size(); ++record_i) {
+                    const auto record_idx = record_offsets[assembly_i] + record_i;
+                    auto& record = records[record_i];
+                    if (record.sequence.size() > std::numeric_limits<std::uint32_t>::max()) {
+                        throw std::runtime_error(
+                            "Sequence length exceeds uint32 range for record " +
+                            record.id + " in assembly " + assembly_paths[assembly_i]);
+                    }
+
+                    const auto mins = btllib::minimize_sequence(
+                        record.sequence,
+                        kmerlen,
+                        windowsize
+                    );
+
+                    for (const auto& m : mins) {
+                        auto cursor_it = hash_to_cursor.find(m.out_hash);
+                        if (cursor_it == hash_to_cursor.end()) {
+                            throw std::runtime_error(
+                                "Low-memory minimizer recomputation found an unknown minimizer hash"
+                            );
+                        }
+                        auto& cursor = cursor_it->second;
+                        kmers[cursor++] = Kmer{
+                            static_cast<std::uint32_t>(m.pos),
+                            static_cast<std::uint32_t>(record_idx)
+                        };
+                    }
+                }
+            }
+        }
+    });
+
+    return kmers;
+}
+
 } // namespace
 
 Graph build(
@@ -194,7 +278,8 @@ Graph build(
     std::size_t kmerlen,
     std::size_t windowsize,
     const std::vector<bool>& is_targets,
-    std::size_t n_cpu
+    std::size_t n_cpu,
+    bool low_memory
 ) {
     if (assembly_paths.size() != is_targets.size()) {
         throw std::runtime_error("assembly_paths and is_targets must have the same length");
@@ -216,22 +301,41 @@ Graph build(
     const std::size_t rem = n_assemblies % n_workers;
 
     pool.parallel_for(n_workers, [&](std::size_t start, std::size_t end, std::size_t) {
-        for (std::size_t i = start; i < end; ++i) {
-            std::size_t chunk_start = i * base + std::min(i, rem);
-            std::size_t chunk_end = chunk_start + base + (i < rem ? 1 : 0);
-            graphs[i] = build_worker(
+        for (std::size_t thread_id = start; thread_id < end; ++thread_id) {
+            std::size_t start_assembly = thread_id * base + std::min(thread_id, rem);
+            std::size_t end_assembly = start_assembly + base + (thread_id < rem ? 1 : 0);
+            graphs[thread_id] = build_worker(
                 assembly_paths,
                 kmerlen,
                 windowsize,
                 is_targets,
-                chunk_start,
-                chunk_end,
-                i
+                start_assembly,
+                end_assembly,
+                thread_id,
+                low_memory
             );
         }
     });
 
-    return merge_thread_graphs(graphs, n_assemblies, pool);
+    auto [graph, kmer_maps] = merge_thread_graphs(
+        graphs,
+        n_assemblies,
+        pool,
+        low_memory
+    );
+    if (low_memory) {
+        log_python(" - Recomputing minimizers for low-memory mode...");
+        graph.kmers = recompute_kmers(
+            assembly_paths,
+            kmerlen,
+            windowsize,
+            graphs,
+            graph.record_offsets,
+            kmer_maps,
+            pool
+        );
+    }
+    return std::move(graph);
 }
 
 } // namespace seqwin

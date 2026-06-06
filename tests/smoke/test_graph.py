@@ -1,10 +1,8 @@
 from pathlib import Path
 
-import networkx as nx
 import numpy as np
 
 from seqwin.graph import KMER_DTYPE, NODE_DTYPE, EDGE_DTYPE, build, _filter_kmers
-from seqwin.markers import _create_ck
 
 
 def _sorted_edges(edges: np.ndarray) -> np.ndarray:
@@ -12,6 +10,17 @@ def _sorted_edges(edges: np.ndarray) -> np.ndarray:
     idx = np.lexsort((edge_values[:, 2], edge_values[:, 1], edge_values[:, 0]))
     return edge_values[idx]
 
+
+def _assert_graph_outputs_equal(standard, low_memory) -> None:
+    kmers_std, nodes_std, edges_std, offsets_std, ids_std = standard
+    kmers_lm, nodes_lm, edges_lm, offsets_lm, ids_lm = low_memory
+
+    assert np.array_equal(kmers_std, kmers_lm)
+    assert np.array_equal(nodes_std, nodes_lm)
+    assert np.array_equal(_sorted_edges(edges_std), _sorted_edges(edges_lm))
+    assert np.array_equal(offsets_std, offsets_lm)
+    assert ids_std == ids_lm
+    _assert_node_ranges(kmers_lm, nodes_lm)
 
 
 def _assert_node_ranges(kmers: np.ndarray, nodes: np.ndarray) -> None:
@@ -166,3 +175,33 @@ def test_filter_kmers() -> None:
     ], dtype=KMER_DTYPE)
     assert np.array_equal(kmers_new, expected_kmers)
     _assert_node_ranges(kmers_new, nodes_new)
+
+
+def test_low_memory_build_matches_standard(targets_dir, non_targets_dir) -> None:
+    assembly_paths = [
+        targets_dir / 'target-1.fasta',
+        targets_dir / 'target-2.fasta',
+        non_targets_dir / 'non-target-1.fasta',
+        non_targets_dir / 'non-target-2.fasta',
+    ]
+    is_targets = [True, True, False, False]
+
+    for n_cpu in (1, 2, 99):
+        standard = build(
+            assembly_paths,
+            kmerlen=7,
+            windowsize=10,
+            is_targets=is_targets,
+            n_cpu=n_cpu,
+            low_memory=False,
+        )
+        low_memory = build(
+            assembly_paths,
+            kmerlen=7,
+            windowsize=10,
+            is_targets=is_targets,
+            n_cpu=n_cpu,
+            low_memory=True,
+        )
+
+        _assert_graph_outputs_equal(standard, low_memory)

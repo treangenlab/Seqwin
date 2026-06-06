@@ -50,7 +50,8 @@ PYBIND11_MODULE(_core, m) {
            std::size_t kmerlen,
            std::size_t windowsize,
            const std::vector<bool>& is_targets,
-           std::size_t n_cpu
+           std::size_t n_cpu,
+           bool low_memory
         ) {
             seqwin::Graph graph;
             {
@@ -60,7 +61,8 @@ PYBIND11_MODULE(_core, m) {
                     kmerlen,
                     windowsize,
                     is_targets,
-                    n_cpu
+                    n_cpu,
+                    low_memory
                 );
             }
 
@@ -84,7 +86,8 @@ PYBIND11_MODULE(_core, m) {
         py::arg("kmerlen"),
         py::arg("windowsize"),
         py::arg("is_targets"),
-        py::arg("n_cpu") = 1
+        py::arg("n_cpu") = 1,
+        py::arg("low_memory") = false
     );
 
     m.def("_filter_kmers_native",
