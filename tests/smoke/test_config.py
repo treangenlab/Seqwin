@@ -73,6 +73,7 @@ def test_json_serialization_contains_important_fields(
         run_mash=False,
         run_blast=False,
         n_cpu=2,
+        low_memory=True,
     )
 
     json_text = config.model_dump_json()
@@ -84,6 +85,7 @@ def test_json_serialization_contains_important_fields(
     assert '"run_mash":false' in json_text
     assert '"run_blast":false' in json_text
     assert '"n_cpu":2' in json_text
+    assert '"low_memory":true' in json_text
 
 
 def test_api_key_secret_and_serialization(tmp_path: Path, targets_txt: Path, non_targets_txt: Path) -> None:

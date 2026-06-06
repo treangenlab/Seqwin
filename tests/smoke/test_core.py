@@ -40,6 +40,7 @@ def test_api_run_and_overwrite_behavior(
         min_len=8,
         max_len=120,
         n_cpu=1,
+        low_memory=True,
     )
 
     seq = run(Config(**run_config))
@@ -48,6 +49,7 @@ def test_api_run_and_overwrite_behavior(
     assert (out_dir / 'assemblies.csv').exists()
     assert (out_dir / 'signatures.fasta').exists()
     assert seq.config.run_mash is False
+    assert seq.config.low_memory is True
 
     with pytest.raises(FileExistsError):
         run(Config(**run_config))
