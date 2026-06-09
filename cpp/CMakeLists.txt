@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.18)
-project(minimizer_btllib LANGUAGES CXX)
+project(seqwin LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -8,12 +8,18 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 find_package(Python REQUIRED COMPONENTS Interpreter Development.Module)
 
-# Fetch and build zlib from source
+# Fetch and build zlib from source for internal use only.
+# Seqwin links zlib statically into the Python extension, so users do not need
+# a separate zlib installation at build or runtime.
 include(FetchContent)
+set(ZLIB_BUILD_SHARED OFF CACHE BOOL "Build zlib shared library" FORCE)
+set(ZLIB_BUILD_STATIC ON CACHE BOOL "Build zlib static library" FORCE)
+set(ZLIB_BUILD_TESTING OFF CACHE BOOL "Build zlib tests" FORCE)
+set(ZLIB_INSTALL OFF CACHE BOOL "Install zlib upstream artifacts" FORCE)
 FetchContent_Declare(
     zlib
-    GIT_REPOSITORY https://github.com/madler/zlib.git
-    GIT_TAG        v1.3.2
+    URL https://zlib.net/fossils/zlib-1.3.2.tar.gz
+    URL_HASH SHA256=bb329a0a2cd0274d05519d61c667c062e06990d72e125ee2dfa8de64f0119d16
 )
 FetchContent_MakeAvailable(zlib)
 
@@ -37,7 +43,15 @@ Python_add_library(_core MODULE WITH_SOABI
 )
 
 target_include_directories(_core PRIVATE include vendor "${PYBIND11_INCLUDE}")
-target_link_libraries(_core PRIVATE Python::Module zlibstatic)
+target_link_libraries(_core PRIVATE Python::Module ZLIB::ZLIBSTATIC)
+
+# GCC 8's libstdc++ keeps std::filesystem symbols in a separate library.
+# Without this, the extension can compile but fail to import with unresolved
+# std::filesystem symbols such as std::filesystem::file_size.
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 9)
+  target_link_libraries(_core PRIVATE stdc++fs)
+endif()
+
 target_compile_definitions(_core PRIVATE PYBIND11_DETAILED_ERROR_MESSAGES)
 
 set_target_properties(_core PROPERTIES PREFIX "")
