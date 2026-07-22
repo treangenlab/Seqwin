@@ -11,7 +11,7 @@
 #include <utility>
 #include <vector>
 
-namespace seqwin {
+namespace seqwin::internal {
 
 /**
  * @brief Simple fixed-size worker pool for parallel range processing.
@@ -155,4 +155,4 @@ private:
     bool stopping_ = false;
 };
 
-} // namespace seqwin
+} // namespace seqwin::internal

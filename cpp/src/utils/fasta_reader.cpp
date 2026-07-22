@@ -1,9 +1,8 @@
-#include "seqwin/fasta_reader.hpp"
+#include "utils/fasta_reader.hpp"
 
-#include <array>
 #include <algorithm>
+#include <array>
 #include <cctype>
-#include <filesystem>
 #include <fstream>
 #include <memory>
 #include <stdexcept>
@@ -13,11 +12,9 @@
 
 #include <zlib.h>
 
-namespace seqwin {
+namespace seqwin::internal {
 namespace {
 
-constexpr std::size_t plain_fasta_seq_len_per_byte = 1;
-constexpr std::size_t gz_fasta_seq_len_per_byte = 4;
 constexpr std::size_t gz_read_buf_size = 1U << 16;
 
 bool ends_with(std::string_view text, std::string_view suffix)
@@ -215,24 +212,4 @@ std::vector<FastaRecord> read_fasta(const std::string& assembly_path)
     return read_plain_fasta(assembly_path);
 }
 
-std::size_t est_kmer_number(
-    const std::vector<std::string>& assembly_paths,
-    std::size_t windowsize
-) {
-    // Reserve-only heuristic, not correctness-critical.
-    std::size_t est_total_seq_len = 0;
-    for (const auto& assembly_path : assembly_paths) {
-        const std::size_t seq_len_per_byte = ends_with(assembly_path, ".gz")
-            ? gz_fasta_seq_len_per_byte
-            : plain_fasta_seq_len_per_byte;
-        std::error_code ec;
-        const auto file_bytes = std::filesystem::file_size(assembly_path, ec);
-        if (ec) {
-            continue;
-        }
-        est_total_seq_len += static_cast<std::size_t>(file_bytes * seq_len_per_byte);
-    }
-    return (2 * est_total_seq_len) / (windowsize + 1);
-}
-
-} // namespace seqwin
+} // namespace seqwin::internal

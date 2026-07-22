@@ -1,24 +1,60 @@
-#include "seqwin/graph.hpp"
+#include "seqwin/build.hpp"
 
 #include <algorithm>
 #include <cstdint>
-#include <exception>
+#include <filesystem>
 #include <limits>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
 #include "btllib/minimizer.hpp"
-#include "seqwin/fasta_reader.hpp"
-#include "seqwin/helpers.hpp"
-#include "seqwin/thread_pool.hpp"
+
+#include "seqwin/build_internals.hpp"
+#include "utils/fasta_reader.hpp"
+#include "utils/logging.hpp"
+#include "utils/thread_pool.hpp"
 
 namespace seqwin {
+namespace internal {
 namespace {
 
 constexpr std::size_t map_reserve_divisor = 100;
+
+constexpr std::size_t plain_fasta_seq_len_per_byte = 1;
+constexpr std::size_t gz_fasta_seq_len_per_byte = 4;
+
+bool ends_with(std::string_view text, std::string_view suffix)
+{
+    return text.size() >= suffix.size() &&
+           text.substr(text.size() - suffix.size()) == suffix;
+}
+
+std::size_t estimate_minimizer_count(
+    const std::vector<std::string>& assembly_paths,
+    std::size_t start_assembly,
+    std::size_t end_assembly,
+    std::size_t windowsize
+) {
+    // Reserve-only heuristic, not correctness-critical
+    std::size_t est_total_seq_len = 0;
+    for (std::size_t assembly_i = start_assembly; assembly_i < end_assembly; ++assembly_i) {
+        const auto& assembly_path = assembly_paths[assembly_i];
+        const std::size_t seq_len_per_byte = ends_with(assembly_path, ".gz")
+            ? gz_fasta_seq_len_per_byte
+            : plain_fasta_seq_len_per_byte;
+        std::error_code ec;
+        const auto file_bytes = std::filesystem::file_size(assembly_path, ec);
+        if (ec) {
+            continue;
+        }
+        est_total_seq_len += static_cast<std::size_t>(file_bytes * seq_len_per_byte);
+    }
+    return (2 * est_total_seq_len) / (windowsize + 1);
+}
 
 struct RawKmer {
     std::uint64_t hash;
@@ -27,7 +63,6 @@ struct RawKmer {
 
 struct NodeState {
     std::size_t count = 0;
-    std::size_t start = 0;
     std::size_t cursor = 0;
     std::uint32_t n_tar = 0;
     std::uint32_t n_neg = 0;
@@ -67,16 +102,15 @@ ThreadGraph build_worker(
     bool low_memory
 ) {
     // Estimate total minimizer count in all assemblies
-    const auto n_kmers_est = seqwin::est_kmer_number(
-        std::vector<std::string>(
-            assembly_paths.begin() + static_cast<std::ptrdiff_t>(start_assembly),
-            assembly_paths.begin() + static_cast<std::ptrdiff_t>(end_assembly)
-        ),
+    const auto n_minimizers_est = estimate_minimizer_count(
+        assembly_paths,
+        start_assembly,
+        end_assembly,
         windowsize
     );
     std::vector<RawKmer> raw_kmers;
     if (!low_memory) {
-        raw_kmers.reserve(n_kmers_est);
+        raw_kmers.reserve(n_minimizers_est);
     }
 
     ThreadGraph graph;
@@ -89,14 +123,14 @@ ThreadGraph build_worker(
     // Reserving for unordered_map will actually allocate physical memory
     std::unordered_map<std::uint64_t, NodeState> node_map;
     std::unordered_map<EdgeKey, EdgeState, EdgeKeyHash> edge_map;
-    const auto n_map_entries_est = n_kmers_est / map_reserve_divisor;
+    const auto n_map_entries_est = n_minimizers_est / map_reserve_divisor;
     node_map.reserve(n_map_entries_est);
     edge_map.reserve(n_map_entries_est);
 
     for (std::size_t assembly_i = start_assembly; assembly_i < end_assembly; ++assembly_i) {
         const bool is_target = is_targets[assembly_i];
 
-        auto records = seqwin::read_fasta(assembly_paths[assembly_i]);
+        auto records = read_fasta(assembly_paths[assembly_i]);
         std::vector<std::string> record_ids;
         record_ids.reserve(records.size());
 
@@ -176,7 +210,6 @@ ThreadGraph build_worker(
         std::size_t cursor = 0;
         for (auto& [hash, state] : node_map) {
             (void)hash;
-            state.start = cursor;
             state.cursor = cursor;
             cursor += state.count;
         }
@@ -191,9 +224,11 @@ ThreadGraph build_worker(
     graph.nodes = NoInitArray<ThreadNode>(node_map.size());
     std::size_t node_i = 0;
     for (const auto& [hash, state] : node_map) {
+        const std::size_t start = low_memory ? 0 : state.cursor - state.count;
+
         graph.nodes[node_i++] = ThreadNode{
             hash,
-            state.start,
+            start,
             state.count,
             state.n_tar,
             state.n_neg,
@@ -233,7 +268,7 @@ NoInitArray<Kmer> recompute_kmers(
             for (std::size_t assembly_i = graph.start_assembly;
                  assembly_i < graph.end_assembly;
                  ++assembly_i) {
-                auto records = seqwin::read_fasta(assembly_paths[assembly_i]);
+                auto records = read_fasta(assembly_paths[assembly_i]);
 
                 for (std::size_t record_i = 0; record_i < records.size(); ++record_i) {
                     const auto record_idx = record_offsets[assembly_i] + record_i;
@@ -272,6 +307,7 @@ NoInitArray<Kmer> recompute_kmers(
 }
 
 } // namespace
+} // namespace internal
 
 Graph build(
     const std::vector<std::string>& assembly_paths,
@@ -294,8 +330,8 @@ Graph build(
         n_workers = std::min(n_workers, n_assemblies);
     }
 
-    ThreadPool pool(n_workers); // Avoid spawning threads every time
-    std::vector<ThreadGraph> graphs(n_workers);
+    internal::ThreadPool pool(n_workers); // Avoid spawning threads every time
+    std::vector<internal::ThreadGraph> graphs(n_workers);
 
     const std::size_t base = n_assemblies / n_workers;
     const std::size_t rem = n_assemblies % n_workers;
@@ -304,7 +340,7 @@ Graph build(
         for (std::size_t thread_id = start; thread_id < end; ++thread_id) {
             std::size_t start_assembly = thread_id * base + std::min(thread_id, rem);
             std::size_t end_assembly = start_assembly + base + (thread_id < rem ? 1 : 0);
-            graphs[thread_id] = build_worker(
+            graphs[thread_id] = internal::build_worker(
                 assembly_paths,
                 kmerlen,
                 windowsize,
@@ -317,15 +353,15 @@ Graph build(
         }
     });
 
-    auto [graph, kmer_maps] = merge_thread_graphs(
+    auto [graph, kmer_maps] = internal::merge_thread_graphs(
         graphs,
         n_assemblies,
         pool,
         low_memory
     );
     if (low_memory) {
-        log_python(" - Recomputing minimizers for low-memory mode...");
-        graph.kmers = recompute_kmers(
+        internal::log_python(" - Recomputing minimizers for low-memory mode...");
+        graph.kmers = internal::recompute_kmers(
             assembly_paths,
             kmerlen,
             windowsize,
