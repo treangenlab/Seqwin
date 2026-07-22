@@ -44,13 +44,13 @@ Python_add_library(_core MODULE WITH_SOABI
     src/seqwin/build.cpp
     src/seqwin/build_internals.cpp
     src/seqwin/filter.cpp
-    src/seqwin/utils.cpp
+    src/utils/fasta_reader.cpp
+    src/utils/logging.cpp
     vendor/btllib/minimizer.cpp
-    src/seqwin/fasta_reader.cpp
     vendor/btllib/status.cpp
 )
 
-target_include_directories(_core PRIVATE include vendor "${PYBIND11_INCLUDE}")
+target_include_directories(_core PRIVATE include src vendor "${PYBIND11_INCLUDE}")
 target_link_libraries(_core PRIVATE Python::Module ZLIB::ZLIBSTATIC)
 
 # GCC 8's libstdc++ keeps std::filesystem symbols in a separate library.

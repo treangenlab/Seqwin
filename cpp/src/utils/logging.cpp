@@ -1,10 +1,10 @@
-#include "seqwin/utils.hpp"
+#include "utils/logging.hpp"
+
 #include <pybind11/pybind11.h>
 
 namespace py = pybind11;
 
-namespace seqwin {
-namespace internal {
+namespace seqwin::internal {
 
 void log_python(const std::string& message, const std::string& level)
 {
@@ -28,5 +28,4 @@ void log_python(const std::string& message, const std::string& level)
     }
 }
 
-} // namespace internal
-} // namespace seqwin
+} // namespace seqwin::internal

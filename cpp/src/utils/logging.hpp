@@ -2,8 +2,7 @@
 
 #include <string>
 
-namespace seqwin {
-namespace internal {
+namespace seqwin::internal {
 
 /**
  * @brief Emit a message through Python's logging module.
@@ -16,5 +15,4 @@ void log_python(
     const std::string& level = "info"
 );
 
-} // namespace internal
-} // namespace seqwin
+} // namespace seqwin::internal

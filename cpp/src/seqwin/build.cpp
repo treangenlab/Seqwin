@@ -12,17 +12,15 @@
 #include <vector>
 
 #include "btllib/minimizer.hpp"
-#include "seqwin/fasta_reader.hpp"
+
 #include "seqwin/build_internals.hpp"
-#include "seqwin/utils.hpp"
-#include "seqwin/thread_pool.hpp"
+#include "utils/fasta_reader.hpp"
+#include "utils/logging.hpp"
+#include "utils/thread_pool.hpp"
 
 namespace seqwin {
+namespace internal {
 namespace {
-
-using internal::KmerMaps;
-using internal::ThreadGraph;
-using internal::ThreadNode;
 
 constexpr std::size_t map_reserve_divisor = 100;
 
@@ -133,7 +131,7 @@ ThreadGraph build_worker(
     for (std::size_t assembly_i = start_assembly; assembly_i < end_assembly; ++assembly_i) {
         const bool is_target = is_targets[assembly_i];
 
-        auto records = seqwin::read_fasta(assembly_paths[assembly_i]);
+        auto records = read_fasta(assembly_paths[assembly_i]);
         std::vector<std::string> record_ids;
         record_ids.reserve(records.size());
 
@@ -270,7 +268,7 @@ NoInitArray<Kmer> recompute_kmers(
             for (std::size_t assembly_i = graph.start_assembly;
                  assembly_i < graph.end_assembly;
                  ++assembly_i) {
-                auto records = seqwin::read_fasta(assembly_paths[assembly_i]);
+                auto records = read_fasta(assembly_paths[assembly_i]);
 
                 for (std::size_t record_i = 0; record_i < records.size(); ++record_i) {
                     const auto record_idx = record_offsets[assembly_i] + record_i;
@@ -309,6 +307,7 @@ NoInitArray<Kmer> recompute_kmers(
 }
 
 } // namespace
+} // namespace internal
 
 Graph build(
     const std::vector<std::string>& assembly_paths,
@@ -331,8 +330,8 @@ Graph build(
         n_workers = std::min(n_workers, n_assemblies);
     }
 
-    ThreadPool pool(n_workers); // Avoid spawning threads every time
-    std::vector<ThreadGraph> graphs(n_workers);
+    internal::ThreadPool pool(n_workers); // Avoid spawning threads every time
+    std::vector<internal::ThreadGraph> graphs(n_workers);
 
     const std::size_t base = n_assemblies / n_workers;
     const std::size_t rem = n_assemblies % n_workers;
@@ -341,7 +340,7 @@ Graph build(
         for (std::size_t thread_id = start; thread_id < end; ++thread_id) {
             std::size_t start_assembly = thread_id * base + std::min(thread_id, rem);
             std::size_t end_assembly = start_assembly + base + (thread_id < rem ? 1 : 0);
-            graphs[thread_id] = build_worker(
+            graphs[thread_id] = internal::build_worker(
                 assembly_paths,
                 kmerlen,
                 windowsize,
@@ -362,7 +361,7 @@ Graph build(
     );
     if (low_memory) {
         internal::log_python(" - Recomputing minimizers for low-memory mode...");
-        graph.kmers = recompute_kmers(
+        graph.kmers = internal::recompute_kmers(
             assembly_paths,
             kmerlen,
             windowsize,

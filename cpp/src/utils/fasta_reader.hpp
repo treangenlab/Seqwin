@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-namespace seqwin {
+namespace seqwin::internal {
 
 struct FastaRecord {
     std::string id;
@@ -20,4 +20,4 @@ struct FastaRecord {
  */
 std::vector<FastaRecord> read_fasta(const std::string& assembly_path);
 
-} // namespace seqwin
+} // namespace seqwin::internal

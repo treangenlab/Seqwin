@@ -1,6 +1,4 @@
 #include "seqwin/build_internals.hpp"
-#include "seqwin/utils.hpp"
-#include "seqwin/thread_pool.hpp"
 
 #include <algorithm>
 #include <cstddef>
@@ -10,9 +8,10 @@
 #include <utility>
 #include <vector>
 
+#include "utils/logging.hpp"
+#include "utils/thread_pool.hpp"
 
-namespace seqwin {
-namespace internal {
+namespace seqwin::internal {
 namespace {
 
 /**
@@ -400,5 +399,4 @@ std::pair<Graph, KmerMaps> merge_thread_graphs(
     };
 }
 
-} // namespace internal
-} // namespace seqwin
+} // namespace seqwin::internal

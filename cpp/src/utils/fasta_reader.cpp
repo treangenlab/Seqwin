@@ -1,7 +1,7 @@
-#include "seqwin/fasta_reader.hpp"
+#include "utils/fasta_reader.hpp"
 
-#include <array>
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <fstream>
 #include <memory>
@@ -12,7 +12,7 @@
 
 #include <zlib.h>
 
-namespace seqwin {
+namespace seqwin::internal {
 namespace {
 
 constexpr std::size_t gz_read_buf_size = 1U << 16;
@@ -212,4 +212,4 @@ std::vector<FastaRecord> read_fasta(const std::string& assembly_path)
     return read_plain_fasta(assembly_path);
 }
 
-} // namespace seqwin
+} // namespace seqwin::internal

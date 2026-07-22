@@ -9,11 +9,9 @@
 
 #include "seqwin/graph.hpp"
 
-namespace seqwin {
+namespace seqwin::internal {
 
 class ThreadPool;
-
-namespace internal {
 
 /**
  * @brief Thread-local minimizer graph node.
@@ -83,6 +81,4 @@ std::pair<Graph, KmerMaps> merge_thread_graphs(
     bool low_memory
 );
 
-
-} // namespace internal
-} // namespace seqwin
+} // namespace seqwin::internal
