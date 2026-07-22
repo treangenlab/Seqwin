@@ -63,7 +63,6 @@ struct RawKmer {
 
 struct NodeState {
     std::size_t count = 0;
-    std::size_t start = 0;
     std::size_t cursor = 0;
     std::uint32_t n_tar = 0;
     std::uint32_t n_neg = 0;
@@ -211,7 +210,6 @@ ThreadGraph build_worker(
         std::size_t cursor = 0;
         for (auto& [hash, state] : node_map) {
             (void)hash;
-            state.start = cursor;
             state.cursor = cursor;
             cursor += state.count;
         }
@@ -226,9 +224,11 @@ ThreadGraph build_worker(
     graph.nodes = NoInitArray<ThreadNode>(node_map.size());
     std::size_t node_i = 0;
     for (const auto& [hash, state] : node_map) {
+        const std::size_t start = low_memory ? 0 : state.cursor - state.count;
+
         graph.nodes[node_i++] = ThreadNode{
             hash,
-            state.start,
+            start,
             state.count,
             state.n_tar,
             state.n_neg,
