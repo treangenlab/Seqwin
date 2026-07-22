@@ -13,6 +13,8 @@ namespace seqwin {
 
 class ThreadPool;
 
+namespace internal {
+
 /**
  * @brief Thread-local minimizer graph node.
  *
@@ -66,17 +68,6 @@ struct ThreadGraph {
 using KmerMaps = std::vector<std::unordered_map<std::uint64_t, std::size_t>>;
 
 /**
- * @brief Emit a message through Python's logging module.
- *
- * @param message Message to log.
- * @param level Logging level: `debug`, `info`, `warning`, `error`, or `critical`.
- */
-void log_python(
-    const std::string& message,
-    const std::string& level = "info"
-);
-
-/**
  * @brief Merge thread-local minimizer graphs into a single graph.
  *
  * @param graphs Thread-local graphs produced during parallel graph construction.
@@ -92,11 +83,6 @@ std::pair<Graph, KmerMaps> merge_thread_graphs(
     bool low_memory
 );
 
-Graph filter_kmers(
-    const Kmer* kmers,
-    const Node* nodes,
-    std::size_t n_nodes,
-    std::vector<std::uint64_t> used_hashes
-);
 
+} // namespace internal
 } // namespace seqwin

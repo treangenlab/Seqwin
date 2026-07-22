@@ -41,8 +41,10 @@ endif()
 
 Python_add_library(_core MODULE WITH_SOABI
     src/bindings/python_bindings.cpp
-    src/seqwin/graph.cpp
-    src/seqwin/helpers.cpp
+    src/seqwin/build.cpp
+    src/seqwin/build_internals.cpp
+    src/seqwin/filter.cpp
+    src/seqwin/utils.cpp
     vendor/btllib/minimizer.cpp
     src/seqwin/fasta_reader.cpp
     vendor/btllib/status.cpp

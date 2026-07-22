@@ -20,16 +20,4 @@ struct FastaRecord {
  */
 std::vector<FastaRecord> read_fasta(const std::string& assembly_path);
 
-/**
- * @brief Estimate the number of minimizers based on the size of assembly files.
- *
- * @param assembly_paths Paths to assembly FASTA files (plain or gzipped).
- * @param windowsize Minimizer window size used for the estimate.
- * @return Estimated total number of minimizers for all assembly files.
- */
-std::size_t est_kmer_number(
-    const std::vector<std::string>& assembly_paths,
-    std::size_t windowsize
-);
-
 } // namespace seqwin
