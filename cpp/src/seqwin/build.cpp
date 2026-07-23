@@ -72,8 +72,8 @@ struct EdgeKeyHash {
 };
 
 struct EdgeState {
-    std::size_t weight = 0;
-    std::size_t last_seen_assembly = std::numeric_limits<std::size_t>::max();
+    std::uint32_t weight = 0;
+    std::uint32_t last_seen_assembly = std::numeric_limits<std::uint32_t>::max();
 };
 
 /**
@@ -119,6 +119,7 @@ ThreadGraph build_worker(
     edge_map.reserve(n_map_entries_est);
 
     for (std::size_t assembly_i = start_assembly; assembly_i < end_assembly; ++assembly_i) {
+        const auto assembly_i_u32 = static_cast<std::uint32_t>(assembly_i);
         auto records = read_fasta(assembly_paths[assembly_i]);
         std::vector<std::string> record_ids;
         record_ids.reserve(records.size());
@@ -167,9 +168,9 @@ ThreadGraph build_worker(
                 }
                 const EdgeKey key{u, v};
                 auto edge_it = edge_map.try_emplace(key).first;
-                if (edge_it->second.last_seen_assembly != assembly_i) {
-                    ++(edge_it->second.weight);
-                    edge_it->second.last_seen_assembly = assembly_i;
+                if (edge_it->second.last_seen_assembly != assembly_i_u32) {
+                    ++edge_it->second.weight;
+                    edge_it->second.last_seen_assembly = assembly_i_u32;
                 }
             }
         }
