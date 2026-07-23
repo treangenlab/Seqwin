@@ -64,9 +64,6 @@ struct RawKmer {
 struct NodeState {
     std::size_t count = 0;
     std::size_t cursor = 0;
-    std::uint32_t n_tar = 0;
-    std::uint32_t n_neg = 0;
-    std::size_t last_seen_assembly = std::numeric_limits<std::size_t>::max();
 };
 
 using EdgeKey = std::pair<std::uint64_t, std::uint64_t>;
@@ -95,7 +92,6 @@ ThreadGraph build_worker(
     const std::vector<std::string>& assembly_paths,
     std::size_t kmerlen,
     std::size_t windowsize,
-    const std::vector<bool>& is_targets,
     std::size_t start_assembly,
     std::size_t end_assembly,
     std::size_t thread_id,
@@ -128,8 +124,6 @@ ThreadGraph build_worker(
     edge_map.reserve(n_map_entries_est);
 
     for (std::size_t assembly_i = start_assembly; assembly_i < end_assembly; ++assembly_i) {
-        const bool is_target = is_targets[assembly_i];
-
         auto records = read_fasta(assembly_paths[assembly_i]);
         std::vector<std::string> record_ids;
         record_ids.reserve(records.size());
@@ -159,16 +153,8 @@ ThreadGraph build_worker(
                 }
 
                 // Add this minimizer to an existing node, or create a new node
-                auto [node_it, node_inserted] = node_map.try_emplace(m.out_hash);
+                auto node_it = node_map.try_emplace(m.out_hash).first;
                 ++(node_it->second.count);
-                if (node_inserted || node_it->second.last_seen_assembly != assembly_i) {
-                    if (is_target) {
-                        ++(node_it->second.n_tar);
-                    } else {
-                        ++(node_it->second.n_neg);
-                    }
-                    node_it->second.last_seen_assembly = assembly_i;
-                }
                 ++graph.n_kmers;
             }
 
@@ -230,11 +216,10 @@ ThreadGraph build_worker(
             hash,
             start,
             state.count,
-            state.n_tar,
-            state.n_neg,
             thread_id
         };
     }
+    std::unordered_map<std::uint64_t, NodeState>().swap(node_map);
 
     return graph;
 }
@@ -313,13 +298,9 @@ Graph build(
     const std::vector<std::string>& assembly_paths,
     std::size_t kmerlen,
     std::size_t windowsize,
-    const std::vector<bool>& is_targets,
     std::size_t n_cpu,
     bool low_memory
 ) {
-    if (assembly_paths.size() != is_targets.size()) {
-        throw std::runtime_error("assembly_paths and is_targets must have the same length");
-    }
     if (assembly_paths.size() > std::numeric_limits<std::uint32_t>::max()) {
         throw std::runtime_error("Number of input assemblies exceeds uint32 range");
     }
@@ -344,7 +325,6 @@ Graph build(
                 assembly_paths,
                 kmerlen,
                 windowsize,
-                is_targets,
                 start_assembly,
                 end_assembly,
                 thread_id,

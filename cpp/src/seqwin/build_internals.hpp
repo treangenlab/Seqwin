@@ -25,10 +25,6 @@ struct ThreadNode {
     std::size_t start;
     /** Number of entries in `ThreadGraph.kmers` for this node. */
     std::size_t count;
-    /** Number of target assemblies containing this minimizer hash. */
-    std::uint32_t n_tar;
-    /** Number of non-target assemblies containing this minimizer hash. */
-    std::uint32_t n_neg;
     /** Worker thread that produced this node. Used by the merging step. */
     std::size_t thread_id;
 };

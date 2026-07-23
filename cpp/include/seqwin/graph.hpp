@@ -32,11 +32,11 @@ struct Node {
     std::size_t start;
     /** End of the half-open range for this node's minimizer entries. */
     std::size_t stop;
-    /** Number of target assemblies containing this minimizer hash. */
-    std::uint32_t n_tar;
-    /** Number of non-target assemblies containing this minimizer hash. */
-    std::uint32_t n_neg;
-    /** Placeholder for node penalty score, for downstream graph filtering. */
+    /** Node scoring placeholder. */
+    std::uint32_t n_tar = 0;
+    /** Node scoring placeholder. */
+    std::uint32_t n_neg = 0;
+    /** Node scoring placeholder. */
     double penalty = 0.0;
 };
 
@@ -56,7 +56,10 @@ struct Edge {
  * @brief Container for the minimizer graph returned by `build()`.
  */
 struct Graph {
-    /** Minimizer occurrences in all assemblies, grouped and sorted by hash. */
+    /**
+     * Minimizer occurrences in all assemblies, grouped and sorted by hash.
+     * `record_idx` is nondecreasing within each node range.
+     */
     NoInitArray<Kmer> kmers;
     /** Sorted by hash. */
     NoInitArray<Node> nodes;
