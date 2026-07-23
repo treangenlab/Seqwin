@@ -61,11 +61,6 @@ struct RawKmer {
     Kmer kmer;
 };
 
-struct NodeState {
-    std::size_t count = 0;
-    std::size_t cursor = 0;
-};
-
 using EdgeKey = std::pair<std::uint64_t, std::uint64_t>;
 
 struct EdgeKeyHash {
@@ -117,7 +112,7 @@ ThreadGraph build_worker(
     graph.end_assembly = end_assembly;
 
     // Reserving for unordered_map will actually allocate physical memory
-    std::unordered_map<std::uint64_t, NodeState> node_map;
+    std::unordered_map<std::uint64_t, std::size_t> node_map;
     std::unordered_map<EdgeKey, EdgeState, EdgeKeyHash> edge_map;
     const auto n_map_entries_est = n_minimizers_est / map_reserve_divisor;
     node_map.reserve(n_map_entries_est);
@@ -153,8 +148,8 @@ ThreadGraph build_worker(
                 }
 
                 // Add this minimizer to an existing node, or create a new node
-                auto node_it = node_map.try_emplace(m.out_hash).first;
-                ++(node_it->second.count);
+                auto node_it = node_map.try_emplace(m.out_hash, 0).first;
+                ++node_it->second;
                 ++graph.n_kmers;
             }
 
@@ -190,36 +185,57 @@ ThreadGraph build_worker(
     }
     std::unordered_map<EdgeKey, EdgeState, EdgeKeyHash>().swap(edge_map);
 
+    graph.n_nodes = node_map.size();
+    graph.nodes = NoInitArray<ThreadNode>(graph.n_nodes);
+    std::size_t node_i = 0;
+
     if (!low_memory) {
         // Build ThreadGraph.kmers (grouped by hash)
         graph.kmers = NoInitArray<Kmer>(graph.n_kmers);
+
+        // node_map values are counts while assigning node ranges,
+        // then cursors while scattering raw k-mers into those ranges
         std::size_t cursor = 0;
-        for (auto& [hash, state] : node_map) {
-            (void)hash;
-            state.cursor = cursor;
-            cursor += state.count;
+        for (auto& [hash, node_val] : node_map) {
+            const std::size_t count = node_val;
+            const std::size_t start = cursor;
+
+            graph.nodes[node_i++] = ThreadNode{
+                hash,
+                start,
+                count,
+                thread_id
+            };
+
+            node_val = start;
+            cursor += count;
         }
+        if (cursor != graph.n_kmers) {
+            throw std::logic_error("Node k-mer counts do not sum to graph.n_kmers");
+        }
+
         for (const auto& rk : raw_kmers) {
             auto node_it = node_map.find(rk.hash);
-            graph.kmers[node_it->second.cursor++] = rk.kmer;
+            if (node_it == node_map.end()) {
+                throw std::logic_error(
+                    "Standard-mode k-mer scattering found an unknown minimizer hash"
+                );
+            }
+            graph.kmers[node_it->second++] = rk.kmer;
         }
         std::vector<RawKmer>().swap(raw_kmers);
+    } else {
+        // In low-memory mode node_map values remain counts
+        for (const auto& [hash, count] : node_map) {
+            graph.nodes[node_i++] = ThreadNode{
+                hash,
+                0,
+                count,
+                thread_id
+            };
+        }
     }
-
-    graph.n_nodes = node_map.size();
-    graph.nodes = NoInitArray<ThreadNode>(node_map.size());
-    std::size_t node_i = 0;
-    for (const auto& [hash, state] : node_map) {
-        const std::size_t start = low_memory ? 0 : state.cursor - state.count;
-
-        graph.nodes[node_i++] = ThreadNode{
-            hash,
-            start,
-            state.count,
-            thread_id
-        };
-    }
-    std::unordered_map<std::uint64_t, NodeState>().swap(node_map);
+    std::unordered_map<std::uint64_t, std::size_t>().swap(node_map);
 
     return graph;
 }
