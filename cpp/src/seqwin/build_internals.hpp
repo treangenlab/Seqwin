@@ -2,10 +2,14 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
+#include <memory>
 #include <string>
-#include <unordered_map>
+#include <type_traits>
 #include <utility>
 #include <vector>
+
+#include <ankerl/unordered_dense.h>
 
 #include "seqwin/graph.hpp"
 
@@ -59,7 +63,16 @@ struct ThreadGraph {
  * Each thread/hash pair owns a disjoint segment inside `Graph.kmers`.
  * When building `Graph.kmers` in the low memory mode, these starts are mutated as cursors.
  */
-using KmerMaps = std::vector<std::unordered_map<std::uint64_t, std::size_t>>;
+using KmerMap = ankerl::unordered_dense::map<
+    std::uint64_t,
+    std::size_t,
+    ankerl::unordered_dense::hash<std::uint64_t>,
+    std::equal_to<std::uint64_t>,
+    std::allocator<std::pair<std::uint64_t, std::size_t>>,
+    ankerl::unordered_dense::bucket_type::big
+>;
+
+using KmerMaps = std::vector<KmerMap>;
 
 /**
  * @brief Merge thread-local minimizer graphs into a single graph.

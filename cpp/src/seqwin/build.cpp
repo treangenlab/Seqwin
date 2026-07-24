@@ -3,15 +3,18 @@
 #include <algorithm>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <limits>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <string_view>
-#include <unordered_map>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
-#include "btllib/minimizer.hpp"
+#include <ankerl/unordered_dense.h>
+#include <btllib/minimizer.hpp>
 
 #include "seqwin/build_internals.hpp"
 #include "utils/fasta_reader.hpp"
@@ -21,8 +24,6 @@
 namespace seqwin {
 namespace internal {
 namespace {
-
-constexpr std::size_t map_reserve_divisor = 100;
 
 constexpr std::size_t plain_fasta_seq_len_per_byte = 1;
 constexpr std::size_t gz_fasta_seq_len_per_byte = 4;
@@ -61,20 +62,30 @@ struct RawKmer {
     Kmer kmer;
 };
 
-using EdgeKey = std::pair<std::uint64_t, std::uint64_t>;
+using NodeMap = ankerl::unordered_dense::segmented_map<
+    std::uint64_t,
+    std::size_t,
+    ankerl::unordered_dense::hash<std::uint64_t>,
+    std::equal_to<std::uint64_t>,
+    std::allocator<std::pair<std::uint64_t, std::size_t>>,
+    ankerl::unordered_dense::bucket_type::big
+>;
 
-struct EdgeKeyHash {
-    std::size_t operator()(const EdgeKey& key) const noexcept
-    {
-        return std::hash<std::uint64_t>{}(key.first) ^
-               (std::hash<std::uint64_t>{}(key.second) << 1);
-    }
-};
+using EdgeKey = std::pair<std::uint64_t, std::uint64_t>;
 
 struct EdgeState {
     std::uint32_t weight = 0;
     std::uint32_t last_seen_assembly = std::numeric_limits<std::uint32_t>::max();
 };
+
+using EdgeMap = ankerl::unordered_dense::segmented_map<
+    EdgeKey,
+    EdgeState,
+    ankerl::unordered_dense::hash<EdgeKey>,
+    std::equal_to<EdgeKey>,
+    std::allocator<std::pair<EdgeKey, EdgeState>>,
+    ankerl::unordered_dense::bucket_type::big
+>;
 
 /**
  * @brief Builds the thread-local portion of a minimizer graph.
@@ -111,12 +122,8 @@ ThreadGraph build_worker(
     graph.start_assembly = start_assembly;
     graph.end_assembly = end_assembly;
 
-    // Reserving for unordered_map will actually allocate physical memory
-    std::unordered_map<std::uint64_t, std::size_t> node_map;
-    std::unordered_map<EdgeKey, EdgeState, EdgeKeyHash> edge_map;
-    const auto n_map_entries_est = n_minimizers_est / map_reserve_divisor;
-    node_map.reserve(n_map_entries_est);
-    edge_map.reserve(n_map_entries_est);
+    NodeMap node_map;
+    EdgeMap edge_map;
 
     for (std::size_t assembly_i = start_assembly; assembly_i < end_assembly; ++assembly_i) {
         const auto assembly_i_u32 = static_cast<std::uint32_t>(assembly_i);
@@ -184,7 +191,7 @@ ThreadGraph build_worker(
     for (const auto& [key, state] : edge_map) {
         graph.edges[edge_i++] = Edge{key.first, key.second, state.weight};
     }
-    std::unordered_map<EdgeKey, EdgeState, EdgeKeyHash>().swap(edge_map);
+    EdgeMap{}.swap(edge_map);
 
     graph.n_nodes = node_map.size();
     graph.nodes = NoInitArray<ThreadNode>(graph.n_nodes);
@@ -236,7 +243,7 @@ ThreadGraph build_worker(
             };
         }
     }
-    std::unordered_map<std::uint64_t, std::size_t>().swap(node_map);
+    NodeMap{}.swap(node_map);
 
     return graph;
 }
