@@ -19,6 +19,7 @@
 #include "seqwin/build_internals.hpp"
 #include "utils/fasta_reader.hpp"
 #include "utils/logging.hpp"
+#include "utils/memory.hpp"
 #include "utils/thread_pool.hpp"
 
 namespace seqwin {
@@ -309,6 +310,7 @@ NoInitArray<Kmer> recompute_kmers(
                     }
                 }
             }
+            KmerMap{}.swap(hash_to_cursor);
         }
     });
 
@@ -356,6 +358,8 @@ Graph build(
             );
         }
     });
+    // Release retained allocator pages of destroyed worker maps
+    internal::trim_heap();
 
     auto [graph, kmer_maps] = internal::merge_thread_graphs(
         graphs,
@@ -363,6 +367,8 @@ Graph build(
         pool,
         low_memory
     );
+    internal::trim_heap();
+
     if (low_memory) {
         internal::log_python(" - Recomputing minimizers for low-memory mode...");
         graph.kmers = internal::recompute_kmers(
@@ -375,6 +381,8 @@ Graph build(
             pool
         );
     }
+    internal::trim_heap();
+
     return std::move(graph);
 }
 
