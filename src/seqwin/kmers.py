@@ -36,7 +36,7 @@ import numpy as np
 import networkx as nx
 from numpy.typing import NDArray
 
-from .graph import build, _filter_kmers
+from .graph import build, _get_penalty, _filter_kmers
 from .assemblies import Assemblies
 from .helpers import get_subgraphs
 from .utils import print_time_delta
@@ -90,16 +90,16 @@ class KmerGraph(object):
             assemblies.path,
             kmerlen,
             windowsize,
-            assemblies.is_target,
             n_cpu=n_cpu,
             low_memory=low_memory
         )
         # calculate penalty for each node
-        n_tar = sum(assemblies.is_target)
-        n_neg = n_assemblies - n_tar
-        nodes['penalty'] = _frac_to_penalty(
-            nodes['n_tar'] / n_tar,
-            nodes['n_neg'] / n_neg
+        _get_penalty(
+            kmers,
+            nodes,
+            record_offsets,
+            assemblies.is_target,
+            n_cpu=n_cpu
         )
         assemblies.record_ids = record_ids
 

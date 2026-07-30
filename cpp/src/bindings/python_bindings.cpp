@@ -1,5 +1,6 @@
 #include <cstdint>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -50,7 +51,6 @@ PYBIND11_MODULE(_core, m) {
         [](const std::vector<std::string>& assembly_paths,
            std::size_t kmerlen,
            std::size_t windowsize,
-           const std::vector<bool>& is_targets,
            std::size_t n_cpu,
            bool low_memory
         ) {
@@ -61,7 +61,6 @@ PYBIND11_MODULE(_core, m) {
                     assembly_paths,
                     kmerlen,
                     windowsize,
-                    is_targets,
                     n_cpu,
                     low_memory
                 );
@@ -86,9 +85,53 @@ PYBIND11_MODULE(_core, m) {
         py::arg("assembly_paths"),
         py::arg("kmerlen"),
         py::arg("windowsize"),
-        py::arg("is_targets"),
         py::arg("n_cpu") = 1,
         py::arg("low_memory") = false
+    );
+
+    m.def("_get_penalty_native",
+        [](py::array_t<seqwin::Kmer, py::array::c_style> kmers,
+           py::array_t<seqwin::Node, py::array::c_style> nodes,
+           py::array_t<std::size_t, py::array::c_style> record_offsets,
+           py::array_t<bool, py::array::c_style> is_targets,
+           std::size_t n_cpu
+        ) {
+            auto kmers_buf = kmers.request();
+            auto nodes_buf = nodes.request();
+            auto record_offsets_buf = record_offsets.request();
+            auto is_targets_buf = is_targets.request();
+
+            if (nodes_buf.readonly) {
+                throw std::invalid_argument("nodes must be writable");
+            }
+
+            const auto* kmers_ptr = static_cast<const seqwin::Kmer*>(kmers_buf.ptr);
+            auto* nodes_ptr = static_cast<seqwin::Node*>(nodes_buf.ptr);
+            const auto* record_offsets_ptr = static_cast<const std::size_t*>(record_offsets_buf.ptr);
+            const auto* is_targets_ptr = static_cast<const bool*>(is_targets_buf.ptr);
+            const auto n_nodes = static_cast<std::size_t>(nodes_buf.shape[0]);
+            const auto n_record_offsets = static_cast<std::size_t>(record_offsets_buf.shape[0]);
+            const auto n_assemblies = static_cast<std::size_t>(is_targets_buf.shape[0]);
+
+            {
+                py::gil_scoped_release release;
+                seqwin::get_penalty(
+                    kmers_ptr,
+                    nodes_ptr,
+                    n_nodes,
+                    record_offsets_ptr,
+                    n_record_offsets,
+                    is_targets_ptr,
+                    n_assemblies,
+                    n_cpu
+                );
+            }
+        },
+        py::arg("kmers").noconvert(),
+        py::arg("nodes").noconvert(),
+        py::arg("record_offsets").noconvert(),
+        py::arg("is_targets").noconvert(),
+        py::arg("n_cpu") = 1
     );
 
     m.def("_filter_kmers_native",

@@ -33,7 +33,7 @@ from collections.abc import Iterable
 import numpy as np
 from numpy.typing import NDArray
 
-from ._core import _build_native, _filter_kmers_native
+from ._core import _build_native, _get_penalty_native, _filter_kmers_native
 
 from .utils import OrderedKmers
 
@@ -62,7 +62,6 @@ def build(
     assembly_paths: Iterable[Path],
     kmerlen: int,
     windowsize: int,
-    is_targets: Iterable[bool],
     low_memory: bool = False,
     n_cpu: int = 1
 ) -> tuple[
@@ -81,12 +80,10 @@ def build(
     >>>     assembly_paths = ...,
     >>>     kmerlen = 21,
     >>>     windowsize = 200,
-    >>>     is_targets = ...,
     >>>     n_cpu = 4,
     >>>     low_memory = False
     >>> )
     ```
-    - `assembly_paths` and `is_targets` are parallel lists.
     - `kmers` stores minimizer occurrences in all assemblies, grouped and sorted by hash.
     - `nodes` and `edges` are sorted by hash.
 
@@ -111,7 +108,6 @@ def build(
         assembly_paths (Iterable[Path]): Paths to input assemblies in FASTA format (plain or gzipped).
         kmerlen (int): K-mer length for minimizer sketch.
         windowsize (int): Window size for minimizer sketch.
-        is_targets (Iterable[bool]): Whether each assembly is a target assembly.
         n_cpu (int, optional): Number of worker threads to use. [1]
         low_memory (bool, optional): Recompute minimizers in a second pass to reduce peak memory. [False]
 
@@ -126,9 +122,9 @@ def build(
                 - 'hash' (uint64): Hash value of the minimizers represented by this node.
                 - 'start' (uintp): Start of the half-open range for this node's minimizer entries.
                 - 'stop' (uintp): End of the half-open range for this node's minimizer entries.
-                - 'n_tar' (uint32): Number of target assemblies containing this minimizer hash.
-                - 'n_neg' (uint32): Number of non-target assemblies containing this minimizer hash.
-                - 'penalty' (float64): Node penalty score used for downstream graph filtering.
+                - 'n_tar' (uint32): Node scoring placeholder initialized to 0.
+                - 'n_neg' (uint32): Node scoring placeholder initialized to 0.
+                - 'penalty' (float64): Node scoring placeholder initialized to 0.0.
             3. NDArray[np.void]: A 1-D NumPy structured array of weighted, undirected edges.
                 Dtype: `EDGE_DTYPE`
                 - 'first' (uint64): Smaller endpoint hash of the undirected edge.
@@ -141,9 +137,33 @@ def build(
         list(str(p) for p in assembly_paths),
         int(kmerlen),
         int(windowsize),
-        list(bool(t) for t in is_targets),
         int(n_cpu),
         bool(low_memory)
+    )
+
+
+def _get_penalty(
+    kmers: NDArray[np.void],
+    nodes: NDArray[np.void],
+    record_offsets: NDArray[np.uintp],
+    is_targets: Iterable[bool],
+    n_cpu: int = 1
+) -> None:
+    """Populate node target counts and penalty scores in place.
+
+    Args:
+        kmers (NDArray): See `KmerGraph.kmers`.
+        nodes (NDArray): See `KmerGraph.nodes`.
+        record_offsets (NDArray[np.uintp]): See `KmerGraph.record_offsets`.
+        is_targets (Iterable[bool]): Whether each assembly is a target assembly.
+        n_cpu (int, optional): Number of worker threads to use. [1]
+    """
+    _get_penalty_native(
+        kmers,
+        nodes,
+        record_offsets,
+        np.asarray(is_targets, dtype=np.bool_, order='C'),
+        int(n_cpu)
     )
 
 

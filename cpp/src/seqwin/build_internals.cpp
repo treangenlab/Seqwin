@@ -198,13 +198,9 @@ static MergedNodes merge_nodes(
     i = 0;
     while (i < n_nodes) {
         const auto hash = nodes[i].hash;
-        std::uint32_t n_tar = 0;
-        std::uint32_t n_neg = 0;
         const auto start = n_kmers;
 
         while (i < n_nodes && nodes[i].hash == hash) {
-            n_tar += nodes[i].n_tar;
-            n_neg += nodes[i].n_neg;
             const auto count = nodes[i].count;
 
             if (low_memory) {
@@ -221,7 +217,7 @@ static MergedNodes merge_nodes(
             ++i;
         }
 
-        merged.nodes[write_i++] = Node{hash, start, n_kmers, n_tar, n_neg};
+        merged.nodes[write_i++] = Node{hash, start, n_kmers};
     }
     return merged;
 }

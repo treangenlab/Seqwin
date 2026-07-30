@@ -2,7 +2,7 @@ from pathlib import Path
 
 import numpy as np
 
-from seqwin.graph import KMER_DTYPE, NODE_DTYPE, EDGE_DTYPE, build, _filter_kmers
+from seqwin.graph import KMER_DTYPE, NODE_DTYPE, EDGE_DTYPE, build, _get_penalty, _filter_kmers
 
 
 def _sorted_edges(edges: np.ndarray) -> np.ndarray:
@@ -30,6 +30,7 @@ def _assert_node_ranges(kmers: np.ndarray, nodes: np.ndarray) -> None:
         stop = int(node['stop'])
         assert 0 <= start <= stop <= len(kmers)
         assert len(kmers[start:stop]) == (stop - start)
+        assert np.all(kmers[start:stop]['record_idx'][:-1] <= kmers[start:stop]['record_idx'][1:])
         total += stop - start
     assert total == len(kmers)
 
@@ -63,27 +64,22 @@ def test_build_threading_equivalence(targets_dir, non_targets_dir) -> None:
         non_targets_dir / 'non-target-1.fasta',
         non_targets_dir / 'non-target-2.fasta',
     ]
-    is_targets = [True, True, False, False]
-
     kmers_1, nodes_1, edges_1, record_offsets_1, record_ids_1 = build(
         assembly_paths,
         kmerlen=7,
         windowsize=10,
-        is_targets=is_targets,
         n_cpu=1,
     )
     kmers_2, nodes_2, edges_2, record_offsets_2, record_ids_2 = build(
         assembly_paths,
         kmerlen=7,
         windowsize=10,
-        is_targets=is_targets,
         n_cpu=2,
     )
     kmers_many, nodes_many, edges_many, record_offsets_many, record_ids_many = build(
         assembly_paths,
         kmerlen=7,
         windowsize=10,
-        is_targets=is_targets,
         n_cpu=99,
     )
 
@@ -92,7 +88,9 @@ def test_build_threading_equivalence(targets_dir, non_targets_dir) -> None:
     assert kmers_1.dtype.names == ('pos', 'record_idx')
     assert np.array_equal(record_offsets_1, np.array([0, 1, 2, 3, 4], dtype=np.uintp))
     assert np.array_equal(np.unique(kmers_1['record_idx']), np.arange(4, dtype=np.uint32))
-    assert np.all(nodes_1['n_tar'] + nodes_1['n_neg'] > 0)
+    assert np.all(nodes_1['n_tar'] == 0)
+    assert np.all(nodes_1['n_neg'] == 0)
+    assert np.all(nodes_1['penalty'] == 0.0)
 
     assert edges_1.ndim == 1
     assert edges_1.dtype == EDGE_DTYPE
@@ -121,6 +119,20 @@ def test_build_threading_equivalence(targets_dir, non_targets_dir) -> None:
     assert np.array_equal(_sorted_edges(edges_1), _sorted_edges(edges_many))
 
 
+def test_build_rejects_is_targets_argument(targets_dir, non_targets_dir) -> None:
+    assembly_paths = [
+        targets_dir / 'target-1.fasta',
+        non_targets_dir / 'non-target-1.fasta',
+    ]
+    with np.testing.assert_raises(TypeError):
+        build(
+            assembly_paths,
+            kmerlen=7,
+            windowsize=10,
+            is_targets=[True, False],
+        )
+
+
 def test_multi_thread_record_offsets_and_global_record_indices(tmp_path: Path) -> None:
     def write_fasta(path: Path, n_records: int) -> None:
         seq = 'ACGT' * 20
@@ -136,7 +148,6 @@ def test_multi_thread_record_offsets_and_global_record_indices(tmp_path: Path) -
         assembly_paths,
         kmerlen=7,
         windowsize=10,
-        is_targets=[True, True, False, False],
         n_cpu=2,
     )
 
@@ -184,14 +195,11 @@ def test_low_memory_build_matches_standard(targets_dir, non_targets_dir) -> None
         non_targets_dir / 'non-target-1.fasta',
         non_targets_dir / 'non-target-2.fasta',
     ]
-    is_targets = [True, True, False, False]
-
     for n_cpu in (1, 2, 99):
         standard = build(
             assembly_paths,
             kmerlen=7,
             windowsize=10,
-            is_targets=is_targets,
             n_cpu=n_cpu,
             low_memory=False,
         )
@@ -199,9 +207,87 @@ def test_low_memory_build_matches_standard(targets_dir, non_targets_dir) -> None
             assembly_paths,
             kmerlen=7,
             windowsize=10,
-            is_targets=is_targets,
             n_cpu=n_cpu,
             low_memory=True,
         )
 
         _assert_graph_outputs_equal(standard, low_memory)
+
+
+def _synthetic_penalty_inputs() -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    kmers = np.array([
+        (0, 0), (1, 0), (2, 1), (3, 2), (4, 4),  # node 10: asm 0, 1, 2 => tar 2 neg 1
+        (5, 2), (6, 3),                           # node 20: asm 1 => neg 1
+        (7, 5), (8, 6),                           # node 30: asm 3 => neg 1
+        (9, 4),                                   # node 40: asm 2 => tar 1
+    ], dtype=KMER_DTYPE)
+    nodes = np.array([
+        (10, 0, 5, 0, 0, 0.0),
+        (20, 5, 7, 0, 0, 0.0),
+        (30, 7, 9, 0, 0, 0.0),
+        (40, 9, 10, 0, 0, 0.0),
+        (50, 10, 10, 9, 9, 9.0),
+        (60, 5, 9, 0, 0, 0.0),
+    ], dtype=NODE_DTYPE)
+    record_offsets = np.array([0, 2, 4, 5, 7], dtype=np.uintp)
+    is_targets = np.array([True, False, True, False], dtype=np.bool_)
+    return kmers, nodes, record_offsets, is_targets
+
+
+def test_get_penalty_exact_scoring() -> None:
+    kmers, nodes, record_offsets, is_targets = _synthetic_penalty_inputs()
+
+    assert _get_penalty(kmers, nodes, record_offsets, is_targets, n_cpu=1) is None
+
+    assert np.array_equal(nodes['n_tar'], np.array([2, 0, 0, 1, 0, 0], dtype=np.uint32))
+    assert np.array_equal(nodes['n_neg'], np.array([1, 1, 1, 0, 0, 2], dtype=np.uint32))
+    np.testing.assert_allclose(
+        nodes['penalty'],
+        np.array([0.5, np.hypot(1.0, 0.5), np.hypot(1.0, 0.5), 0.5, 1.0, np.sqrt(2.0)])
+    )
+
+
+def test_get_penalty_parallel_equivalence() -> None:
+    kmers, nodes_1, record_offsets, is_targets = _synthetic_penalty_inputs()
+    nodes_2 = nodes_1.copy()
+    nodes_many = nodes_1.copy()
+
+    _get_penalty(kmers, nodes_1, record_offsets, is_targets, n_cpu=1)
+    _get_penalty(kmers, nodes_2, record_offsets, is_targets, n_cpu=2)
+    _get_penalty(kmers, nodes_many, record_offsets, is_targets, n_cpu=99)
+
+    assert np.array_equal(nodes_1, nodes_2)
+    assert np.array_equal(nodes_1, nodes_many)
+
+
+def test_get_penalty_validation() -> None:
+    kmers, nodes, record_offsets, is_targets = _synthetic_penalty_inputs()
+
+    read_only = nodes.copy()
+    read_only.flags.writeable = False
+    with np.testing.assert_raises(ValueError):
+        _get_penalty(kmers, read_only, record_offsets, is_targets)
+    with np.testing.assert_raises(ValueError):
+        _get_penalty(kmers, nodes.copy(), record_offsets[:-1], is_targets)
+    with np.testing.assert_raises(ValueError):
+        _get_penalty(kmers, nodes.copy(), np.array([1, 2, 4, 5, 7], dtype=np.uintp), is_targets)
+    with np.testing.assert_raises(ValueError):
+        _get_penalty(kmers, nodes.copy(), np.array([0, 3, 2, 5, 7], dtype=np.uintp), is_targets)
+    with np.testing.assert_raises(ValueError):
+        _get_penalty(kmers, nodes.copy(), record_offsets, [False, False, False, False])
+    with np.testing.assert_raises(ValueError):
+        _get_penalty(kmers, nodes.copy(), record_offsets, [True, True, True, True])
+    bad_nodes = nodes.copy()
+    bad_nodes[0]['stop'] = len(kmers) + 1
+    with np.testing.assert_raises(ValueError):
+        _get_penalty(kmers, bad_nodes, record_offsets, is_targets)
+    bad_kmers = kmers.copy()
+    bad_kmers[0]['record_idx'] = 7
+    with np.testing.assert_raises(ValueError):
+        _get_penalty(bad_kmers, nodes.copy(), record_offsets, is_targets)
+    descending = kmers.copy()
+    descending[3]['record_idx'] = 0
+    with np.testing.assert_raises(ValueError):
+        _get_penalty(descending, nodes.copy(), record_offsets, is_targets)
+    with np.testing.assert_raises(ValueError):
+        _get_penalty(kmers, nodes.copy(), record_offsets, np.array([[True, False], [True, False]]))
