@@ -260,6 +260,19 @@ def test_get_penalty_parallel_equivalence() -> None:
     assert np.array_equal(nodes_1, nodes_many)
 
 
+def test_get_penalty_skips_zero_record_assemblies() -> None:
+    kmers = np.array([(0, 0), (1, 1)], dtype=KMER_DTYPE)
+    nodes = np.array([(10, 0, 2, 0, 0, 0.0)], dtype=NODE_DTYPE)
+    record_offsets = np.array([0, 1, 1, 1, 2], dtype=np.uintp)
+    is_targets = np.array([True, False, True, False], dtype=np.bool_)
+
+    _get_penalty(kmers, nodes, record_offsets, is_targets, n_cpu=2)
+
+    assert nodes[0]['n_tar'] == 1
+    assert nodes[0]['n_neg'] == 1
+    assert nodes[0]['penalty'] == np.sqrt(0.5)
+
+
 def test_get_penalty_validation() -> None:
     kmers, nodes, record_offsets, is_targets = _synthetic_penalty_inputs()
 
