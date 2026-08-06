@@ -132,8 +132,13 @@ ThreadGraph build_worker(
         std::vector<std::string> record_ids;
         record_ids.reserve(records.size());
 
+        std::uint32_t record_idx = graph.record_offsets.back();
+        if (records.size() > std::numeric_limits<std::uint32_t>::max() - record_idx) {
+            throw std::runtime_error(
+                "Total number of FASTA records exceeds uint32 range"
+            );
+        }
         for (std::size_t record_i = 0; record_i < records.size(); ++record_i) {
-            const auto record_idx = graph.record_offsets.back() + record_i;
             auto& record = records[record_i];
             if (record.sequence.size() > std::numeric_limits<std::uint32_t>::max()) {
                 throw std::runtime_error(
@@ -151,7 +156,7 @@ ThreadGraph build_worker(
                         m.out_hash,
                         Kmer{
                             static_cast<std::uint32_t>(m.pos),
-                            static_cast<std::uint32_t>(record_idx)
+                            record_idx
                         }
                     });
                 }
@@ -161,6 +166,7 @@ ThreadGraph build_worker(
                 ++node_it->second;
                 ++graph.n_kmers;
             }
+            ++record_idx;
 
             // Current record is too short for an edge
             if (mins.size() < 2) {
@@ -182,7 +188,7 @@ ThreadGraph build_worker(
                 }
             }
         }
-        graph.record_offsets.push_back(graph.record_offsets.back() + records.size());
+        graph.record_offsets.push_back(record_idx);
         graph.ids_by_assembly.push_back(std::move(record_ids));
     }
 
@@ -260,7 +266,7 @@ NoInitArray<Kmer> recompute_kmers(
     std::size_t kmerlen,
     std::size_t windowsize,
     const std::vector<ThreadGraph>& graphs,
-    const std::vector<std::size_t>& record_offsets,
+    const std::vector<std::uint32_t>& record_offsets,
     KmerMaps& kmer_maps,
     ThreadPool& pool
 ) {
@@ -279,9 +285,9 @@ NoInitArray<Kmer> recompute_kmers(
                  assembly_i < graph.end_assembly;
                  ++assembly_i) {
                 auto records = read_fasta(assembly_paths[assembly_i]);
+                std::uint32_t record_idx = record_offsets[assembly_i];
 
                 for (std::size_t record_i = 0; record_i < records.size(); ++record_i) {
-                    const auto record_idx = record_offsets[assembly_i] + record_i;
                     auto& record = records[record_i];
                     if (record.sequence.size() > std::numeric_limits<std::uint32_t>::max()) {
                         throw std::runtime_error(
@@ -305,9 +311,10 @@ NoInitArray<Kmer> recompute_kmers(
                         auto& cursor = cursor_it->second;
                         kmers[cursor++] = Kmer{
                             static_cast<std::uint32_t>(m.pos),
-                            static_cast<std::uint32_t>(record_idx)
+                            record_idx
                         };
                     }
+                    ++record_idx;
                 }
             }
             KmerMap{}.swap(hash_to_cursor);

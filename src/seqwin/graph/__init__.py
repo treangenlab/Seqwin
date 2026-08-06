@@ -130,7 +130,7 @@ def build(
                 - 'first' (uint64): Smaller endpoint hash of the undirected edge.
                 - 'second' (uint64): Larger endpoint hash of the undirected edge.
                 - 'weight' (uintp): Number of assemblies where the endpoints are adjacent.
-            4. NDArray[np.uintp]: Cumulative global FASTA record offsets by assembly.
+            4. NDArray[np.uint32]: Cumulative global FASTA record offsets by assembly.
             5. list[tuple[str, ...]]: FASTA record IDs of each assembly.
     """
     return _build_native(
@@ -145,7 +145,7 @@ def build(
 def _get_penalty(
     kmers: NDArray[np.void],
     nodes: NDArray[np.void],
-    record_offsets: NDArray[np.uintp],
+    record_offsets: NDArray[np.uint32],
     is_targets: Iterable[bool],
     n_cpu: int = 1
 ) -> None:
@@ -154,7 +154,7 @@ def _get_penalty(
     Args:
         kmers (NDArray): See `KmerGraph.kmers`.
         nodes (NDArray): See `KmerGraph.nodes`.
-        record_offsets (NDArray[np.uintp]): See `KmerGraph.record_offsets`.
+        record_offsets (NDArray[np.uint32]): See `KmerGraph.record_offsets`.
         is_targets (Iterable[bool]): Whether each assembly is a target assembly.
         n_cpu (int, optional): Number of worker threads to use. [1]
     """

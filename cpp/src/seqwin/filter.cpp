@@ -16,7 +16,7 @@ void get_penalty(
     const Kmer* kmers,
     Node* nodes,
     std::size_t n_nodes,
-    const std::size_t* record_offsets,
+    const std::uint32_t* record_offsets,
     std::size_t n_record_offsets,
     const bool* is_targets,
     std::size_t n_assemblies,
@@ -65,23 +65,17 @@ void get_penalty(
     }
     internal::ThreadPool pool(n_workers);
 
-    const std::size_t n_records = record_offsets[n_assemblies];
-    if (
-        n_records > 0 &&
-        n_records - 1 > static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max())
-    ) {
-        throw std::invalid_argument("Number of records exceeds uint32 range");
-    }
+    const std::uint32_t n_records = record_offsets[n_assemblies];
     NoInitArray<RecordInfo> record_info(n_records);
     pool.parallel_for(n_assemblies, [&](std::size_t start, std::size_t end, std::size_t) {
         for (std::size_t assembly_idx = start; assembly_idx < end; ++assembly_idx) {
-            const std::size_t record_start = record_offsets[assembly_idx];
-            const std::size_t record_stop = record_offsets[assembly_idx + 1];
+            const std::uint32_t record_start = record_offsets[assembly_idx];
+            const std::uint32_t record_stop = record_offsets[assembly_idx + 1];
             if (record_start == record_stop) {
                 continue;
             }
             const RecordInfo info{
-                static_cast<std::uint32_t>(record_stop - 1),
+                record_stop - 1,
                 is_targets[assembly_idx] ? 1U : 0U
             };
             std::fill(
@@ -106,7 +100,7 @@ void get_penalty(
             }
 
             auto previous_record_idx = kmers[node.start].record_idx;
-            if (static_cast<std::size_t>(previous_record_idx) >= n_records) {
+            if (previous_record_idx >= n_records) {
                 throw std::invalid_argument("record_idx is outside record_offsets range");
             }
             auto info = record_info[previous_record_idx];
@@ -124,7 +118,7 @@ void get_penalty(
                 if (record_idx <= last_record_idx) {
                     continue;
                 }
-                if (static_cast<std::size_t>(record_idx) >= n_records) {
+                if (record_idx >= n_records) {
                     throw std::invalid_argument("record_idx is outside record_offsets range");
                 }
                 info = record_info[record_idx];

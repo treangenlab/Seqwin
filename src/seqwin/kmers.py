@@ -54,7 +54,7 @@ class KmerGraph(object):
             For each node, `kmers[node['start']:node['stop']]` is the k-mer group with `node['hash']`.
         edges (NDArray[np.void]): A 1-D NumPy structured array of weighted, undirected edges.
             Edge weight is the number of assemblies where the two k-mers are adjacent.
-        record_offsets (NDArray[np.uintp]): Cumulative global FASTA record offsets by assembly.
+        record_offsets (NDArray[np.uint32]): Cumulative global FASTA record offsets by assembly.
         graph (nx.Graph): The graph instance built from filtered nodes and edges.
         subgraphs (tuple[frozenset[np.uint64], ...] | None): Low-penalty subgraphs. Each subgraph is a set of k-mer hash values.
             Generated with `self.filter()`.
@@ -65,7 +65,7 @@ class KmerGraph(object):
     kmers: NDArray[np.void]
     nodes: NDArray[np.void]
     edges: NDArray[np.void]
-    record_offsets: NDArray[np.uintp]
+    record_offsets: NDArray[np.uint32]
     graph: nx.Graph
     subgraphs: tuple[frozenset[np.uint64], ...] | None
     _is_filtered: bool # True if `self.filter()` is called
