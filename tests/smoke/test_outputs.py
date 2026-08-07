@@ -38,6 +38,7 @@ def _assert_graph_matches_expected(actual_path: Path, expected_path: Path) -> No
 
     np.testing.assert_array_equal(actual['kmers'], expected['kmers'], err_msg='kmers array values mismatch')
     np.testing.assert_array_equal(actual['edges'], expected['edges'], err_msg='edges array values mismatch')
+    np.testing.assert_array_equal(actual['record_offsets'], expected['record_offsets'], err_msg='record_offsets array values mismatch')
 
     nodes_dtype = actual['nodes'].dtype
     for field_name in nodes_dtype.names or ():

@@ -92,7 +92,7 @@ PYBIND11_MODULE(_core, m) {
     m.def("_get_penalty_native",
         [](py::array_t<seqwin::Kmer, py::array::c_style> kmers,
            py::array_t<seqwin::Node, py::array::c_style> nodes,
-           py::array_t<std::size_t, py::array::c_style> record_offsets,
+           py::array_t<std::uint32_t, py::array::c_style> record_offsets,
            py::array_t<bool, py::array::c_style> is_targets,
            std::size_t n_cpu
         ) {
@@ -107,7 +107,7 @@ PYBIND11_MODULE(_core, m) {
 
             const auto* kmers_ptr = static_cast<const seqwin::Kmer*>(kmers_buf.ptr);
             auto* nodes_ptr = static_cast<seqwin::Node*>(nodes_buf.ptr);
-            const auto* record_offsets_ptr = static_cast<const std::size_t*>(record_offsets_buf.ptr);
+            const auto* record_offsets_ptr = static_cast<const std::uint32_t*>(record_offsets_buf.ptr);
             const auto* is_targets_ptr = static_cast<const bool*>(is_targets_buf.ptr);
             const auto n_nodes = static_cast<std::size_t>(nodes_buf.shape[0]);
             const auto n_record_offsets = static_cast<std::size_t>(record_offsets_buf.shape[0]);

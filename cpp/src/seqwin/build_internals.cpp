@@ -300,10 +300,6 @@ std::pair<Graph, KmerMaps> merge_thread_graphs(
 ) {
     if (graphs.size() == 1) {
         auto& graph = graphs[0];
-        if (graph.record_offsets.back() > std::numeric_limits<std::uint32_t>::max()) {
-            throw std::runtime_error("Total number of FASTA records exceeds uint32 range");
-        }
-
         merge_edges(graph.edges, pool); // Sort only
 
         auto merged = merge_nodes(graph.nodes, graphs, pool, low_memory);
@@ -337,25 +333,25 @@ std::pair<Graph, KmerMaps> merge_thread_graphs(
 
     // Merge record offsets
     std::vector<std::uint32_t> thread_record_offsets(graphs.size());
-    std::vector<std::size_t> record_offsets;
+    std::vector<std::uint32_t> record_offsets;
     record_offsets.reserve(n_assemblies + 1);
     record_offsets.push_back(0);
 
-    std::size_t total_records = 0;
+    std::uint32_t total_records = 0;
     for (std::size_t t = 0; t < graphs.size(); ++t) {
         auto& local_offsets = graphs[t].record_offsets;
 
         const auto base = total_records;
-        thread_record_offsets[t] = static_cast<std::uint32_t>(base);
+        thread_record_offsets[t] = base;
+        if (local_offsets.back() > std::numeric_limits<std::uint32_t>::max() - total_records) {
+            throw std::runtime_error("Total number of FASTA records exceeds uint32 range");
+        }
         total_records += local_offsets.back();
 
         for (std::size_t i = 1; i < local_offsets.size(); ++i) {
             record_offsets.push_back(base + local_offsets[i]);
         }
-        std::vector<std::size_t>().swap(local_offsets);
-    }
-    if (total_records > std::numeric_limits<std::uint32_t>::max()) {
-        throw std::runtime_error("Total number of FASTA records exceeds uint32 range");
+        std::vector<std::uint32_t>().swap(local_offsets);
     }
 
     // Merge edges and nodes first to reduce peak memory

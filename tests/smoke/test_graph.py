@@ -18,6 +18,8 @@ def _assert_graph_outputs_equal(standard, low_memory) -> None:
     assert np.array_equal(kmers_std, kmers_lm)
     assert np.array_equal(nodes_std, nodes_lm)
     assert np.array_equal(_sorted_edges(edges_std), _sorted_edges(edges_lm))
+    assert offsets_std.dtype == np.dtype(np.uint32)
+    assert offsets_lm.dtype == np.dtype(np.uint32)
     assert np.array_equal(offsets_std, offsets_lm)
     assert ids_std == ids_lm
     _assert_node_ranges(kmers_lm, nodes_lm)
@@ -86,7 +88,8 @@ def test_build_threading_equivalence(targets_dir, non_targets_dir) -> None:
     assert kmers_1.dtype == KMER_DTYPE
     assert kmers_1.dtype.itemsize == 8
     assert kmers_1.dtype.names == ('pos', 'record_idx')
-    assert np.array_equal(record_offsets_1, np.array([0, 1, 2, 3, 4], dtype=np.uintp))
+    assert record_offsets_1.dtype == np.dtype(np.uint32)
+    assert np.array_equal(record_offsets_1, np.array([0, 1, 2, 3, 4], dtype=np.uint32))
     assert np.array_equal(np.unique(kmers_1['record_idx']), np.arange(4, dtype=np.uint32))
     assert np.all(nodes_1['n_tar'] == 0)
     assert np.all(nodes_1['n_neg'] == 0)
@@ -152,8 +155,31 @@ def test_multi_thread_record_offsets_and_global_record_indices(tmp_path: Path) -
     )
 
     assert [len(ids) for ids in record_ids] == [2, 1, 3, 1]
-    assert np.array_equal(record_offsets, np.array([0, 2, 3, 6, 7], dtype=np.uintp))
+    assert record_offsets.dtype == np.dtype(np.uint32)
+    assert np.array_equal(record_offsets, np.array([0, 2, 3, 6, 7], dtype=np.uint32))
     assert np.array_equal(np.unique(kmers['record_idx']), np.arange(7, dtype=np.uint32))
+
+
+def test_build_empty_record_offsets(tmp_path: Path) -> None:
+    empty_assembly = tmp_path / 'empty.fasta'
+    empty_assembly.write_text('')
+
+    for assembly_paths, expected_offsets in (
+        ([], np.array([0], dtype=np.uint32)),
+        ([empty_assembly], np.array([0, 0], dtype=np.uint32)),
+    ):
+        for low_memory in (False, True):
+            kmers, _, _, record_offsets, record_ids = build(
+                assembly_paths,
+                kmerlen=7,
+                windowsize=10,
+                n_cpu=2,
+                low_memory=low_memory,
+            )
+            assert len(kmers) == 0
+            assert record_offsets.dtype == np.dtype(np.uint32)
+            assert np.array_equal(record_offsets, expected_offsets)
+            assert record_ids == [()] * len(assembly_paths)
 
 
 def test_filter_kmers() -> None:
@@ -229,7 +255,7 @@ def _synthetic_penalty_inputs() -> tuple[np.ndarray, np.ndarray, np.ndarray, np.
         (50, 10, 10, 9, 9, 9.0),
         (60, 5, 9, 0, 0, 0.0),
     ], dtype=NODE_DTYPE)
-    record_offsets = np.array([0, 2, 4, 5, 7], dtype=np.uintp)
+    record_offsets = np.array([0, 2, 4, 5, 7], dtype=np.uint32)
     is_targets = np.array([True, False, True, False], dtype=np.bool_)
     return kmers, nodes, record_offsets, is_targets
 
@@ -260,6 +286,19 @@ def test_get_penalty_parallel_equivalence() -> None:
     assert np.array_equal(nodes_1, nodes_many)
 
 
+def test_get_penalty_skips_zero_record_assemblies() -> None:
+    kmers = np.array([(0, 0), (1, 1)], dtype=KMER_DTYPE)
+    nodes = np.array([(10, 0, 2, 0, 0, 0.0)], dtype=NODE_DTYPE)
+    record_offsets = np.array([0, 1, 1, 1, 2], dtype=np.uint32)
+    is_targets = np.array([True, False, True, False], dtype=np.bool_)
+
+    _get_penalty(kmers, nodes, record_offsets, is_targets, n_cpu=2)
+
+    assert nodes[0]['n_tar'] == 1
+    assert nodes[0]['n_neg'] == 1
+    assert nodes[0]['penalty'] == np.sqrt(0.5)
+
+
 def test_get_penalty_validation() -> None:
     kmers, nodes, record_offsets, is_targets = _synthetic_penalty_inputs()
 
@@ -270,9 +309,13 @@ def test_get_penalty_validation() -> None:
     with np.testing.assert_raises(ValueError):
         _get_penalty(kmers, nodes.copy(), record_offsets[:-1], is_targets)
     with np.testing.assert_raises(ValueError):
-        _get_penalty(kmers, nodes.copy(), np.array([1, 2, 4, 5, 7], dtype=np.uintp), is_targets)
+        _get_penalty(kmers, nodes.copy(), np.array([1, 2, 4, 5, 7], dtype=np.uint32), is_targets)
     with np.testing.assert_raises(ValueError):
-        _get_penalty(kmers, nodes.copy(), np.array([0, 3, 2, 5, 7], dtype=np.uintp), is_targets)
+        _get_penalty(kmers, nodes.copy(), np.array([0, 3, 2, 5, 7], dtype=np.uint32), is_targets)
+    with np.testing.assert_raises(TypeError):
+        _get_penalty(kmers, nodes.copy(), record_offsets.astype(np.uintp), is_targets)
+    with np.testing.assert_raises(TypeError):
+        _get_penalty(kmers, nodes.copy(), record_offsets.astype(np.uint64), is_targets)
     with np.testing.assert_raises(ValueError):
         _get_penalty(kmers, nodes.copy(), record_offsets, [False, False, False, False])
     with np.testing.assert_raises(ValueError):

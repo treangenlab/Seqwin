@@ -66,7 +66,7 @@ struct Graph {
     /** Sorted by hash. */
     NoInitArray<Edge> edges;
     /** Cumulative global FASTA record offsets by assembly. */
-    std::vector<std::size_t> record_offsets;
+    std::vector<std::uint32_t> record_offsets;
     /** FASTA record IDs of each assembly. */
     std::vector<std::vector<std::string>> ids_by_assembly;
 };

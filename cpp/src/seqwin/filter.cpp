@@ -16,12 +16,20 @@ void get_penalty(
     const Kmer* kmers,
     Node* nodes,
     std::size_t n_nodes,
-    const std::size_t* record_offsets,
+    const std::uint32_t* record_offsets,
     std::size_t n_record_offsets,
     const bool* is_targets,
     std::size_t n_assemblies,
     std::size_t n_cpu
 ) {
+    /** Metadata shared by all FASTA records in one assembly. */
+    struct RecordInfo {
+        /** Inclusive global index of the assembly's final FASTA record. */
+        std::uint32_t last_record_idx;
+        /** Whether the assembly belongs to the target set, as 0 or 1. */
+        std::uint32_t is_target;
+    };
+
     if (n_record_offsets != n_assemblies + 1) {
         throw std::invalid_argument("len(record_offsets) must equal len(is_targets) + 1");
     }
@@ -57,6 +65,30 @@ void get_penalty(
     }
     internal::ThreadPool pool(n_workers);
 
+    const std::uint32_t n_records = record_offsets[n_assemblies];
+    NoInitArray<RecordInfo> record_info(n_records);
+    pool.parallel_for(n_assemblies, [&](std::size_t start, std::size_t end, std::size_t) {
+        for (std::size_t assembly_idx = start; assembly_idx < end; ++assembly_idx) {
+            const std::uint32_t record_start = record_offsets[assembly_idx];
+            const std::uint32_t record_stop = record_offsets[assembly_idx + 1];
+            if (record_start == record_stop) {
+                continue;
+            }
+            const RecordInfo info{
+                record_stop - 1,
+                is_targets[assembly_idx] ? 1U : 0U
+            };
+            std::fill(
+                record_info.begin() + record_start,
+                record_info.begin() + record_stop,
+                info
+            );
+        }
+    });
+
+    const double inv_total_targets = 1.0 / static_cast<double>(total_targets);
+    const double inv_total_non_targets = 1.0 / static_cast<double>(total_non_targets);
+
     pool.parallel_for(n_nodes, [&](std::size_t start, std::size_t end, std::size_t) {
         for (std::size_t node_i = start; node_i < end; ++node_i) {
             auto& node = nodes[node_i];
@@ -67,58 +99,39 @@ void get_penalty(
                 continue;
             }
 
-            std::uint32_t n_tar = 0;
-            std::uint32_t n_neg = 0;
-
-            // Monotonic scan of record_idx and record_offsets
-            // Each node range has nondecreasing record_idx values, so one upper_bound()
-            // maps the first record to its assembly and the scan only advances forward
-            std::uint32_t previous_record_idx = kmers[node.start].record_idx;
-            if (static_cast<std::size_t>(previous_record_idx) >= record_offsets[n_assemblies]) {
+            auto previous_record_idx = kmers[node.start].record_idx;
+            if (previous_record_idx >= n_records) {
                 throw std::invalid_argument("record_idx is outside record_offsets range");
             }
-            const auto* offset_it = std::upper_bound(
-                record_offsets,
-                record_offsets + n_record_offsets,
-                static_cast<std::size_t>(previous_record_idx)
-            );
-            std::size_t assembly_idx = static_cast<std::size_t>(offset_it - record_offsets - 1);
-            // Count each assembly once per node
-            std::size_t last_counted_assembly = std::numeric_limits<std::size_t>::max();
+            auto info = record_info[previous_record_idx];
+            auto last_record_idx = info.last_record_idx;
+            std::uint32_t n_tar = info.is_target;
+            std::uint32_t n_neg = 1U - info.is_target;
 
-            for (std::size_t kmer_i = node.start; kmer_i < node.stop; ++kmer_i) {
-                const std::uint32_t record_idx_u32 = kmers[kmer_i].record_idx;
-                if (record_idx_u32 < previous_record_idx) {
+            for (std::size_t kmer_i = node.start + 1; kmer_i < node.stop; ++kmer_i) {
+                const std::uint32_t record_idx = kmers[kmer_i].record_idx;
+                if (record_idx < previous_record_idx) {
                     throw std::invalid_argument("record_idx must be nondecreasing within each node range");
                 }
-                previous_record_idx = record_idx_u32;
+                previous_record_idx = record_idx;
 
-                const std::size_t record_idx = static_cast<std::size_t>(record_idx_u32);
-                if (record_idx >= record_offsets[n_assemblies]) {
+                if (record_idx <= last_record_idx) {
+                    continue;
+                }
+                if (record_idx >= n_records) {
                     throw std::invalid_argument("record_idx is outside record_offsets range");
                 }
-                // Duplicate record offsets are allowed for zero-record assemblies
-                while (
-                    assembly_idx + 1 < n_assemblies &&
-                    record_idx >= record_offsets[assembly_idx + 1]
-                ) {
-                    ++assembly_idx;
-                }
-                if (assembly_idx != last_counted_assembly) {
-                    if (is_targets[assembly_idx]) {
-                        ++n_tar;
-                    } else {
-                        ++n_neg;
-                    }
-                    last_counted_assembly = assembly_idx;
-                }
+                info = record_info[record_idx];
+                last_record_idx = info.last_record_idx;
+                n_tar += info.is_target;
+                n_neg += 1U - info.is_target;
             }
 
             node.n_tar = n_tar;
             node.n_neg = n_neg;
-            const double frac_tar = static_cast<double>(n_tar) / static_cast<double>(total_targets);
-            const double frac_neg = static_cast<double>(n_neg) / static_cast<double>(total_non_targets);
-            node.penalty = std::hypot(1.0 - frac_tar, frac_neg);
+            const double frac_tar = static_cast<double>(n_tar) * inv_total_targets;
+            const double frac_neg = static_cast<double>(n_neg) * inv_total_non_targets;
+            node.penalty = std::sqrt((1.0 - frac_tar) * (1.0 - frac_tar) + frac_neg * frac_neg);
         }
     });
 }

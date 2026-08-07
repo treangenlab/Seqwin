@@ -357,7 +357,7 @@ def _create_ck(
     graph: nx.Graph,
     nodes: tuple[np.uint64],
     kmers: tuple,
-    record_offsets: NDArray[np.uintp],
+    record_offsets: NDArray[np.uint32],
     n_tar: int,
     kmerlen: int,
     windowsize: int
