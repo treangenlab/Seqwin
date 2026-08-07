@@ -20,7 +20,8 @@ Classes:
 
 Functions:
 ----------
-- get_kmers
+- build_graph
+- filter_graph
 """
 
 __author__ = 'Michael X. Wang'
@@ -36,179 +37,138 @@ import numpy as np
 import networkx as nx
 from numpy.typing import NDArray
 
-from .graph import build, _get_penalty, _filter_kmers
+from .graph import KmerGraph, _get_penalty, _filter_kmers
 from .assemblies import Assemblies
 from .helpers import get_subgraphs
 from .utils import print_time_delta
 from .config import Config, RunState, HAS_MASH, WORKINGDIR, EDGE_W, NODE_P
 
 
-class KmerGraph(object):
-    """
-    1. Build a weighted, undirected k-mer graph, and calculate node penalty scores.
-    2. Extract low-penalty subgraphs with `self.filter()`.
+class FilteredGraph(KmerGraph):
+    """The filtered minimizer graph class.
 
     Attributes:
-        kmers (NDArray[np.void]): A 1-D NumPy structured array of k-mers from all assemblies, grouped by node range.
-        nodes (NDArray[np.void]): A 1-D NumPy structured array of k-mer nodes.
-            For each node, `kmers[node['start']:node['stop']]` is the k-mer group with `node['hash']`.
-        edges (NDArray[np.void]): A 1-D NumPy structured array of weighted, undirected edges.
-            Edge weight is the number of assemblies where the two k-mers are adjacent.
-        record_offsets (NDArray[np.uint32]): Cumulative global FASTA record offsets by assembly.
-        graph (nx.Graph): The graph instance built from filtered nodes and edges.
-        subgraphs (tuple[frozenset[np.uint64], ...] | None): Low-penalty subgraphs. Each subgraph is a set of k-mer hash values.
-            Generated with `self.filter()`.
+        kmers (NDArray[np.void]): Only includes k-mers with hashes in `subgraphs`.
+        nodes (NDArray[np.void]): Only includes nodes with hashes in `subgraphs`.
+        edges (NDArray[np.void]): Low-weight edges are filtered.
+        record_offsets (NDArray[np.uintp]): Inherited from `KmerGraph.record_offsets`.
+        record_ids (list[tuple[str, ...]]): Inherited from `KmerGraph.record_ids`.
+        nx_graph (nx.Graph): The NetworkX graph instance built from filtered edges.
+        subgraphs (tuple[frozenset[np.uint64], ...]): Low-penalty subgraphs. Each subgraph is a set of k-mer hash values.
     """
-    __slots__ = (
-        'kmers', 'nodes', 'edges', 'record_offsets', 'graph', 'subgraphs', '_is_filtered'
-    )
-    kmers: NDArray[np.void]
-    nodes: NDArray[np.void]
-    edges: NDArray[np.void]
-    record_offsets: NDArray[np.uint32]
-    graph: nx.Graph
-    subgraphs: tuple[frozenset[np.uint64], ...] | None
-    _is_filtered: bool # True if `self.filter()` is called
+    __slots__ = ('nx_graph', 'subgraphs')
+    nx_graph: nx.Graph
+    subgraphs: tuple[frozenset[np.uint64], ...]
 
-    def __init__(self, assemblies: Assemblies, kmerlen: int, windowsize: int, n_cpu: int, low_memory: bool) -> None:
-        """Build the k-mer graph and calculate node penalty scores.
-
-        Args:
-            assemblies (Assemblies): See `Assemblies` in `assemblies.py`.
-            kmerlen (int): See `Config` in `config.py`.
-            windowsize (int): See `Config` in `config.py`.
-            n_cpu (int): See `Config` in `config.py`.
-            low_memory (bool): See `Config` in `config.py`.
+    def __init__(
+        self,
+        kmers: NDArray[np.void],
+        nodes: NDArray[np.void],
+        edges: NDArray[np.void],
+        record_offsets: NDArray[np.uintp],
+        record_ids: list[tuple[str, ...]],
+        nx_graph: nx.Graph,
+        subgraphs: tuple[frozenset[np.uint64], ...]
+    ) -> None:
+        """Initialized a filtered minimizer graph from computed graph data.
         """
-        n_assemblies = len(assemblies)
-        logger.info(f'Building minimizer graph from {n_assemblies} assemblies...')
-        if low_memory:
-            logger.warning(' - Low-memory mode is enabled; graph construction may take longer.')
-        tik = time()
-
-        kmers, nodes, edges, record_offsets, record_ids = build(
-            assemblies.path,
-            kmerlen,
-            windowsize,
-            n_cpu=n_cpu,
-            low_memory=low_memory
-        )
-        # calculate penalty for each node
-        _get_penalty(
-            kmers,
-            nodes,
-            record_offsets,
-            assemblies.is_target,
-            n_cpu=n_cpu
-        )
-        assemblies.record_ids = record_ids
-
-        logger.info(f' - Found {len(kmers)} minimizers')
-        logger.info(f' - Found {len(nodes)} nodes (unique minimizers)')
-        logger.info(f' - Found {len(edges)} weighted edges')
-
-        print_time_delta(time()-tik)
-
         self.kmers = kmers
         self.nodes = nodes
         self.edges = edges
         self.record_offsets = record_offsets
-        self.graph = None # create graph after filtering nodes and edges
-        self.subgraphs = None
-        self._is_filtered = False
-
-    def filter(
-        self, penalty_th: float, edge_weight_th: float, min_nodes: int, max_nodes: int | None, rng: Random
-    ) -> None:
-        """Filter graph edges and nodes.
-        1. Remove low-weight edges and isolated nodes.
-        2. Create the graph instance and extract low-penalty subgraphs.
-        3. Remove k-mers not included in any of the subgraphs.
-
-        Args:
-            penalty_th (float): See `RunState` in `config.py`.
-            edge_weight_th (float): See `RunState` in `config.py`.
-            min_nodes (int): See `RunState` in `config.py`.
-            max_nodes (int | None): See `RunState` in `config.py`.
-            rng (random.Random): See `RunState` in `config.py`.
-        """
-        kmers = self.kmers
-        nodes = self.nodes
-        edges = self.edges
-        is_filtered = self._is_filtered
-
-        if is_filtered:
-            logger.error(f'K-mers are already filtered, cannot filter again.')
-            return None
-
-        logger.info('Extracting low-penalty subgraphs from the k-mer graph...')
-        tik = time()
-
-        if max_nodes is None:
-            logger.warning(f' - Upper limit of subgraph size is not set. Lower limit is set to {min_nodes}')
-        else:
-            logger.info(f' - Subgraph size limit is set to [{min_nodes}, {max_nodes}]')
-
-        # remove low-weight edges and isolated nodes
-        nodes, edges, graph = KmerGraph.__filter_graph(nodes, edges, edge_weight_th)
-
-        # get low-penalty subgraphs
-        subgraphs, used_hashes = get_subgraphs(graph, penalty_th, min_nodes, max_nodes, rng)
-
-        # remove unused k-mers
-        logger.info(' - Removing k-mers not included in any of the subgraphs...')
-        kmers, nodes = _filter_kmers(kmers, nodes, used_hashes)
-        logger.info(f' - {len(kmers)} k-mers left')
-
-        print_time_delta(time()-tik)
-        self.kmers = kmers
-        self.nodes = nodes
-        self.edges = edges
-        self.graph = graph
+        self.record_ids = record_ids
+        self.nx_graph = nx_graph
         self.subgraphs = subgraphs
-        self._is_filtered = True
 
-    @staticmethod
-    def __filter_graph(nodes: NDArray, edges: NDArray, edge_weight_th: float) -> tuple[NDArray, NDArray, nx.Graph]:
-        """Remove low-weight edges and isolated nodes, and create the graph instance.
 
-        Args:
-            nodes (NDArray): See `KmerGraph.nodes`.
-            edges (NDArray): See `KmerGraph.edges`.
-            edge_weight_th (float): See `RunState` in `config.py`.
+def _extract_subgraphs(
+    graph: KmerGraph, penalty_th: float, edge_weight_th: float, min_nodes: int, max_nodes: int | None, rng: Random
+) -> FilteredGraph:
+    """
+    1. Remove low-weight edges and isolated nodes.
+    2. Create the graph instance and extract low-penalty subgraphs.
+    3. Remove k-mers not included in any of the subgraphs.
 
-        Returns:
-            tuple: A tuple containing
-                1. NDArray: Filtered nodes.
-                2. NDArray: Filtered edges.
-                3. nx.Graph: See `KmerGraph.graph`.
-        """
-        logger.info(' - Filtering graph edges and nodes...')
-        n_nodes, n_edges = len(nodes), len(edges)
+    Args:
+        penalty_th (float): See `RunState` in `config.py`.
+        edge_weight_th (float): See `RunState` in `config.py`.
+        min_nodes (int): See `RunState` in `config.py`.
+        max_nodes (int | None): See `RunState` in `config.py`.
+        rng (random.Random): See `RunState` in `config.py`.
+    """
+    logger.info('Extracting low-penalty subgraphs from the k-mer graph...')
+    tik = time()
 
-        # remove low-weight edges
-        th = np.uintp(edge_weight_th) # for faster comparison
-        edges = edges[edges['weight'] > th]
-        edge_values = edges.view(np.uint64).reshape(-1, 3)
-        logger.info(f' - Removed {n_edges - len(edges)} edges with weight<{edge_weight_th:.3f}, {len(edges)} edges left')
+    if max_nodes is None:
+        logger.warning(f' - Upper limit of subgraph size is not set. Lower limit is set to {min_nodes}')
+    else:
+        logger.info(f' - Subgraph size limit is set to [{min_nodes}, {max_nodes}]')
 
-        # remove isolated nodes
-        nodes_to_keep = np.unique(edge_values[:, :2])
-        nodes = nodes[
-            np.searchsorted(nodes['hash'], nodes_to_keep)
-        ]
-        logger.info(f' - Removed {n_nodes - len(nodes)} isolated nodes, {len(nodes)} nodes left')
+    # remove low-weight edges and isolated nodes
+    nodes, edges, nx_graph = _filter_edges_and_nodes(graph.nodes, graph.edges, edge_weight_th)
 
-        logger.info(' - Building graph...')
-        graph = nx.Graph()
-        graph.add_weighted_edges_from(edge_values, weight=EDGE_W)
-        nx.set_node_attributes(
-            graph,
-            values=dict(zip(nodes['hash'], nodes['penalty'])),
-            name=NODE_P
-        )
+    # get low-penalty subgraphs
+    subgraphs, used_hashes = get_subgraphs(nx_graph, penalty_th, min_nodes, max_nodes, rng)
 
-        return nodes, edges, graph
+    # remove unused k-mers
+    logger.info(' - Removing k-mers not included in any of the subgraphs...')
+    kmers, nodes = _filter_kmers(graph.kmers, nodes, used_hashes)
+    logger.info(f' - {len(kmers)} k-mers left')
+
+    print_time_delta(time()-tik)
+    return FilteredGraph(
+        kmers=kmers,
+        nodes=nodes,
+        edges=edges,
+        record_offsets=graph.record_offsets,
+        record_ids=graph.record_ids,
+        nx_graph=nx_graph,
+        subgraphs=subgraphs
+    )
+
+
+def _filter_edges_and_nodes(
+    nodes: NDArray, edges: NDArray, edge_weight_th: float
+) -> tuple[NDArray, NDArray, nx.Graph]:
+    """Remove low-weight edges and isolated nodes, and create the graph instance.
+
+    Args:
+        nodes (NDArray): See `KmerGraph.nodes`.
+        edges (NDArray): See `KmerGraph.edges`.
+        edge_weight_th (float): See `RunState` in `config.py`.
+
+    Returns:
+        tuple: A tuple containing
+            1. NDArray: Filtered nodes.
+            2. NDArray: Filtered edges.
+            3. nx.Graph: See `KmerGraph.graph`.
+    """
+    logger.info(' - Filtering graph edges and nodes...')
+    n_nodes, n_edges = len(nodes), len(edges)
+
+    # remove low-weight edges
+    th = np.uintp(edge_weight_th) # for faster comparison
+    edges = edges[edges['weight'] > th]
+    edge_values = edges.view(np.uint64).reshape(-1, 3)
+    logger.info(f' - Removed {n_edges - len(edges)} edges with weight<{edge_weight_th:.3f}, {len(edges)} edges left')
+
+    # remove isolated nodes
+    nodes_to_keep = np.unique(edge_values[:, :2])
+    nodes = nodes[
+        np.searchsorted(nodes['hash'], nodes_to_keep)
+    ]
+    logger.info(f' - Removed {n_nodes - len(nodes)} isolated nodes, {len(nodes)} nodes left')
+
+    logger.info(' - Building graph...')
+    nx_graph = nx.Graph()
+    nx_graph.add_weighted_edges_from(edge_values, weight=EDGE_W)
+    nx.set_node_attributes(
+        nx_graph,
+        values=dict(zip(nodes['hash'], nodes['penalty'])),
+        name=NODE_P
+    )
+
+    return nodes, edges, nx_graph
 
 
 def _expected_frac(jaccard_mtx: NDArray) -> np.floating:
@@ -222,18 +182,43 @@ def _expected_frac(jaccard_mtx: NDArray) -> np.floating:
     return np.mean(2 * jaccard_mtx / (1 + jaccard_mtx))
 
 
-def _frac_to_penalty(frac_tar: NDArray | float, frac_neg: NDArray | float) -> NDArray | float:
-    """The penalty formula (Euclidean / L2 norm of the two fractions).
-    - When `frac_tar` and `frac_neg` are expectations, this formula doesn't give the expected penalty, since it's non-linear.
-    - However, since it is convex, the returned value ≤ the true expectation (Jensen’s inequality).
+def build_graph(assemblies: Assemblies, config: Config) -> KmerGraph:
     """
-    return ((1 - frac_tar)**2 + frac_neg**2)**0.5
+    Args:
+        assemblies (Assemblies): See `Assemblies` in `assemblies.py`.
+        config (Config): See `Config` in `config.py`.
+
+    Returns:
+        KmerGraph: The unscored minimizer graph.
+    """
+    logger.info(f'Building minimizer graph from {len(assemblies)} assemblies...')
+    if config.low_memory:
+        logger.warning(' - Low-memory mode is enabled; graph construction may take longer.')
+    tik = time()
+
+    graph = KmerGraph(
+        assemblies.path,
+        config.kmerlen,
+        config.windowsize,
+        n_cpu=config.n_cpu,
+        low_memory=config.low_memory
+    )
+
+    logger.info(f' - Found {len(graph.kmers)} minimizers')
+    logger.info(f' - Found {len(graph.nodes)} nodes (unique minimizers)')
+    logger.info(f' - Found {len(graph.edges)} weighted edges')
+
+    print_time_delta(time()-tik)
+    return graph
 
 
-def get_kmers(
-    assemblies: Assemblies, config: Config, state: RunState
-) -> tuple[KmerGraph, NDArray | None]:
-    """Create a `KmerGraph` instance, calculate filtering thresholds and run the `filter()` method to generate low-penalty subgraphs.
+def filter_graph(
+    graph: KmerGraph, assemblies: Assemblies, config: Config, state: RunState
+) -> tuple[FilteredGraph, NDArray | None]:
+    """
+    1. Calculate node penalty scores. This will populate empty fields in `KmerGraph.nodes` in place.
+    2. Calculate filtering thresholds.
+    3. Filter the graph and extract low-penalty subgraphs.
 
     Args:
         assemblies (Assemblies): See `Assemblies` in `assemblies.py`.
@@ -242,7 +227,7 @@ def get_kmers(
 
     Returns:
         tuple: A tuple containing
-            1. KmerGraph: The KmerGraph instance.
+            1. FilteredGraph: The filtered graph.
             2. NDArray | None: A matrix of Jaccard indices of all assembly pairs.
     """
     overwrite = config.overwrite
@@ -253,24 +238,20 @@ def get_kmers(
     stringency = config.stringency
     min_len = config.min_len
     max_len = config.max_len
-    no_filter = config.no_filter
     penalty_th_cap = config.penalty_th_cap
     edge_w_th_mul = config.edge_w_th_mul
     min_nodes_floor = config.min_nodes_floor
     max_nodes_cap = config.max_nodes_cap
     sketchsize = config.sketchsize
     n_cpu = config.n_cpu
-    low_memory = config.low_memory
 
     working_dir = state.working_dir
     rng = state.rng
     n_tar = state.n_tar
     n_neg = state.n_neg
 
-    kmers = KmerGraph(assemblies, kmerlen, windowsize, n_cpu, low_memory)
-
-    if no_filter:
-        return kmers, None
+    # fill in nodes['n_tar'], nodes['n_neg'] and nodes['penalty']
+    _get_penalty(graph.kmers, graph.nodes, graph.record_offsets, assemblies.is_target, n_cpu=n_cpu)
 
     # calculate filter params
     # 1. calculate penalty threshold
@@ -294,7 +275,7 @@ def get_kmers(
                 logger.error('Mash is not installed. Falling back to minimizer sketches.')
             # calculate expected fractions directly from minimizer sketches
             # for tar absence or neg presence, k-mer weights should always be nodes['n_tar'] (how many target assemblies have this k-mer)
-            nodes = kmers.nodes
+            nodes = graph.nodes
             frac_tar = nodes['n_tar'] / n_tar
             e_absence_tar = 1 - np.sum(frac_tar * nodes['n_tar']) / np.sum(nodes['n_tar'])
             frac_neg = nodes['n_neg'] / n_neg
@@ -333,10 +314,10 @@ def get_kmers(
         max_nodes = max_len // gap_len + 1
 
     # extract low-penalty subgraphs and remove unused k-mers
-    kmers.filter(penalty_th, edge_weight_th, min_nodes, max_nodes, rng)
+    graph = _extract_subgraphs(graph, penalty_th, edge_weight_th, min_nodes, max_nodes, rng)
 
     state.penalty_th = penalty_th
     state.edge_weight_th = edge_weight_th
     state.min_nodes = min_nodes
     state.max_nodes = max_nodes
-    return kmers, jaccard
+    return graph, jaccard

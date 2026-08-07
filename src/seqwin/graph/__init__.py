@@ -2,22 +2,22 @@
 Minimizer Graph
 ===============
 
-Core functions and dtypes for Seqwin minimizer graphs.
+Core classes and dtypes for Seqwin minimizer graphs.
 
 Usage:
 ------
 ```python
->>> from seqwin.graph import build
->>> help(build)
+>>> from seqwin.graph import KmerGraph
+>>> help(KmerGraph)
 ```
 
 Dependencies:
 -------------
 - numpy
 
-Functions:
+Classes:
 ----------
-- build
+- KmerGraph
 
 Attributes:
 -----------
@@ -58,25 +58,13 @@ EDGE_DTYPE = np.dtype([
 ])
 
 
-def build(
-    assembly_paths: Iterable[Path],
-    kmerlen: int,
-    windowsize: int,
-    low_memory: bool = False,
-    n_cpu: int = 1
-) -> tuple[
-    NDArray[np.void],
-    NDArray[np.void],
-    NDArray[np.void],
-    NDArray[np.uintp],
-    list[tuple[str, ...]]
-]:
-    """Build a Seqwin minimizer graph.
+class KmerGraph:
+    """The minimizer graph class.
 
     Example usage:
     ```python
-    >>> from seqwin.graph import build
-    >>> kmers, nodes, edges, record_offsets, record_ids = build(
+    >>> from seqwin.graph import KmerGraph
+    >>> graph = KmerGraph(
     >>>     assembly_paths = ...,
     >>>     kmerlen = 21,
     >>>     windowsize = 200,
@@ -104,42 +92,58 @@ def build(
     >>> record_idx = kmers['record_idx'] - record_offsets[assembly_idx]
     ```
 
-    Args:
-        assembly_paths (Iterable[Path]): Paths to input assemblies in FASTA format (plain or gzipped).
-        kmerlen (int): K-mer length for minimizer sketch.
-        windowsize (int): Window size for minimizer sketch.
-        n_cpu (int, optional): Number of worker threads to use. [1]
-        low_memory (bool, optional): Recompute minimizers in a second pass to reduce peak memory. [False]
-
-    Returns:
-        tuple: A tuple containing
-            1. NDArray[np.void]: A 1-D NumPy structured array of minimizers from all assemblies.
-                Dtype: `KMER_DTYPE`
-                - 'pos' (uint32): 0-based position of the minimizer within its FASTA record.
-                - 'record_idx' (uint32): 0-based global index of the FASTA record.
-            2. NDArray[np.void]: A 1-D NumPy structured array of minimizer nodes.
-                Dtype: `NODE_DTYPE`
-                - 'hash' (uint64): Hash value of the minimizers represented by this node.
-                - 'start' (uintp): Start of the half-open range for this node's minimizer entries.
-                - 'stop' (uintp): End of the half-open range for this node's minimizer entries.
-                - 'n_tar' (uint32): Node scoring placeholder initialized to 0.
-                - 'n_neg' (uint32): Node scoring placeholder initialized to 0.
-                - 'penalty' (float64): Node scoring placeholder initialized to 0.0.
-            3. NDArray[np.void]: A 1-D NumPy structured array of weighted, undirected edges.
-                Dtype: `EDGE_DTYPE`
-                - 'first' (uint64): Smaller endpoint hash of the undirected edge.
-                - 'second' (uint64): Larger endpoint hash of the undirected edge.
-                - 'weight' (uintp): Number of assemblies where the endpoints are adjacent.
-            4. NDArray[np.uint32]: Cumulative global FASTA record offsets by assembly.
-            5. list[tuple[str, ...]]: FASTA record IDs of each assembly.
+    Attributes:
+        kmers (NDArray[np.void]): A 1-D NumPy structured array of minimizers from all assemblies.
+            Dtype: `KMER_DTYPE`
+            - 'pos' (uint32): 0-based position of the minimizer within its FASTA record.
+            - 'record_idx' (uint32): 0-based global index of the FASTA record.
+        nodes (NDArray[np.void]): A 1-D NumPy structured array of minimizer nodes.
+            Dtype: `NODE_DTYPE`
+            - 'hash' (uint64): Hash value of the minimizers represented by this node.
+            - 'start' (uintp): Start of the half-open range for this node's minimizer entries.
+            - 'stop' (uintp): End of the half-open range for this node's minimizer entries.
+            - 'n_tar' (uint32): Node scoring placeholder initialized to 0.
+            - 'n_neg' (uint32): Node scoring placeholder initialized to 0.
+            - 'penalty' (float64): Node scoring placeholder initialized to 0.0.
+        edges (NDArray[np.void]): A 1-D NumPy structured array of weighted, undirected edges.
+            Dtype: `EDGE_DTYPE`
+            - 'first' (uint64): Smaller endpoint hash of the undirected edge.
+            - 'second' (uint64): Larger endpoint hash of the undirected edge.
+            - 'weight' (uintp): Number of assemblies where the endpoints are adjacent.
+        record_offsets (NDArray[np.uint32]): Cumulative global FASTA record offsets by assembly.
+        record_ids (list[tuple[str, ...]]): FASTA record IDs of each assembly.
     """
-    return _build_native(
-        list(str(p) for p in assembly_paths),
-        int(kmerlen),
-        int(windowsize),
-        int(n_cpu),
-        bool(low_memory)
-    )
+    __slots__ = ('kmers', 'nodes', 'edges', 'record_offsets', 'record_ids')
+    kmers: NDArray[np.void]
+    nodes: NDArray[np.void]
+    edges: NDArray[np.void]
+    record_offsets: NDArray[np.uintp]
+    record_ids: list[tuple[str, ...]]
+
+    def __init__(
+        self,
+        assembly_paths: Iterable[Path],
+        kmerlen: int,
+        windowsize: int,
+        low_memory: bool = False,
+        n_cpu: int = 1
+    ) -> None:
+        """Build a minimizer graph.
+
+        Args:
+            assembly_paths (Iterable[Path]): Paths to input assemblies in FASTA format (plain or gzipped).
+            kmerlen (int): K-mer length for minimizer sketch.
+            windowsize (int): Window size for minimizer sketch.
+            n_cpu (int, optional): Number of worker threads to use. [1]
+            low_memory (bool, optional): Recompute minimizers in a second pass to reduce peak memory. [False]
+        """
+        self.kmers, self.nodes, self.edges, self.record_offsets, self.record_ids = _build_native(
+            list(str(p) for p in assembly_paths),
+            int(kmerlen),
+            int(windowsize),
+            int(n_cpu),
+            bool(low_memory)
+        )
 
 
 def _get_penalty(

@@ -9,7 +9,7 @@ Dependencies:
 - numpy
 - pandas
 - .assemblies
-- .kmers
+- .graph
 - .markers
 - .utils
 - .config
@@ -37,7 +37,7 @@ import numpy as np
 import pandas as pd
 
 from .assemblies import Assemblies, get_assemblies
-from .kmers import KmerGraph, get_kmers
+from .kmers import FilteredGraph, build_graph, filter_graph
 from .markers import ConnectedKmers, get_markers
 from .utils import overwrite_warning, overwrite_error, file_to_write
 from .config import Config, RunState, config_logger, WORKINGDIR
@@ -50,15 +50,15 @@ class Seqwin(object):
         config (Config): See `Config` in `config.py`.
         state (RunState): See `RunState` in `config.py`.
         assemblies (Assemblies): See `Assemblies` in `assemblies.py`.
-        kmers (KmerGraph | None): See `KmerGraph` in `kmers.py`. Generated with `self.run()`.
+        graph (FilteredGraph | None): See `FilteredGraph` in `kmers.py`. Generated with `self.run()`.
         mash (pd.DataFrame | None): Tabular output of `mash dist`. Generated with `self.run()`.
         markers (list[ConnectedKmers] | None): See `ConnectedKmers` in `markers.py`. Generated with `self.run()`.
     """
-    __slots__ = ('config', 'state', 'assemblies', 'kmers', 'mash', 'markers')
+    __slots__ = ('config', 'state', 'assemblies', 'graph', 'mash', 'markers')
     config: Config
     state: RunState
     assemblies: Assemblies
-    kmers: KmerGraph | None
+    graph: FilteredGraph | None
     mash: pd.DataFrame | None
     markers: list[ConnectedKmers] | None
 
@@ -116,47 +116,46 @@ class Seqwin(object):
         self.config = config
         self.state = state
         self.assemblies = assemblies
-        self.kmers = None
+        self.graph = None
         self.mash = None
         self.markers = None
 
     def run(self) -> None:
-        """Build the k-mer graph and extract candidate markers.
-        """
+        """Build and filter the k-mer graph, then extract candidate markers."""
         config = self.config
         state = self.state
         assemblies = self.assemblies
 
         overwrite = config.overwrite
-        no_filter = config.no_filter
+        save_graph = config.save_graph
         working_dir = state.working_dir
 
-        kmers, jaccard = get_kmers(assemblies, config, state)
-
-        if no_filter:
+        graph = build_graph(assemblies, config)
+        if save_graph:
             graph_path = working_dir / WORKINGDIR.graph
             file_to_write(graph_path, overwrite)
             np.savez(
                 graph_path,
                 allow_pickle=False,
-                kmers=kmers.kmers,
-                nodes=kmers.nodes,
-                edges=kmers.edges,
-                record_offsets=kmers.record_offsets,
+                kmers=graph.kmers,
+                nodes=graph.nodes,
+                edges=graph.edges,
+                record_offsets=graph.record_offsets
             )
-            logger.info(f'Filtering is turned off. Raw minimizer graph is saved as {graph_path}')
-        else:
-            markers = get_markers(kmers, assemblies, config, state)
+            logger.info(f'Raw minimizer graph is saved as {graph_path}')
 
-            self.kmers = kmers
-            self.mash = jaccard
-            self.markers = markers
+        graph, jaccard = filter_graph(graph, assemblies, config, state)
+        markers = get_markers(graph, assemblies, config, state)
 
-            # save run instance
-            results_path = working_dir / WORKINGDIR.results
-            file_to_write(results_path, overwrite)
-            results_path.write_bytes(pickle.dumps(self))
-            logger.info(f'Run instance (includes all run data) saved as {results_path}')
+        self.graph = graph
+        self.mash = jaccard
+        self.markers = markers
+
+        # save run instance
+        results_path = working_dir / WORKINGDIR.results
+        file_to_write(results_path, overwrite)
+        results_path.write_bytes(pickle.dumps(self))
+        logger.info(f'Run instance (includes all run data) saved as {results_path}')
 
 
 def run(config: Config) -> Seqwin:

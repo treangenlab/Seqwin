@@ -94,7 +94,6 @@ class Config(BaseModel):
         min_len (int): Minimum length of output signatures. [200]
         max_len (int | None): Estimated maximum length of output signatures. If None, no explicit limit is applied (capped by `max_nodes_cap`). [None]
         run_blast (bool): If True, evaluate signature sequences with BLAST. [True]
-        no_filter (bool): If True, skip filtering k-mers and save the raw k-mer graph. [False]
         blast_neg_only (bool, deprecated): If True, only include non-target assemblies in the BLAST database. [False]
 
         penalty_th_cap (float): If `penalty_th` is None, penalty threshold cannot be higher than this value. [0.2]
@@ -115,6 +114,7 @@ class Config(BaseModel):
         seed (int): Random seed for reproducibility. [42]
         n_cpu (int): Number of parallel processes or threads to use. [4]
         low_memory (bool): If True, reduce peak memory by recomputing minimizers in a second pass. [False]
+        save_graph (bool): Save the minimizer graph produced by the build phase before filtering. [False]
         version (str): Seqwin version.
     """
     # Inputs
@@ -139,7 +139,6 @@ class Config(BaseModel):
     min_len: int = 200
     max_len: int | None = None
     run_blast: bool = True
-    no_filter: bool = False
     blast_neg_only: bool = False # NOTE: need to fix when this is turned on
 
     # Graph filtering options (not included in CLI)
@@ -159,6 +158,7 @@ class Config(BaseModel):
     gzip: bool = True
     api_key: SecretStr | None = None
     download_only: bool = False
+    save_graph: bool = False
 
     # Miscellaneous
     seed: int = 42
