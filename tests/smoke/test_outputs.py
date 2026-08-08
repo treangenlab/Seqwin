@@ -114,8 +114,8 @@ def test_graph_matches_expected(tmp_path: Path, targets_txt: Path, non_targets_t
         '--neg-paths', str(non_targets_txt),
         '--prefix', str(tmp_path),
         '--threads', '1',
-        '--title', 'no-filter',
-        '--no-filter',
+        '--title', 'save-graph',
+        '--save-graph',
         *_shared_config,
     )
 
@@ -128,8 +128,8 @@ def test_low_memory_graph_matches_expected(tmp_path: Path, targets_txt: Path, no
         '--neg-paths', str(non_targets_txt),
         '--prefix', str(tmp_path),
         '--threads', '1',
-        '--title', 'no-filter-low-memory',
-        '--no-filter',
+        '--title', 'save-graph-low-memory',
+        '--save-graph',
         '--low-memory',
         *_shared_config,
     )

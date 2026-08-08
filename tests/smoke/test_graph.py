@@ -2,7 +2,12 @@ from pathlib import Path
 
 import numpy as np
 
-from seqwin.graph import KMER_DTYPE, NODE_DTYPE, EDGE_DTYPE, build, _get_penalty, _filter_kmers
+from seqwin.graph import KMER_DTYPE, NODE_DTYPE, EDGE_DTYPE, KmerGraph, _get_penalty, _filter_kmers
+
+
+def _build(*args, **kwargs):
+    graph = KmerGraph(*args, **kwargs)
+    return graph.kmers, graph.nodes, graph.edges, graph.record_offsets, graph.record_ids
 
 
 def _sorted_edges(edges: np.ndarray) -> np.ndarray:
@@ -66,19 +71,19 @@ def test_build_threading_equivalence(targets_dir, non_targets_dir) -> None:
         non_targets_dir / 'non-target-1.fasta',
         non_targets_dir / 'non-target-2.fasta',
     ]
-    kmers_1, nodes_1, edges_1, record_offsets_1, record_ids_1 = build(
+    kmers_1, nodes_1, edges_1, record_offsets_1, record_ids_1 = _build(
         assembly_paths,
         kmerlen=7,
         windowsize=10,
         n_cpu=1,
     )
-    kmers_2, nodes_2, edges_2, record_offsets_2, record_ids_2 = build(
+    kmers_2, nodes_2, edges_2, record_offsets_2, record_ids_2 = _build(
         assembly_paths,
         kmerlen=7,
         windowsize=10,
         n_cpu=2,
     )
-    kmers_many, nodes_many, edges_many, record_offsets_many, record_ids_many = build(
+    kmers_many, nodes_many, edges_many, record_offsets_many, record_ids_many = _build(
         assembly_paths,
         kmerlen=7,
         windowsize=10,
@@ -128,7 +133,7 @@ def test_build_rejects_is_targets_argument(targets_dir, non_targets_dir) -> None
         non_targets_dir / 'non-target-1.fasta',
     ]
     with np.testing.assert_raises(TypeError):
-        build(
+        _build(
             assembly_paths,
             kmerlen=7,
             windowsize=10,
@@ -147,7 +152,7 @@ def test_multi_thread_record_offsets_and_global_record_indices(tmp_path: Path) -
         write_fasta(path, n_records)
         assembly_paths.append(path)
 
-    kmers, _, _, record_offsets, record_ids = build(
+    kmers, _, _, record_offsets, record_ids = _build(
         assembly_paths,
         kmerlen=7,
         windowsize=10,
@@ -169,7 +174,7 @@ def test_build_empty_record_offsets(tmp_path: Path) -> None:
         ([empty_assembly], np.array([0, 0], dtype=np.uint32)),
     ):
         for low_memory in (False, True):
-            kmers, _, _, record_offsets, record_ids = build(
+            kmers, _, _, record_offsets, record_ids = _build(
                 assembly_paths,
                 kmerlen=7,
                 windowsize=10,
@@ -222,14 +227,14 @@ def test_low_memory_build_matches_standard(targets_dir, non_targets_dir) -> None
         non_targets_dir / 'non-target-2.fasta',
     ]
     for n_cpu in (1, 2, 99):
-        standard = build(
+        standard = _build(
             assembly_paths,
             kmerlen=7,
             windowsize=10,
             n_cpu=n_cpu,
             low_memory=False,
         )
-        low_memory = build(
+        low_memory = _build(
             assembly_paths,
             kmerlen=7,
             windowsize=10,

@@ -2,8 +2,8 @@
 Markers
 =======
 
-A core module of Seqwin. Extract candidate markers (signatures) from subgraphs of a k-mer graph
-(`kmers.KmerGraph.subgraphs`).
+A core module of Seqwin. Extract candidate markers (signatures) from
+subgraphs of a filtered k-mer graph (`kmers.FilteredGraph.subgraphs`).
 
 Dependencies:
 -------------
@@ -47,7 +47,7 @@ import networkx as nx
 from numpy.typing import NDArray
 
 from .assemblies import Assemblies
-from .kmers import KmerGraph
+from .kmers import FilteredGraph
 from .ncbi import blast
 from .graph import OrderedKmers
 from .utils import print_time_delta, log_and_raise, file_to_write, mp_wrapper
@@ -93,12 +93,12 @@ _BASELINE_METRICS = MarkerMetrics(**{f: .0 for f in _METRIC_NAMES})
 
 
 class ConnectedKmers(object):
-    """The candidate marker Class, created from a low-penalty subgraph of the k-mer graph `KmerGraph.graph`.
+    """The candidate marker Class, created from a low-penalty subgraph of the k-mer graph `FilteredGraph.nx_graph`.
 
     Attributes:
-        graph (nx.Graph): A low-penalty subgraph of the k-mer graph `KmerGraph.graph`.
+        graph (nx.Graph): A low-penalty subgraph of the k-mer graph `FilteredGraph.nx_graph`.
         kmers (pd.DataFrame): K-mers of each node in the subgraph, from all assemblies.
-            It's a subset of `KmerGraph.kmers`, with index inherited.
+            It's a subset of `FilteredGraph.kmers`, with index inherited.
             K-mers with adjacent indices are also adjacent in the assembly sequence.
         loc (pd.DataFrame): Location of the subgraph in each assembly.
             Columns: ['assembly_idx', 'record_idx', 'start', 'stop', 'n_kmers',
@@ -137,9 +137,9 @@ class ConnectedKmers(object):
         3. (deprecated) Determine the orientation (strand, +/-) of the subgraph in each assembly.
 
         Args:
-            graph (nx.Graph): A connected low-penalty subgraph of the k-mer graph `KmerGraph.graph`.
+            graph (nx.Graph): A connected low-penalty subgraph of the k-mer graph `FilteredGraph.nx_graph`.
             kmers (pd.DataFrame): K-mers of each node in the subgraph, from all assemblies.
-                It's a subset of `KmerGraph.kmers`, with index inherited.
+                It's a subset of `FilteredGraph.kmers`, with index inherited.
                 K-mers with adjacent indices are also adjacent in the assembly sequence.
             kmerlen (int): See `Config` in `config.py`.
             windowsize (int): See `Config` in `config.py`.
@@ -387,12 +387,12 @@ def _create_ck(
 
 
 def _get_create_ck_args(
-    kg: KmerGraph, n_tar: int, kmerlen: int, windowsize: int
+    graph: FilteredGraph, n_tar: int, kmerlen: int, windowsize: int
 ) -> Generator[tuple[nx.Graph, pd.DataFrame, int], None, None]:
     """Generate input arguments for `_create_ck()`.
 
     Args:
-        kg (KmerGraph): See `KmerGraph` in `kmers.py`.
+        graph (FilteredGraph): See `FilteredGraph` in `kmers.py`.
         n_tar (int): See `RunState` in `config.py`.
         kmerlen (int): See `Config` in `config.py`.
         windowsize (int): See `Config` in `config.py`.
@@ -400,11 +400,11 @@ def _get_create_ck_args(
     Yields:
         tuple: Input arguments of `_create_ck()`.
     """
-    kmers = kg.kmers
-    nodes = kg.nodes
-    graph = kg.graph
-    subgraphs = kg.subgraphs
-    record_offsets = kg.record_offsets
+    kmers = graph.kmers
+    nodes = graph.nodes
+    nx_graph = graph.nx_graph
+    subgraphs = graph.subgraphs
+    record_offsets = graph.record_offsets
 
     # create a dict of hash -> k-mer group
     kmer_groups = dict()
@@ -415,7 +415,7 @@ def _get_create_ck_args(
     # yield function args
     for sg in subgraphs:
         # each subgraph is a set of nodes, so it's not ordered
-        arg_graph = graph.subgraph(sg).copy()
+        arg_graph = nx_graph.subgraph(sg).copy()
 
         arg_nodes = tuple(sg) # fixate node order
         arg_kmers = tuple(
@@ -472,7 +472,7 @@ def _fetch_cks_seq(
 
 
 def _get_cks(
-    kmers: KmerGraph,
+    graph: FilteredGraph,
     n_tar: int,
     kmerlen: int,
     windowsize: int,
@@ -481,12 +481,12 @@ def _get_cks(
     n_cpu: int
 ) -> tuple[list[ConnectedKmers], list[str]]:
     """
-    1. Create a ConnectedKmers instance for each low-penalty subgraph of the k-mer graph (`KmerGraph.subgraphs`).
+    1. Create a ConnectedKmers instance for each low-penalty subgraph of the k-mer graph (`FilteredGraph.subgraphs`).
     2. Remove instances that are shorter than min_len or have defects (`ConnectedKmers.is_bad`).
     3. Fetch the representative sequence for each remaining instance.
 
     Args:
-        kmers (KmerGraph): See `KmerGraph` in `kmers.py`.
+        graph (FilteredGraph): See `FilteredGraph` in `kmers.py`.
         n_tar (int): See `RunState` in `config.py`.
         kmerlen (int): See `Config` in `config.py`.
         windowsize (int): See `Config` in `config.py`.
@@ -506,8 +506,8 @@ def _get_cks(
     logger.info(' - Processing each subgraph...')
     all_cks: list[ConnectedKmers] = mp_wrapper(
         _create_ck,
-        _get_create_ck_args(kmers, n_tar, kmerlen, windowsize),
-        n_cpu=n_cpu, n_jobs=len(kmers.subgraphs)
+        _get_create_ck_args(graph, n_tar, kmerlen, windowsize),
+        n_cpu=n_cpu, n_jobs=len(graph.subgraphs)
     )
 
     # get candidate ConnectedKmers instances
@@ -728,12 +728,12 @@ def _eval_cks(
 
 
 def get_markers(
-    kmers: KmerGraph, assemblies: Assemblies, config: Config, state: RunState
+    graph: FilteredGraph, assemblies: Assemblies, config: Config, state: RunState
 ) -> list[ConnectedKmers]:
     """Extract candidate markers (signatures) from a k-mer graph, and save them to files.
 
     Args:
-        kmers (KmerGraph): See `KmerGraph` in `kmers.py`.
+        graph (FilteredGraph): See `FilteredGraph` in `kmers.py`.
         assemblies (Assemblies): See `Assemblies` in `assemblies.py`.
         config (Config): See `Config` in `config.py`.
         state (RunState): See `RunState` in `config.py`.
@@ -755,7 +755,7 @@ def get_markers(
 
     # extract marker from each low-penalty subgraph
     # all_cks: ConnectedKmers (ck) instances; all_reps: representative sequences
-    all_cks, all_reps = _get_cks(kmers, n_tar, kmerlen, windowsize, min_len, assemblies, n_cpu)
+    all_cks, all_reps = _get_cks(graph, n_tar, kmerlen, windowsize, min_len, assemblies, n_cpu)
 
     # evaluate each marker with BLAST
     if run_blast and HAS_BLAST:
@@ -779,7 +779,7 @@ def get_markers(
     file_to_write(markers_fasta, overwrite)
     fasta = list()
     csv = list()
-    all_record_ids = assemblies.record_ids
+    all_record_ids = graph.record_ids
     for ck in all_cks:
         rep = ck.rep
         assembly_idx = rep.assembly_idx
