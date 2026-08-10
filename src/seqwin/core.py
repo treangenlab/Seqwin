@@ -140,7 +140,8 @@ class Seqwin(object):
                 kmers=graph.kmers,
                 nodes=graph.nodes,
                 edges=graph.edges,
-                record_offsets=graph.record_offsets
+                record_offsets=graph.record_offsets,
+                record_ids=graph.record_ids
             )
             logger.info(f'Raw minimizer graph is saved as {graph_path}')
 

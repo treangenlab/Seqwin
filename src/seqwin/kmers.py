@@ -50,8 +50,8 @@ class FilteredGraph(KmerGraph):
         kmers (NDArray[np.void]): Only includes k-mers with hashes in `subgraphs`.
         nodes (NDArray[np.void]): Only includes nodes with hashes in `subgraphs`.
         edges (NDArray[np.void]): Low-weight edges are filtered.
-        record_offsets (NDArray[np.uintp]): Inherited from `KmerGraph.record_offsets`.
-        record_ids (list[tuple[str, ...]]): Inherited from `KmerGraph.record_ids`.
+        record_offsets (NDArray[np.uint32]): Inherited from `KmerGraph.record_offsets`.
+        record_ids (NDArray[np.str\_]): Inherited from `KmerGraph.record_ids`.
         nx_graph (nx.Graph): The NetworkX graph instance built from filtered edges.
         subgraphs (tuple[frozenset[np.uint64], ...]): Low-penalty subgraphs. Each subgraph is a set of k-mer hash values.
     """
@@ -64,8 +64,8 @@ class FilteredGraph(KmerGraph):
         kmers: NDArray[np.void],
         nodes: NDArray[np.void],
         edges: NDArray[np.void],
-        record_offsets: NDArray[np.uintp],
-        record_ids: list[tuple[str, ...]],
+        record_offsets: NDArray[np.uint32],
+        record_ids: NDArray[np.str_],
         nx_graph: nx.Graph,
         subgraphs: tuple[frozenset[np.uint64], ...]
     ) -> None:

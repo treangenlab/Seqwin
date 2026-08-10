@@ -26,7 +26,7 @@ def _assert_graph_outputs_equal(standard, low_memory) -> None:
     assert offsets_std.dtype == np.dtype(np.uint32)
     assert offsets_lm.dtype == np.dtype(np.uint32)
     assert np.array_equal(offsets_std, offsets_lm)
-    assert ids_std == ids_lm
+    assert np.array_equal(ids_std, ids_lm)
     _assert_node_ranges(kmers_lm, nodes_lm)
 
 
@@ -117,9 +117,13 @@ def test_build_threading_equivalence(targets_dir, non_targets_dir) -> None:
     assert np.array_equal(nodes_1, nodes_2)
     assert np.array_equal(nodes_1, nodes_many)
 
-    assert record_ids_1 == record_ids_2
-    assert record_ids_1 == record_ids_many
-    assert len(record_ids_1) == len(assembly_paths)
+    assert isinstance(record_ids_1, np.ndarray)
+    assert record_ids_1.ndim == 1
+    assert record_ids_1.dtype.kind == 'U'
+    assert record_ids_1.dtype != object
+    assert np.array_equal(record_ids_1, record_ids_2)
+    assert np.array_equal(record_ids_1, record_ids_many)
+    assert len(record_ids_1) == int(record_offsets_1[-1])
     assert np.array_equal(record_offsets_1, record_offsets_2)
     assert np.array_equal(record_offsets_1, record_offsets_many)
 
@@ -159,9 +163,13 @@ def test_multi_thread_record_offsets_and_global_record_indices(tmp_path: Path) -
         n_cpu=2,
     )
 
-    assert [len(ids) for ids in record_ids] == [2, 1, 3, 1]
     assert record_offsets.dtype == np.dtype(np.uint32)
     assert np.array_equal(record_offsets, np.array([0, 2, 3, 6, 7], dtype=np.uint32))
+    assert record_ids.dtype.kind == 'U'
+    assert record_ids.tolist() == ['r0', 'r1', 'r0', 'r0', 'r1', 'r2', 'r0']
+    assert [record_ids[record_offsets[i]:record_offsets[i + 1]].tolist()
+            for i in range(4)] == [['r0', 'r1'], ['r0'], ['r0', 'r1', 'r2'], ['r0']]
+    assert len(record_ids) == int(record_offsets[-1])
     assert np.array_equal(np.unique(kmers['record_idx']), np.arange(7, dtype=np.uint32))
 
 
@@ -184,7 +192,11 @@ def test_build_empty_record_offsets(tmp_path: Path) -> None:
             assert len(kmers) == 0
             assert record_offsets.dtype == np.dtype(np.uint32)
             assert np.array_equal(record_offsets, expected_offsets)
-            assert record_ids == [()] * len(assembly_paths)
+            assert isinstance(record_ids, np.ndarray)
+            assert record_ids.ndim == 1
+            assert record_ids.dtype.kind == 'U'
+            assert record_ids.size == 0
+            assert len(record_ids) == int(record_offsets[-1])
 
 
 def test_filter_kmers() -> None:

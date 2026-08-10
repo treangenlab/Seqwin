@@ -22,6 +22,8 @@ Classes:
 Attributes:
 -----------
 - KMER_DTYPE (np.dtype)
+- NODE_DTYPE (np.dtype)
+- EDGE_DTYPE (np.dtype)
 """
 
 __license__ = 'GPL 3.0'
@@ -111,14 +113,14 @@ class KmerGraph:
             - 'second' (uint64): Larger endpoint hash of the undirected edge.
             - 'weight' (uintp): Number of assemblies where the endpoints are adjacent.
         record_offsets (NDArray[np.uint32]): Cumulative global FASTA record offsets by assembly.
-        record_ids (list[tuple[str, ...]]): FASTA record IDs of each assembly.
+        record_ids (NDArray[np.str\_]): FASTA record IDs in global record order.
     """
     __slots__ = ('kmers', 'nodes', 'edges', 'record_offsets', 'record_ids')
     kmers: NDArray[np.void]
     nodes: NDArray[np.void]
     edges: NDArray[np.void]
-    record_offsets: NDArray[np.uintp]
-    record_ids: list[tuple[str, ...]]
+    record_offsets: NDArray[np.uint32]
+    record_ids: NDArray[np.str_]
 
     def __init__(
         self,
@@ -137,13 +139,14 @@ class KmerGraph:
             n_cpu (int, optional): Number of worker threads to use. [1]
             low_memory (bool, optional): Recompute minimizers in a second pass to reduce peak memory. [False]
         """
-        self.kmers, self.nodes, self.edges, self.record_offsets, self.record_ids = _build_native(
+        self.kmers, self.nodes, self.edges, self.record_offsets, record_ids = _build_native(
             list(str(p) for p in assembly_paths),
             int(kmerlen),
             int(windowsize),
             int(n_cpu),
             bool(low_memory)
         )
+        self.record_ids = np.asarray(record_ids, dtype='U')
 
 
 def _get_penalty(

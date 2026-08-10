@@ -67,8 +67,8 @@ struct Graph {
     NoInitArray<Edge> edges;
     /** Cumulative global FASTA record offsets by assembly. */
     std::vector<std::uint32_t> record_offsets;
-    /** FASTA record IDs of each assembly. */
-    std::vector<std::vector<std::string>> ids_by_assembly;
+    /** FASTA record IDs in global record order. */
+    std::vector<std::string> record_ids;
 };
 
 } // namespace seqwin
