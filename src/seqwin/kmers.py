@@ -44,7 +44,7 @@ from .config import Config, RunState, HAS_MASH, WORKINGDIR, EDGE_W, NODE_P
 
 
 class FilteredGraph(KmerGraph):
-    """The filtered minimizer graph class.
+    r"""The filtered minimizer graph class.
 
     Attributes:
         kmers (NDArray[np.void]): Only includes k-mers with hashes in `subgraphs`.

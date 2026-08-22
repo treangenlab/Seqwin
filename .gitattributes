@@ -1,3 +1,3 @@
-cpp/**/btllib/** linguist-vendored
+cpp/vendor/** linguist-vendored
 tests/**/*.py linguist-vendored
-*.npz binary
+*.npy binary
