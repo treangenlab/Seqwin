@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from seqwin.graph import KMER_DTYPE, NODE_DTYPE, EDGE_DTYPE, KmerGraph, _get_penalty, _filter_kmers
 
@@ -8,6 +9,107 @@ from seqwin.graph import KMER_DTYPE, NODE_DTYPE, EDGE_DTYPE, KmerGraph, _get_pen
 def _build(*args, **kwargs):
     graph = KmerGraph(*args, **kwargs)
     return graph.kmers, graph.nodes, graph.edges, graph.record_offsets, graph.record_ids
+
+
+def _small_graph(targets_dir: Path, non_targets_dir: Path) -> KmerGraph:
+    return KmerGraph(
+        [targets_dir / 'target-1.fasta', non_targets_dir / 'non-target-1.fasta'],
+        kmerlen=7,
+        windowsize=10,
+    )
+
+
+def test_graph_save_load_round_trip(tmp_path: Path, targets_dir: Path, non_targets_dir: Path) -> None:
+    graph = _small_graph(targets_dir, non_targets_dir)
+    graph_path = tmp_path / 'graph'
+    graph_path.mkdir()
+    graph.save(graph_path)
+
+    names = ('kmers', 'nodes', 'edges', 'record_offsets', 'record_ids')
+    assert {path.name for path in graph_path.iterdir()} == {f'{name}.npy' for name in names}
+
+    loaded = KmerGraph.load(graph_path)
+    for name in names:
+        original_array = getattr(graph, name)
+        loaded_array = getattr(loaded, name)
+        assert loaded_array.dtype == original_array.dtype
+        assert loaded_array.shape == original_array.shape
+        assert np.array_equal(loaded_array, original_array)
+
+
+def test_graph_load_uses_expected_mmap_modes(
+    tmp_path: Path,
+    targets_dir: Path,
+    non_targets_dir: Path,
+) -> None:
+    graph_path = tmp_path / 'graph'
+    graph_path.mkdir()
+    _small_graph(targets_dir, non_targets_dir).save(graph_path)
+
+    graph = KmerGraph.load(graph_path)
+    for name in ('kmers', 'edges', 'record_offsets', 'record_ids'):
+        array = getattr(graph, name)
+        assert isinstance(array, np.memmap)
+        assert not array.flags.writeable
+        assert array.flags.c_contiguous
+        assert array.mode == 'r'
+    assert isinstance(graph.nodes, np.memmap)
+    assert graph.nodes.flags.writeable
+    assert graph.nodes.flags.c_contiguous
+    assert graph.nodes.mode == 'c'
+
+
+def test_graph_mmap_nodes_support_native_scoring_without_changing_file(
+    tmp_path: Path,
+    targets_dir: Path,
+    non_targets_dir: Path,
+) -> None:
+    graph_path = tmp_path / 'graph'
+    graph_path.mkdir()
+    graph = _small_graph(targets_dir, non_targets_dir)
+    graph.save(graph_path)
+    saved_nodes = graph.nodes.copy()
+
+    loaded = KmerGraph.load(graph_path)
+    _get_penalty(loaded.kmers, loaded.nodes, loaded.record_offsets, [True, False])
+
+    assert np.any(loaded.nodes['n_tar'] != saved_nodes['n_tar'])
+    assert np.array_equal(np.load(graph_path / 'nodes.npy', allow_pickle=False), saved_nodes)
+
+
+@pytest.mark.parametrize(
+    ('name', 'array', 'message'),
+    (
+        ('kmers', np.empty((1, 1), dtype=KMER_DTYPE), 'one-dimensional'),
+        ('nodes', np.empty(1, dtype=KMER_DTYPE), 'has dtype'),
+        ('record_ids', np.array(['record'], dtype='S6'), 'has dtype'),
+    ),
+)
+def test_graph_load_rejects_malformed_arrays(
+    tmp_path: Path,
+    targets_dir: Path,
+    non_targets_dir: Path,
+    name: str,
+    array: np.ndarray,
+    message: str,
+) -> None:
+    graph_path = tmp_path / 'graph'
+    graph_path.mkdir()
+    _small_graph(targets_dir, non_targets_dir).save(graph_path)
+    np.save(graph_path / f'{name}.npy', array)
+
+    with pytest.raises(ValueError, match=message):
+        KmerGraph.load(graph_path)
+
+
+def test_graph_load_rejects_missing_array(tmp_path: Path, targets_dir: Path, non_targets_dir: Path) -> None:
+    graph_path = tmp_path / 'graph'
+    graph_path.mkdir()
+    _small_graph(targets_dir, non_targets_dir).save(graph_path)
+    (graph_path / 'edges.npy').unlink()
+
+    with pytest.raises(FileNotFoundError, match='edges.npy'):
+        KmerGraph.load(graph_path)
 
 
 def _sorted_edges(edges: np.ndarray) -> np.ndarray:

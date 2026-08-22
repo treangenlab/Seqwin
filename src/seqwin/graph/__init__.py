@@ -61,7 +61,7 @@ EDGE_DTYPE = np.dtype([
 
 
 class KmerGraph:
-    """The minimizer graph class.
+    r"""The minimizer graph class.
 
     Example usage:
     ```python
@@ -147,6 +147,76 @@ class KmerGraph:
             bool(low_memory)
         )
         self.record_ids = np.asarray(record_ids, dtype='U')
+
+    def save(self, path: str | Path) -> None:
+        """Save the minimizer graph as a directory of NumPy arrays. Existing files are overwritten.
+
+        Args:
+            path (str | Path): Path to the graph directory.
+        """
+        path = Path(path)
+        for name in self.__slots__:
+            np.save(path / f'{name}.npy', getattr(self, name), allow_pickle=False)
+
+    @classmethod
+    def load(cls, path: str | Path) -> 'KmerGraph':
+        """Load a memory-mapped minimizer graph.
+
+        Args:
+            path (str | Path): Path to the graph directory.
+
+        Returns:
+            KmerGraph: A graph backed by the saved NumPy array files.
+        """
+        path = Path(path)
+        if not path.is_dir():
+            raise NotADirectoryError(f'Not a graph directory: {path}')
+
+        modes = {
+            'kmers': 'r',
+            'nodes': 'c', # copy-on-write: changes affect data in memory, but are not saved to disk
+            'edges': 'r',
+            'record_offsets': 'r',
+            'record_ids': 'r',
+        }
+        paths = {name: path / f'{name}.npy' for name in modes}
+        missing = [array_path.name for array_path in paths.values() if not array_path.is_file()]
+        if missing:
+            raise FileNotFoundError(f'Missing graph array file(s): {", ".join(missing)}')
+
+        arrays = {
+            name: np.load(array_path, mmap_mode=modes[name], allow_pickle=False)
+            for name, array_path in paths.items()
+        }
+        expected_dtypes = {
+            'kmers': KMER_DTYPE,
+            'nodes': NODE_DTYPE,
+            'edges': EDGE_DTYPE,
+            'record_offsets': np.dtype(np.uint32),
+        }
+        for name, array in arrays.items():
+            if array.ndim != 1:
+                raise ValueError(f'Graph array {name!r} must be one-dimensional, got shape {array.shape}')
+            if not array.flags.c_contiguous:
+                raise ValueError(f'Graph array {name!r} must be C-contiguous')
+        for name, dtype in expected_dtypes.items():
+            if arrays[name].dtype != dtype:
+                raise ValueError(f'Graph array {name!r} has dtype {arrays[name].dtype}, expected {dtype}')
+
+        if arrays['record_offsets'].size == 0:
+            raise ValueError("Graph array 'record_offsets' must not be empty")
+        if int(arrays['record_offsets'][0]) != 0:
+            raise ValueError("Graph array 'record_offsets' must start at zero")
+
+        if arrays['record_ids'].dtype.kind != 'U':
+            raise ValueError(f"Graph array 'record_ids' has dtype {arrays['record_ids'].dtype}, expected 'U'")
+        if len(arrays['record_ids']) != int(arrays['record_offsets'][-1]):
+            raise ValueError("Graph array 'record_ids' length must equal the final record offset")
+
+        graph = cls.__new__(cls)
+        for name, array in arrays.items():
+            setattr(graph, name, array)
+        return graph
 
 
 def _get_penalty(

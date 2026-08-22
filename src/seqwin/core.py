@@ -33,13 +33,12 @@ from random import Random
 
 logger = logging.getLogger(__name__)
 
-import numpy as np
 import pandas as pd
 
 from .assemblies import Assemblies, get_assemblies
 from .kmers import FilteredGraph, build_graph, filter_graph
 from .markers import ConnectedKmers, get_markers
-from .utils import overwrite_warning, overwrite_error, file_to_write
+from .utils import overwrite_warning, overwrite_error, mkdir, file_to_write
 from .config import Config, RunState, config_logger, WORKINGDIR
 
 
@@ -133,16 +132,8 @@ class Seqwin(object):
         graph = build_graph(assemblies, config)
         if save_graph:
             graph_path = working_dir / WORKINGDIR.graph
-            file_to_write(graph_path, overwrite)
-            np.savez(
-                graph_path,
-                allow_pickle=False,
-                kmers=graph.kmers,
-                nodes=graph.nodes,
-                edges=graph.edges,
-                record_offsets=graph.record_offsets,
-                record_ids=graph.record_ids
-            )
+            mkdir(graph_path, overwrite=overwrite, verbose=overwrite)
+            graph.save(graph_path)
             logger.info(f'Raw minimizer graph is saved as {graph_path}')
 
         graph, jaccard = filter_graph(graph, assemblies, config, state)
