@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from seqwin.graph import KMER_DTYPE, NODE_DTYPE, EDGE_DTYPE, KmerGraph, _get_penalty, _filter_kmers
 
@@ -8,6 +9,107 @@ from seqwin.graph import KMER_DTYPE, NODE_DTYPE, EDGE_DTYPE, KmerGraph, _get_pen
 def _build(*args, **kwargs):
     graph = KmerGraph(*args, **kwargs)
     return graph.kmers, graph.nodes, graph.edges, graph.record_offsets, graph.record_ids
+
+
+def _small_graph(targets_dir: Path, non_targets_dir: Path) -> KmerGraph:
+    return KmerGraph(
+        [targets_dir / 'target-1.fasta', non_targets_dir / 'non-target-1.fasta'],
+        kmerlen=7,
+        windowsize=10,
+    )
+
+
+def test_graph_save_load_round_trip(tmp_path: Path, targets_dir: Path, non_targets_dir: Path) -> None:
+    graph = _small_graph(targets_dir, non_targets_dir)
+    graph_path = tmp_path / 'graph'
+    graph_path.mkdir()
+    graph.save(graph_path)
+
+    names = ('kmers', 'nodes', 'edges', 'record_offsets', 'record_ids')
+    assert {path.name for path in graph_path.iterdir()} == {f'{name}.npy' for name in names}
+
+    loaded = KmerGraph.load(graph_path)
+    for name in names:
+        original_array = getattr(graph, name)
+        loaded_array = getattr(loaded, name)
+        assert loaded_array.dtype == original_array.dtype
+        assert loaded_array.shape == original_array.shape
+        assert np.array_equal(loaded_array, original_array)
+
+
+def test_graph_load_uses_expected_mmap_modes(
+    tmp_path: Path,
+    targets_dir: Path,
+    non_targets_dir: Path,
+) -> None:
+    graph_path = tmp_path / 'graph'
+    graph_path.mkdir()
+    _small_graph(targets_dir, non_targets_dir).save(graph_path)
+
+    graph = KmerGraph.load(graph_path)
+    for name in ('kmers', 'edges', 'record_offsets', 'record_ids'):
+        array = getattr(graph, name)
+        assert isinstance(array, np.memmap)
+        assert not array.flags.writeable
+        assert array.flags.c_contiguous
+        assert array.mode == 'r'
+    assert isinstance(graph.nodes, np.memmap)
+    assert graph.nodes.flags.writeable
+    assert graph.nodes.flags.c_contiguous
+    assert graph.nodes.mode == 'c'
+
+
+def test_graph_mmap_nodes_support_native_scoring_without_changing_file(
+    tmp_path: Path,
+    targets_dir: Path,
+    non_targets_dir: Path,
+) -> None:
+    graph_path = tmp_path / 'graph'
+    graph_path.mkdir()
+    graph = _small_graph(targets_dir, non_targets_dir)
+    graph.save(graph_path)
+    saved_nodes = graph.nodes.copy()
+
+    loaded = KmerGraph.load(graph_path)
+    _get_penalty(loaded.kmers, loaded.nodes, loaded.record_offsets, [True, False])
+
+    assert np.any(loaded.nodes['n_tar'] != saved_nodes['n_tar'])
+    assert np.array_equal(np.load(graph_path / 'nodes.npy', allow_pickle=False), saved_nodes)
+
+
+@pytest.mark.parametrize(
+    ('name', 'array', 'message'),
+    (
+        ('kmers', np.empty((1, 1), dtype=KMER_DTYPE), 'one-dimensional'),
+        ('nodes', np.empty(1, dtype=KMER_DTYPE), 'has dtype'),
+        ('record_ids', np.array(['record'], dtype='S6'), 'has dtype'),
+    ),
+)
+def test_graph_load_rejects_malformed_arrays(
+    tmp_path: Path,
+    targets_dir: Path,
+    non_targets_dir: Path,
+    name: str,
+    array: np.ndarray,
+    message: str,
+) -> None:
+    graph_path = tmp_path / 'graph'
+    graph_path.mkdir()
+    _small_graph(targets_dir, non_targets_dir).save(graph_path)
+    np.save(graph_path / f'{name}.npy', array)
+
+    with pytest.raises(ValueError, match=message):
+        KmerGraph.load(graph_path)
+
+
+def test_graph_load_rejects_missing_array(tmp_path: Path, targets_dir: Path, non_targets_dir: Path) -> None:
+    graph_path = tmp_path / 'graph'
+    graph_path.mkdir()
+    _small_graph(targets_dir, non_targets_dir).save(graph_path)
+    (graph_path / 'edges.npy').unlink()
+
+    with pytest.raises(FileNotFoundError, match='edges.npy'):
+        KmerGraph.load(graph_path)
 
 
 def _sorted_edges(edges: np.ndarray) -> np.ndarray:
@@ -26,7 +128,7 @@ def _assert_graph_outputs_equal(standard, low_memory) -> None:
     assert offsets_std.dtype == np.dtype(np.uint32)
     assert offsets_lm.dtype == np.dtype(np.uint32)
     assert np.array_equal(offsets_std, offsets_lm)
-    assert ids_std == ids_lm
+    assert np.array_equal(ids_std, ids_lm)
     _assert_node_ranges(kmers_lm, nodes_lm)
 
 
@@ -117,9 +219,13 @@ def test_build_threading_equivalence(targets_dir, non_targets_dir) -> None:
     assert np.array_equal(nodes_1, nodes_2)
     assert np.array_equal(nodes_1, nodes_many)
 
-    assert record_ids_1 == record_ids_2
-    assert record_ids_1 == record_ids_many
-    assert len(record_ids_1) == len(assembly_paths)
+    assert isinstance(record_ids_1, np.ndarray)
+    assert record_ids_1.ndim == 1
+    assert record_ids_1.dtype.kind == 'U'
+    assert record_ids_1.dtype != object
+    assert np.array_equal(record_ids_1, record_ids_2)
+    assert np.array_equal(record_ids_1, record_ids_many)
+    assert len(record_ids_1) == int(record_offsets_1[-1])
     assert np.array_equal(record_offsets_1, record_offsets_2)
     assert np.array_equal(record_offsets_1, record_offsets_many)
 
@@ -159,9 +265,13 @@ def test_multi_thread_record_offsets_and_global_record_indices(tmp_path: Path) -
         n_cpu=2,
     )
 
-    assert [len(ids) for ids in record_ids] == [2, 1, 3, 1]
     assert record_offsets.dtype == np.dtype(np.uint32)
     assert np.array_equal(record_offsets, np.array([0, 2, 3, 6, 7], dtype=np.uint32))
+    assert record_ids.dtype.kind == 'U'
+    assert record_ids.tolist() == ['r0', 'r1', 'r0', 'r0', 'r1', 'r2', 'r0']
+    assert [record_ids[record_offsets[i]:record_offsets[i + 1]].tolist()
+            for i in range(4)] == [['r0', 'r1'], ['r0'], ['r0', 'r1', 'r2'], ['r0']]
+    assert len(record_ids) == int(record_offsets[-1])
     assert np.array_equal(np.unique(kmers['record_idx']), np.arange(7, dtype=np.uint32))
 
 
@@ -184,7 +294,11 @@ def test_build_empty_record_offsets(tmp_path: Path) -> None:
             assert len(kmers) == 0
             assert record_offsets.dtype == np.dtype(np.uint32)
             assert np.array_equal(record_offsets, expected_offsets)
-            assert record_ids == [()] * len(assembly_paths)
+            assert isinstance(record_ids, np.ndarray)
+            assert record_ids.ndim == 1
+            assert record_ids.dtype.kind == 'U'
+            assert record_ids.size == 0
+            assert len(record_ids) == int(record_offsets[-1])
 
 
 def test_filter_kmers() -> None:

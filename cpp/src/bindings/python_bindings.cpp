@@ -71,16 +71,7 @@ PYBIND11_MODULE(_core, m) {
             auto edges = array_to_numpy(std::move(graph.edges));
             auto record_offsets = array_to_numpy(std::move(graph.record_offsets));
 
-            py::list ids_by_assembly;
-            for (const auto& ids : graph.ids_by_assembly) {
-                py::tuple ids_tuple(ids.size());
-                for (std::size_t i = 0; i < ids.size(); ++i) {
-                    ids_tuple[i] = ids[i];
-                }
-                ids_by_assembly.append(ids_tuple);
-            }
-
-            return py::make_tuple(kmers, nodes, edges, record_offsets, ids_by_assembly);
+            return py::make_tuple(kmers, nodes, edges, record_offsets, std::move(graph.record_ids));
         },
         py::arg("assembly_paths"),
         py::arg("kmerlen"),

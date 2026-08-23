@@ -1,8 +1,10 @@
 #include "seqwin/build_internals.hpp"
 
 #include <algorithm>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <iterator>
 #include <limits>
 #include <stdexcept>
 #include <utility>
@@ -323,7 +325,7 @@ std::pair<Graph, KmerMaps> merge_thread_graphs(
                 std::move(merged.nodes),
                 std::move(graph.edges),
                 std::move(graph.record_offsets),
-                std::move(graph.ids_by_assembly)
+                std::move(graph.record_ids)
             },
             std::move(merged.kmer_maps)
         };
@@ -371,12 +373,14 @@ std::pair<Graph, KmerMaps> merge_thread_graphs(
         std::vector<KmerSegment>().swap(merged.kmer_segments);
     }
 
-    std::vector<std::vector<std::string>> ids_by_assembly;
-    ids_by_assembly.reserve(n_assemblies);
+    std::vector<std::string> record_ids;
+    record_ids.reserve(total_records);
     for (auto& graph : graphs) {
-        for (auto& ids : graph.ids_by_assembly) {
-            ids_by_assembly.push_back(std::move(ids));
-        }
+        record_ids.insert(
+            record_ids.end(),
+            std::make_move_iterator(graph.record_ids.begin()),
+            std::make_move_iterator(graph.record_ids.end())
+        );
     }
 
     return {
@@ -385,7 +389,7 @@ std::pair<Graph, KmerMaps> merge_thread_graphs(
             std::move(merged.nodes),
             std::move(edges),
             std::move(record_offsets),
-            std::move(ids_by_assembly)
+            std::move(record_ids)
         },
         std::move(merged.kmer_maps)
     };

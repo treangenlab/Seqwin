@@ -22,6 +22,8 @@ Classes:
 Attributes:
 -----------
 - KMER_DTYPE (np.dtype)
+- NODE_DTYPE (np.dtype)
+- EDGE_DTYPE (np.dtype)
 """
 
 __license__ = 'GPL 3.0'
@@ -59,7 +61,7 @@ EDGE_DTYPE = np.dtype([
 
 
 class KmerGraph:
-    """The minimizer graph class.
+    r"""The minimizer graph class.
 
     Example usage:
     ```python
@@ -111,14 +113,14 @@ class KmerGraph:
             - 'second' (uint64): Larger endpoint hash of the undirected edge.
             - 'weight' (uintp): Number of assemblies where the endpoints are adjacent.
         record_offsets (NDArray[np.uint32]): Cumulative global FASTA record offsets by assembly.
-        record_ids (list[tuple[str, ...]]): FASTA record IDs of each assembly.
+        record_ids (NDArray[np.str\_]): FASTA record IDs in global record order.
     """
     __slots__ = ('kmers', 'nodes', 'edges', 'record_offsets', 'record_ids')
     kmers: NDArray[np.void]
     nodes: NDArray[np.void]
     edges: NDArray[np.void]
-    record_offsets: NDArray[np.uintp]
-    record_ids: list[tuple[str, ...]]
+    record_offsets: NDArray[np.uint32]
+    record_ids: NDArray[np.str_]
 
     def __init__(
         self,
@@ -137,13 +139,84 @@ class KmerGraph:
             n_cpu (int, optional): Number of worker threads to use. [1]
             low_memory (bool, optional): Recompute minimizers in a second pass to reduce peak memory. [False]
         """
-        self.kmers, self.nodes, self.edges, self.record_offsets, self.record_ids = _build_native(
+        self.kmers, self.nodes, self.edges, self.record_offsets, record_ids = _build_native(
             list(str(p) for p in assembly_paths),
             int(kmerlen),
             int(windowsize),
             int(n_cpu),
             bool(low_memory)
         )
+        self.record_ids = np.asarray(record_ids, dtype='U')
+
+    def save(self, path: str | Path) -> None:
+        """Save the minimizer graph as a directory of NumPy arrays. Existing files are overwritten.
+
+        Args:
+            path (str | Path): Path to the graph directory.
+        """
+        path = Path(path)
+        for name in self.__slots__:
+            np.save(path / f'{name}.npy', getattr(self, name), allow_pickle=False)
+
+    @classmethod
+    def load(cls, path: str | Path) -> 'KmerGraph':
+        """Load a memory-mapped minimizer graph.
+
+        Args:
+            path (str | Path): Path to the graph directory.
+
+        Returns:
+            KmerGraph: A graph backed by the saved NumPy array files.
+        """
+        path = Path(path)
+        if not path.is_dir():
+            raise NotADirectoryError(f'Not a graph directory: {path}')
+
+        modes = {
+            'kmers': 'r',
+            'nodes': 'c', # copy-on-write: changes affect data in memory, but are not saved to disk
+            'edges': 'r',
+            'record_offsets': 'r',
+            'record_ids': 'r',
+        }
+        paths = {name: path / f'{name}.npy' for name in modes}
+        missing = [array_path.name for array_path in paths.values() if not array_path.is_file()]
+        if missing:
+            raise FileNotFoundError(f'Missing graph array file(s): {", ".join(missing)}')
+
+        arrays = {
+            name: np.load(array_path, mmap_mode=modes[name], allow_pickle=False)
+            for name, array_path in paths.items()
+        }
+        expected_dtypes = {
+            'kmers': KMER_DTYPE,
+            'nodes': NODE_DTYPE,
+            'edges': EDGE_DTYPE,
+            'record_offsets': np.dtype(np.uint32),
+        }
+        for name, array in arrays.items():
+            if array.ndim != 1:
+                raise ValueError(f'Graph array {name!r} must be one-dimensional, got shape {array.shape}')
+            if not array.flags.c_contiguous:
+                raise ValueError(f'Graph array {name!r} must be C-contiguous')
+        for name, dtype in expected_dtypes.items():
+            if arrays[name].dtype != dtype:
+                raise ValueError(f'Graph array {name!r} has dtype {arrays[name].dtype}, expected {dtype}')
+
+        if arrays['record_offsets'].size == 0:
+            raise ValueError("Graph array 'record_offsets' must not be empty")
+        if int(arrays['record_offsets'][0]) != 0:
+            raise ValueError("Graph array 'record_offsets' must start at zero")
+
+        if arrays['record_ids'].dtype.kind != 'U':
+            raise ValueError(f"Graph array 'record_ids' has dtype {arrays['record_ids'].dtype}, expected 'U'")
+        if len(arrays['record_ids']) != int(arrays['record_offsets'][-1]):
+            raise ValueError("Graph array 'record_ids' length must equal the final record offset")
+
+        graph = cls.__new__(cls)
+        for name, array in arrays.items():
+            setattr(graph, name, array)
+        return graph
 
 
 def _get_penalty(

@@ -741,6 +741,9 @@ def get_markers(
     Returns:
         list[ConnectedKmers]: Candidate markers.
     """
+    record_offsets = graph.record_offsets
+    record_ids = graph.record_ids
+
     overwrite = config.overwrite
     kmerlen = config.kmerlen
     windowsize = config.windowsize
@@ -779,11 +782,10 @@ def get_markers(
     file_to_write(markers_fasta, overwrite)
     fasta = list()
     csv = list()
-    all_record_ids = graph.record_ids
     for ck in all_cks:
         rep = ck.rep
         assembly_idx = rep.assembly_idx
-        record_id = all_record_ids[assembly_idx][rep.record_idx]
+        record_id = record_ids[record_offsets[assembly_idx] + rep.record_idx]
         header = f'{assembly_idx}-{record_id}-{rep.start}:{rep.stop}'
         fasta.append(f'>{header}\n{rep.seq}\n')
         csv.append(

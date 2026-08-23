@@ -20,16 +20,18 @@ _shared_config = (
 
 
 def _assert_graph_matches_expected(actual_path: Path, expected_path: Path) -> None:
-    actual = np.load(actual_path, allow_pickle=False)
-    expected = np.load(expected_path, allow_pickle=False)
+    required_keys = {'kmers', 'nodes', 'edges', 'record_offsets', 'record_ids'}
+    actual_keys = {path.stem for path in actual_path.glob('*.npy')}
+    expected_keys = {path.stem for path in expected_path.glob('*.npy')}
 
-    actual_keys = set(actual.files)
-    expected_keys = set(expected.files)
-    required_keys = {'kmers', 'nodes', 'edges', 'record_offsets'}
-
-    assert actual_keys == expected_keys, f'graph arrays mismatch: actual={sorted(actual_keys)}, expected={sorted(expected_keys)}'
     assert actual_keys == required_keys, f'graph arrays must be exactly {sorted(required_keys)}, got {sorted(actual_keys)}'
-
+    assert actual_keys == expected_keys, f'graph arrays mismatch: actual={sorted(actual_keys)}, expected={sorted(expected_keys)}'
+    actual = {name: np.load(actual_path / f'{name}.npy', allow_pickle=False) for name in required_keys}
+    expected = {name: np.load(expected_path / f'{name}.npy', allow_pickle=False) for name in required_keys}
+    assert actual['record_ids'].ndim == 1
+    assert actual['record_ids'].dtype.kind == 'U'
+    assert actual['record_ids'].dtype != object
+    assert len(actual['record_ids']) == int(actual['record_offsets'][-1])
     for name in sorted(required_keys):
         actual_array = actual[name]
         expected_array = expected[name]
@@ -39,6 +41,7 @@ def _assert_graph_matches_expected(actual_path: Path, expected_path: Path) -> No
     np.testing.assert_array_equal(actual['kmers'], expected['kmers'], err_msg='kmers array values mismatch')
     np.testing.assert_array_equal(actual['edges'], expected['edges'], err_msg='edges array values mismatch')
     np.testing.assert_array_equal(actual['record_offsets'], expected['record_offsets'], err_msg='record_offsets array values mismatch')
+    np.testing.assert_array_equal(actual['record_ids'], expected['record_ids'], err_msg='record_ids array values mismatch')
 
     nodes_dtype = actual['nodes'].dtype
     for field_name in nodes_dtype.names or ():

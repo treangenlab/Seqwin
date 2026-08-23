@@ -119,7 +119,6 @@ ThreadGraph build_worker(
     ThreadGraph graph;
     graph.record_offsets.reserve(end_assembly - start_assembly + 1);
     graph.record_offsets.push_back(0);
-    graph.ids_by_assembly.reserve(end_assembly - start_assembly);
     graph.start_assembly = start_assembly;
     graph.end_assembly = end_assembly;
 
@@ -129,8 +128,6 @@ ThreadGraph build_worker(
     for (std::size_t assembly_i = start_assembly; assembly_i < end_assembly; ++assembly_i) {
         const auto assembly_i_u32 = static_cast<std::uint32_t>(assembly_i);
         auto records = read_fasta(assembly_paths[assembly_i]);
-        std::vector<std::string> record_ids;
-        record_ids.reserve(records.size());
 
         std::uint32_t record_idx = graph.record_offsets.back();
         if (records.size() > std::numeric_limits<std::uint32_t>::max() - record_idx) {
@@ -145,7 +142,7 @@ ThreadGraph build_worker(
                     "Sequence length exceeds uint32 range for record " +
                     record.id + " in assembly " + assembly_paths[assembly_i]);
             }
-            record_ids.push_back(std::move(record.id));
+            graph.record_ids.push_back(std::move(record.id));
 
             // Generate minimizers for the current record
             const auto mins = btllib::minimize_sequence(record.sequence, kmerlen, windowsize);
@@ -189,7 +186,6 @@ ThreadGraph build_worker(
             }
         }
         graph.record_offsets.push_back(record_idx);
-        graph.ids_by_assembly.push_back(std::move(record_ids));
     }
 
     // Materialize edges first to reduce peak memory
