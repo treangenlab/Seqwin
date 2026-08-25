@@ -20,7 +20,7 @@ def test_download_only_does_not_execute_full_run(monkeypatch: pytest.MonkeyPatch
 
     assert invoked['run_called'] is False
     assert (tmp_path / 'download-only' / 'config.json').exists()
-    assert seq.assemblies.empty
+    assert len(seq.assemblies) == 0
 
 
 def test_api_run_and_overwrite_behavior(

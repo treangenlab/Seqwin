@@ -256,7 +256,7 @@ class WorkingDir:
         log (str): Seqwin log file. ['seqwin.log']
         config (str): The `Config` instance saved as JSON. ['config.json']
         assemblies_dir (str): Directory for downloaded assemblies. ['assemblies']
-        assemblies_csv (str): The `Assemblies` instance (`assemblies.py`) saved as CSV. ['assemblies.csv']
+        assemblies_csv (str): Assembly indices, paths, and is_target saved as CSV. ['assemblies.csv']
         graph (str): Directory of NumPy arrays representing the k-mer graph. ['graph']
         mash (str): Mash sketch of all assemblies (.msh will be added by Mash). ['sketches']
         blast_dir (str): Directory for the BLAST database. ['blastdb']
