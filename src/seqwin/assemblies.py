@@ -32,6 +32,7 @@ from pathlib import Path
 from io import BufferedWriter
 from time import time
 from queue import Empty
+from collections.abc import Sequence
 
 logger = logging.getLogger(__name__)
 
@@ -53,32 +54,32 @@ _FASTA_EXT = (
 
 class Assemblies:
     r"""Ordered collection of input genome assemblies.
-    Target assemblies always precede non-target assemblies.
 
     Attributes:
-        path (tuple[Path, ...]): Assembly paths in global assembly-index order.
-        is_target (NDArray[np.bool\_]): True for target assemblies.
+        paths (tuple[Path, ...]): Assembly paths in global assembly-index order.
+        is_targets (NDArray[np.bool\_]): True for target assemblies.
     """
-    __slots__ = ('path', 'is_target')
-    path: tuple[Path, ...]
-    is_target: NDArray[np.bool_]
+    __slots__ = ('paths', 'is_targets')
+    paths: tuple[Path, ...]
+    is_targets: NDArray[np.bool_]
 
-    def __init__(self, tar_paths: list[Path], neg_paths: list[Path]) -> None:
-        """Package target paths followed by non-target paths.
+    def __init__(self, paths: Sequence[Path], is_targets: Sequence[bool]) -> None:
+        """Package assembly paths and their target statuses.
 
         Args:
-            tar_paths (list[Path]): A list of paths to target assemblies.
-            neg_paths (list[Path]): A list of paths to non-target assemblies.
+            paths (Sequence[Path]): A list of assembly paths.
+            is_targets (Sequence[bool]): True for target assemblies.
         """
-        self.path = tuple((*tar_paths, *neg_paths))
-        self.is_target = np.concatenate((
-            np.ones(len(tar_paths), dtype=np.bool_),
-            np.zeros(len(neg_paths), dtype=np.bool_),
-        ))
+        self.paths = tuple(paths)
+        self.is_targets = np.asarray(is_targets, dtype=np.bool_, order='C')
+        if self.is_targets.ndim != 1:
+            raise ValueError(f'is_targets must be one-dimensional, got shape {self.is_targets.shape}')
+        if len(self.paths) != len(self.is_targets):
+            raise ValueError('len(paths) must equal len(is_targets)')
 
     def __len__(self) -> int:
         """Return the number of assemblies."""
-        return len(self.path)
+        return len(self.paths)
 
     def mash(self, kmerlen: int, sketchsize: int, out_path: Path, overwrite: bool, n_cpu: int) -> NDArray[np.floating]:
         """Calculate the Jaccard indices of all assembly pairs with Mash.
@@ -94,7 +95,7 @@ class Assemblies:
             NDArray[np.floating]: A matrix of Jaccard indices of all assembly pairs.
         """
         mash_sketch = sketch(
-            self.path,
+            self.paths,
             kmerlen=kmerlen,
             sketchsize=sketchsize,
             out_path=out_path,
@@ -133,7 +134,7 @@ class Assemblies:
 
         # fetch the actual sequences by start and stop in the source sequences
         fetch_seq_args = (
-            (group, self.path[assembly_idx])
+            (group, self.paths[assembly_idx])
             for assembly_idx, group in groups
         )
         all_seq = pd.concat(
@@ -163,7 +164,7 @@ class Assemblies:
         # Since the evalue threshold for a blast task is set, this hit might not be included when the blastdb gets larger
         if neg_only:
             logger.info('Creating a BLAST database of non-target assemblies (less sensitive but faster)...')
-            assembly_indices = np.flatnonzero(~self.is_target)
+            assembly_indices = np.flatnonzero(~self.is_targets)
             title = BLASTCONFIG.title_neg_only
         else:
             logger.info('Creating a BLAST database of all assemblies...')
@@ -199,9 +200,9 @@ class Assemblies:
                 pool.apply_async(
                     _add_fasta_to_queue,
                     args=(
-                        self.path[assembly_idx],
+                        self.paths[assembly_idx],
                         assembly_idx,
-                        self.is_target[assembly_idx],
+                        self.is_targets[assembly_idx],
                         queue_idx,
                         queue
                     )
@@ -471,7 +472,9 @@ def get_assemblies(config: Config, state: RunState) -> Assemblies:
             log_and_raise(RuntimeError, f"Duplicated assembly file paths:\n{dup_paths}")
 
     # package all assemblies
-    assemblies = Assemblies(tar_paths, neg_paths)
+    paths = tar_paths + neg_paths
+    is_targets = [True] * len(tar_paths) + [False] * len(neg_paths)
+    assemblies = Assemblies(paths, is_targets)
     n_tar, n_neg = len(tar_paths), len(neg_paths)
     logger.info(f'Loaded {n_tar} target assemblies and {n_neg} non-target assemblies, {len(assemblies)} in total.')
 
@@ -479,8 +482,8 @@ def get_assemblies(config: Config, state: RunState) -> Assemblies:
     assemblies_path = working_dir / WORKINGDIR.assemblies_csv
     file_to_write(assemblies_path, overwrite)
     pd.DataFrame({
-        'path': assemblies.path,
-        'is_target': assemblies.is_target,
+        'path': assemblies.paths,
+        'is_target': assemblies.is_targets,
     }).to_csv(assemblies_path, index=True)
     logger.info(f'Assembly indices and paths saved as {assemblies_path}')
 

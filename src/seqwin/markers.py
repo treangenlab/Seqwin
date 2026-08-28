@@ -358,7 +358,7 @@ def _create_ck(
     nodes: tuple[np.uint64],
     kmers: tuple,
     record_offsets: NDArray[np.uint32],
-    is_target: NDArray[np.bool_],
+    is_targets: NDArray[np.bool_],
     kmerlen: int,
     windowsize: int
 ) -> ConnectedKmers:
@@ -381,7 +381,7 @@ def _create_ck(
     ) - 1
     kmers_df['record_idx'] = record_idx - record_offsets[assembly_idx]
     kmers_df['assembly_idx'] = assembly_idx
-    kmers_df['is_target'] = is_target[assembly_idx]
+    kmers_df['is_target'] = is_targets[assembly_idx]
 
     return ConnectedKmers(graph, kmers_df, kmerlen, windowsize)
 
@@ -405,7 +405,7 @@ def _get_create_ck_args(
     nx_graph = graph.nx_graph
     subgraphs = graph.subgraphs
     record_offsets = graph.record_offsets
-    is_target = assemblies.is_target
+    is_targets = assemblies.is_targets
 
     # create a dict of hash -> k-mer group
     kmer_groups = dict()
@@ -423,7 +423,7 @@ def _get_create_ck_args(
             kmer_groups.pop(h) for h in arg_nodes
         )
 
-        yield arg_graph, arg_nodes, arg_kmers, record_offsets, is_target, kmerlen, windowsize
+        yield arg_graph, arg_nodes, arg_kmers, record_offsets, is_targets, kmerlen, windowsize
 
 
 def _fetch_cks_seq(
