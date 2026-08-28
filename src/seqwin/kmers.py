@@ -338,7 +338,7 @@ def build_graph(assemblies: Assemblies, config: Config) -> KmerGraph:
     tik = time()
 
     graph = KmerGraph(
-        assembly_paths=assemblies.path,
+        assembly_paths=assemblies.paths,
         kmerlen=config.kmerlen,
         windowsize=config.windowsize,
         n_cpu=config.n_cpu,
@@ -397,7 +397,7 @@ def filter_graph(
         kmers=graph.kmers,
         nodes=nodes,
         record_offsets=graph.record_offsets,
-        is_targets=assemblies.is_target,
+        is_targets=assemblies.is_targets,
         n_cpu=n_cpu
     )
 
@@ -416,8 +416,10 @@ def filter_graph(
                 overwrite=overwrite,
                 n_cpu=n_cpu
             )
-            e_absence_tar = 1 - _expected_frac(jaccard[:n_tar, :n_tar])
-            e_presence_neg = _expected_frac(jaccard[n_tar:, :n_tar])
+            target_idx = np.flatnonzero(assemblies.is_targets)
+            non_target_idx = np.flatnonzero(~assemblies.is_targets)
+            e_absence_tar = 1 - _expected_frac(jaccard[np.ix_(target_idx, target_idx)])
+            e_presence_neg = _expected_frac(jaccard[np.ix_(non_target_idx, target_idx)])
         else:
             if run_mash:
                 logger.error('Mash is not installed. Falling back to minimizer sketches.')

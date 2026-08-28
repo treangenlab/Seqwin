@@ -358,7 +358,7 @@ def _create_ck(
     nodes: tuple[np.uint64],
     kmers: tuple,
     record_offsets: NDArray[np.uint32],
-    n_tar: int,
+    is_targets: NDArray[np.bool_],
     kmerlen: int,
     windowsize: int
 ) -> ConnectedKmers:
@@ -381,19 +381,19 @@ def _create_ck(
     ) - 1
     kmers_df['record_idx'] = record_idx - record_offsets[assembly_idx]
     kmers_df['assembly_idx'] = assembly_idx
-    kmers_df['is_target'] = assembly_idx < n_tar
+    kmers_df['is_target'] = is_targets[assembly_idx]
 
     return ConnectedKmers(graph, kmers_df, kmerlen, windowsize)
 
 
 def _get_create_ck_args(
-    graph: FilteredGraph, n_tar: int, kmerlen: int, windowsize: int
+    graph: FilteredGraph, assemblies: Assemblies, kmerlen: int, windowsize: int
 ) -> Generator[tuple[nx.Graph, pd.DataFrame, int], None, None]:
     """Generate input arguments for `_create_ck()`.
 
     Args:
         graph (FilteredGraph): See `FilteredGraph` in `kmers.py`.
-        n_tar (int): See `RunState` in `config.py`.
+        assemblies (Assemblies): See `Assemblies` in `assemblies.py`.
         kmerlen (int): See `Config` in `config.py`.
         windowsize (int): See `Config` in `config.py`.
 
@@ -405,6 +405,7 @@ def _get_create_ck_args(
     nx_graph = graph.nx_graph
     subgraphs = graph.subgraphs
     record_offsets = graph.record_offsets
+    is_targets = assemblies.is_targets
 
     # create a dict of hash -> k-mer group
     kmer_groups = dict()
@@ -422,7 +423,7 @@ def _get_create_ck_args(
             kmer_groups.pop(h) for h in arg_nodes
         )
 
-        yield arg_graph, arg_nodes, arg_kmers, record_offsets, n_tar, kmerlen, windowsize
+        yield arg_graph, arg_nodes, arg_kmers, record_offsets, is_targets, kmerlen, windowsize
 
 
 def _fetch_cks_seq(
@@ -506,7 +507,7 @@ def _get_cks(
     logger.info(' - Processing each subgraph...')
     all_cks: list[ConnectedKmers] = mp_wrapper(
         _create_ck,
-        _get_create_ck_args(graph, n_tar, kmerlen, windowsize),
+        _get_create_ck_args(graph, assemblies, kmerlen, windowsize),
         n_cpu=n_cpu, n_jobs=len(graph.subgraphs)
     )
 

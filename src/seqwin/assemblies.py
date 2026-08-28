@@ -32,6 +32,7 @@ from pathlib import Path
 from io import BufferedWriter
 from time import time
 from queue import Empty
+from collections.abc import Sequence
 
 logger = logging.getLogger(__name__)
 
@@ -51,27 +52,34 @@ _FASTA_EXT = (
 )
 
 
-class Assemblies(pd.DataFrame):
-    """Package all input genome assemblies as a pandas DataFrame.
+class Assemblies:
+    r"""Ordered collection of input genome assemblies.
 
     Attributes:
-        path (pd.Series[Path]): Assembly paths.
-        is_target (pd.Series[bool]): True for target assemblies.
-        record_ids (pd.Series[tuple[str, ...] | None]): Record IDs of each assembly.
+        paths (tuple[Path, ...]): Assembly paths in global assembly-index order.
+        is_targets (NDArray[np.bool\_]): True for target assemblies.
     """
-    def __init__(self, tar_paths: list[Path], neg_paths: list[Path]) -> None:
-        """Package all input genome assemblies as a pandas DataFrame.
+    __slots__ = ('paths', 'is_targets')
+    paths: tuple[Path, ...]
+    is_targets: NDArray[np.bool_]
+
+    def __init__(self, paths: Sequence[Path], is_targets: Sequence[bool]) -> None:
+        """Package assembly paths and their target statuses.
 
         Args:
-            tar_paths (list[Path]): A list of paths to target assemblies.
-            neg_paths (list[Path]): A list of paths to non-target assemblies.
+            paths (Sequence[Path]): A list of assembly paths.
+            is_targets (Sequence[bool]): True for target assemblies.
         """
-        data = dict(
-            path=tar_paths + neg_paths,
-            is_target=[True]*len(tar_paths) + [False]*len(neg_paths),
-            record_ids=None
-        )
-        super().__init__(data)
+        self.paths = tuple(paths)
+        self.is_targets = np.asarray(is_targets, dtype=np.bool_, order='C')
+        if self.is_targets.ndim != 1:
+            raise ValueError(f'is_targets must be one-dimensional, got shape {self.is_targets.shape}')
+        if len(self.paths) != len(self.is_targets):
+            raise ValueError('len(paths) must equal len(is_targets)')
+
+    def __len__(self) -> int:
+        """Return the number of assemblies."""
+        return len(self.paths)
 
     def mash(self, kmerlen: int, sketchsize: int, out_path: Path, overwrite: bool, n_cpu: int) -> NDArray[np.floating]:
         """Calculate the Jaccard indices of all assembly pairs with Mash.
@@ -87,15 +95,15 @@ class Assemblies(pd.DataFrame):
             NDArray[np.floating]: A matrix of Jaccard indices of all assembly pairs.
         """
         mash_sketch = sketch(
-            self.path.tolist(),
+            self.paths,
             kmerlen=kmerlen,
             sketchsize=sketchsize,
             out_path=out_path,
             overwrite=overwrite,
             n_cpu=n_cpu
         )
-        return np.array(
-            list(get_jaccard(mash_sketch, n_cpu=n_cpu))
+        return np.fromiter(
+            get_jaccard(mash_sketch, n_cpu=n_cpu), dtype=float
         ).reshape(len(self), len(self))
 
     def fetch_seq(self, loc: pd.DataFrame, n_cpu: int) -> pd.Series:
@@ -115,25 +123,22 @@ class Assemblies(pd.DataFrame):
         Returns:
             pd.Series: A sequence is fetched for each row in `loc`. indices are sorted with `ascending=True`.
         """
-        # group sequences by assembly_idx
-        loc: dict[int, pd.DataFrame] = dict(tuple(
-            loc.groupby(
-                by='assembly_idx', sort=False
-            )[['record_idx', 'start', 'stop']]
-        ))
-        logger.info(f' - {len(loc)} assemblies to be loaded')
+        if loc.empty:
+            return pd.Series(index=loc.index, dtype=object)
 
-        # fetch the source sequence for each group of sequences
-        assemblies_paths = self.path
-        all_src_paths = (assemblies_paths.loc[assembly_idx] for assembly_idx in loc)
+        groups = loc.groupby(
+            by='assembly_idx', sort=False
+        )[['record_idx', 'start', 'stop']]
+        n_groups = groups.ngroups
+        logger.info(f' - {n_groups} assemblies to be loaded')
 
         # fetch the actual sequences by start and stop in the source sequences
-        fetch_seq_args = zip(
-            loc.values(),
-            all_src_paths
+        fetch_seq_args = (
+            (group, self.paths[assembly_idx])
+            for assembly_idx, group in groups
         )
-        all_seq: pd.Series = pd.concat(
-            mp_wrapper(_fetch_seq, fetch_seq_args, n_cpu, n_jobs=len(loc)),
+        all_seq = pd.concat(
+            mp_wrapper(_fetch_seq, fetch_seq_args, min(n_cpu, n_groups), n_jobs=n_groups),
             axis=0
         )
         # sort the returned sequences by the original ordering (before groupby)
@@ -159,11 +164,11 @@ class Assemblies(pd.DataFrame):
         # Since the evalue threshold for a blast task is set, this hit might not be included when the blastdb gets larger
         if neg_only:
             logger.info('Creating a BLAST database of non-target assemblies (less sensitive but faster)...')
-            df = self[self.is_target == False]
+            assembly_indices = np.flatnonzero(~self.is_targets)
             title = BLASTCONFIG.title_neg_only
         else:
             logger.info('Creating a BLAST database of all assemblies...')
-            df = self
+            assembly_indices = np.arange(len(self))
             title = BLASTCONFIG.title_all
         tik = time()
 
@@ -176,7 +181,6 @@ class Assemblies(pd.DataFrame):
             # only Manager().Queue() can be shared between processes (e.g, when used with Pool())
             # so that different processes can put items in the same queue.
             queue = manager.Queue(maxsize=BLASTCONFIG.queue_size+n_cpu) # set queue size to limit memory usage
-            queue_idx = range(len(df)) # queue index must start from 0 (for df.index, this is not True when neg_only is True)
 
             # create a process for makeblastdb
             makeblastdb_args = [
@@ -192,12 +196,21 @@ class Assemblies(pd.DataFrame):
 
             # process fasta files in parallel and add file contents to queue
             pool = mp.Pool(processes=n_cpu)
-            for args in zip(df.path, df.index, df.is_target, queue_idx):
-                pool.apply_async(_add_fasta_to_queue, args=(*args, queue))
+            for queue_idx, assembly_idx in enumerate(assembly_indices):
+                pool.apply_async(
+                    _add_fasta_to_queue,
+                    args=(
+                        self.paths[assembly_idx],
+                        assembly_idx,
+                        self.is_targets[assembly_idx],
+                        queue_idx,
+                        queue
+                    )
+                )
             pool.close() # no more task to be added to pool
 
             # dequeue and stream to stdin
-            _stream_to_stdin(queue, len(df), proc.stdin)
+            _stream_to_stdin(queue, len(assembly_indices), proc.stdin)
 
             # wait for everything to finish
             pool.join()
@@ -283,7 +296,7 @@ def _fetch_seq(loc: pd.DataFrame, src_fasta: Path) -> pd.Series:
     """Fetch sequences from a source FASTA file, based on their record id, start and stop coordinates.
 
     Args:
-        loc (pd.DataFrame): A group of sequences in the same assembly. Required columns: 'record_idx', 'start' and 'stop'.
+        loc (pd.DataFrame): A group of sequences in the same assembly, with three columns: 'record_idx', 'start' and 'stop'.
         src_fasta (Path): Path to the assembly FASTA file.
 
     Returns:
@@ -291,9 +304,9 @@ def _fetch_seq(loc: pd.DataFrame, src_fasta: Path) -> pd.Series:
     """
     src_seq = load_fasta(src_fasta)
     # NOTE: assume all forward strand
-    return loc.apply(
-        lambda row: src_seq[row['record_idx']][row['start']:row['stop']],
-        axis=1
+    return pd.Series(
+        (src_seq[record_idx][start:stop] for record_idx, start, stop in loc.itertuples(index=False, name=None)),
+        index=loc.index
     )
 
 
@@ -459,14 +472,19 @@ def get_assemblies(config: Config, state: RunState) -> Assemblies:
             log_and_raise(RuntimeError, f"Duplicated assembly file paths:\n{dup_paths}")
 
     # package all assemblies
-    assemblies = Assemblies(tar_paths, neg_paths)
+    paths = tar_paths + neg_paths
+    is_targets = [True] * len(tar_paths) + [False] * len(neg_paths)
+    assemblies = Assemblies(paths, is_targets)
     n_tar, n_neg = len(tar_paths), len(neg_paths)
     logger.info(f'Loaded {n_tar} target assemblies and {n_neg} non-target assemblies, {len(assemblies)} in total.')
 
     # save assemblies as csv
     assemblies_path = working_dir / WORKINGDIR.assemblies_csv
     file_to_write(assemblies_path, overwrite)
-    assemblies.to_csv(assemblies_path, columns=('path', 'is_target'), index=True)
+    pd.DataFrame({
+        'path': assemblies.paths,
+        'is_target': assemblies.is_targets,
+    }).to_csv(assemblies_path, index=True)
     logger.info(f'Assembly indices and paths saved as {assemblies_path}')
 
     # load assembly sequences
