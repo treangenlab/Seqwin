@@ -416,8 +416,10 @@ def filter_graph(
                 overwrite=overwrite,
                 n_cpu=n_cpu
             )
-            e_absence_tar = 1 - _expected_frac(jaccard[:n_tar, :n_tar])
-            e_presence_neg = _expected_frac(jaccard[n_tar:, :n_tar])
+            target_idx = np.flatnonzero(assemblies.is_target)
+            non_target_idx = np.flatnonzero(~assemblies.is_target)
+            e_absence_tar = 1 - _expected_frac(jaccard[np.ix_(target_idx, target_idx)])
+            e_presence_neg = _expected_frac(jaccard[np.ix_(non_target_idx, target_idx)])
         else:
             if run_mash:
                 logger.error('Mash is not installed. Falling back to minimizer sketches.')
