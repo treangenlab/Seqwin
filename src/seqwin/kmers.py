@@ -161,7 +161,7 @@ def _filter_edges_and_nodes(
     ]
     logger.info(f' - Removed {n_nodes - len(nodes)} isolated nodes, {len(nodes)} nodes left')
 
-    logger.info(' - Building graph...')
+    logger.info(' - Building NetworkX graph...')
     nx_graph = nx.Graph()
     nx_graph.add_weighted_edges_from(edge_values, weight=EDGE_W)
     nx.set_node_attributes(
@@ -425,22 +425,23 @@ def filter_graph(
                 logger.error('Mash is not installed. Falling back to minimizer sketches.')
             # calculate expected fractions directly from minimizer sketches
             # for tar absence or neg presence, k-mer weights should always be nodes['n_tar'] (how many target assemblies have this k-mer)
+            logger.info(' - Using minimizer sketches')
             frac_tar = nodes['n_tar'] / n_tar
             e_absence_tar = 1 - np.sum(frac_tar * nodes['n_tar']) / np.sum(nodes['n_tar'])
             frac_neg = nodes['n_neg'] / n_neg
             e_presence_neg = np.sum(frac_neg * nodes['n_tar']) / np.sum(nodes['n_tar'])
             jaccard = None
 
-        logger.info(f' - expected k-mer absence in targets: {e_absence_tar:.5f}')
-        logger.info(f' - expected k-mer presence in non-targets: {e_presence_neg:.5f}')
+        logger.info(f' - Expected k-mer absence in targets: {e_absence_tar:.5f}')
+        logger.info(f' - Expected k-mer presence in non-targets: {e_presence_neg:.5f}')
 
         penalty_th_mul = 1 - stringency / 10
         penalty_th = penalty_th_mul * (e_absence_tar * e_presence_neg)**0.5 # geometric mean
-        logger.info(f' - calculated penalty threshold: {penalty_th:.5f}')
+        logger.info(f' - Calculated penalty threshold: {penalty_th:.5f}')
 
         if penalty_th > penalty_th_cap:
             penalty_th = penalty_th_cap
-            logger.warning(f' - calculated penalty threshold is too large (capped at {penalty_th})')
+            logger.warning(f' - Calculated penalty threshold is too large (capped at {penalty_th})')
 
         print_time_delta(time()-tik)
     else:
