@@ -1,11 +1,48 @@
+import gzip
+import io
 import pickle
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pytest
 
 import seqwin.assemblies as assemblies_module
 from seqwin.assemblies import Assemblies, get_assemblies
+
+
+class FakePopen:
+    """Minimal makeblastdb process that captures standard input."""
+    instances = []
+    returncode_to_use = 0
+
+    def __init__(self, args, stdin, stdout, stderr, text) -> None:
+        self.args = args
+        self.stdin = io.BytesIO()
+        self.returncode = None
+        self._final_returncode = self.returncode_to_use
+        self.terminated = False
+        self.instances.append(self)
+
+    def communicate(self):
+        if self.returncode is None:
+            self.returncode = self._final_returncode
+        return b'makeblastdb stdout', b'makeblastdb stderr'
+
+    def poll(self):
+        return self.returncode
+
+    def terminate(self) -> None:
+        self.terminated = True
+        self.returncode = -15
+
+
+@pytest.fixture
+def fake_popen(monkeypatch):
+    FakePopen.instances = []
+    FakePopen.returncode_to_use = 0
+    monkeypatch.setattr(assemblies_module.subprocess, 'Popen', FakePopen)
+    return FakePopen
 
 
 def test_assemblies_is_a_lightweight_ordered_container(tmp_path: Path) -> None:
@@ -138,3 +175,77 @@ def test_fetch_seq_empty_preserves_index() -> None:
     assert actual.empty
     assert actual.dtype == object
     assert actual.index.equals(index)
+
+
+@pytest.mark.parametrize('n_cpu', [1, 3])
+def test_makeblastdb_streams_plain_and_gzip_fasta_in_order(
+    fake_popen, tmp_path: Path, n_cpu: int,
+) -> None:
+    first = tmp_path / 'first.fasta'
+    second = tmp_path / 'second.fasta.gz'
+    third = tmp_path / 'third.fasta'
+    first.write_bytes(b'>first one\nAAC\n>first two description\nGGT\n')
+    second.write_bytes(gzip.compress(b'>second original header\nTTT\n'))
+    third.write_bytes(b'>third header\nCCC\n')
+    assemblies = Assemblies([first, second, third], [True, False, True])
+
+    blastdb = assemblies.makeblastdb(
+        tmp_path / f'db-{n_cpu}', neg_only=False, overwrite=False, n_cpu=n_cpu
+    )
+
+    assert blastdb.name == assemblies_module.BLASTCONFIG.title_all
+    assert fake_popen.instances[-1].stdin.getvalue() == (
+        b'>0@y@first one\nAAC\n>0@y@first two description\nGGT\n'
+        b'>1@n@second original header\nTTT\n'
+        b'>2@y@third header\nCCC\n'
+    )
+
+
+def test_makeblastdb_neg_only_preserves_global_indices(fake_popen, tmp_path: Path) -> None:
+    paths = []
+    for idx in range(4):
+        path = tmp_path / f'{idx}.fasta'
+        path.write_bytes(f'>record {idx}\nACGT\n'.encode())
+        paths.append(path)
+    assemblies = Assemblies(paths, [True, False, True, False])
+
+    assemblies.makeblastdb(
+        tmp_path / 'negative-db', neg_only=True, overwrite=False, n_cpu=3
+    )
+
+    assert fake_popen.instances[-1].stdin.getvalue() == (
+        b'>1@n@record 1\nACGT\n>3@n@record 3\nACGT\n'
+    )
+
+
+def test_makeblastdb_worker_exception_propagates_and_reaps_process(
+    fake_popen, tmp_path: Path,
+) -> None:
+    missing = tmp_path / 'missing.fasta'
+    assemblies = Assemblies([missing], [False])
+
+    with pytest.raises(FileNotFoundError):
+        assemblies.makeblastdb(
+            tmp_path / 'failed-db', neg_only=False, overwrite=False, n_cpu=2
+        )
+
+    proc = fake_popen.instances[-1]
+    assert proc.terminated
+    assert proc.returncode == -15
+
+
+def test_makeblastdb_nonzero_return_writes_log_and_raises(fake_popen, tmp_path: Path) -> None:
+    fasta = tmp_path / 'input.fasta'
+    fasta.write_bytes(b'>record\nACGT\n')
+    assemblies = Assemblies([fasta], [True])
+    fake_popen.returncode_to_use = 2
+    prefix = tmp_path / 'failed-db'
+
+    with pytest.raises(RuntimeError, match='Failed to create the BLAST database'):
+        assemblies.makeblastdb(prefix, neg_only=False, overwrite=False, n_cpu=1)
+
+    assert (prefix / assemblies_module.WORKINGDIR.blast_log).read_text() == '\n'.join((
+        str(fake_popen.instances[-1].args),
+        'makeblastdb stdout',
+        'makeblastdb stderr'
+    ))

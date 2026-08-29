@@ -285,7 +285,6 @@ class BlastConfig:
     Attributes:
         title_neg_only (str): DB title when created from non-target assemblies only. ['neg-only']
         title_all (str): DB title when created from all assemblies. ['all']
-        queue_size (int): Max queue size when streaming FASTA files to stdin of `makeblastdb`, to limit memory usage. [50]
         bool2str (Mapping[bool, str]): Mapping of bool to string. [True -> 'y', False -> 'n']
         str2bool (Mapping[str, bool]): Reversed mapping of bool2str for parsing BLAST outputs. ['y' -> True, 'n' -> False]
         header_sep (str): Separator used in FASTA headers. Should pick a rare char (cannot be '$', BLAST treats it as a special char). ['@']
@@ -295,7 +294,6 @@ class BlastConfig:
     """
     title_neg_only: str = 'neg-only'
     title_all: str = 'all'
-    queue_size: int = 50
     bool2str: Mapping[bool, str] = field( # a dict cannot be used as the default value in a dataclass
         # MappingProxyType is not hashable until python 3.12, so have to use default_factory for compatibility
         default_factory=lambda: MappingProxyType({True: 'y', False: 'n'})
