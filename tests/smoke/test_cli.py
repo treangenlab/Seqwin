@@ -25,8 +25,8 @@ def test_help_shows_key_options() -> None:
         '--tar-dir',
         '--neg-dir',
         '--api-key',
-        '--no-mash',
-        '--no-blast',
+        '--mash',
+        '--blast',
         '--threads',
         '--low-memory',
         '--prefix',
@@ -61,8 +61,8 @@ def test_cli_to_config_mapping_txt(monkeypatch, tmp_path: Path, targets_txt: Pat
         [
             '--tar-paths', str(targets_txt),
             '--neg-paths', str(non_targets_txt),
-            '--no-mash',
-            '--no-blast',
+            '--mash',
+            '--blast',
             '--threads', '2',
             '--low-memory',
             '--prefix', str(tmp_path),
@@ -71,8 +71,8 @@ def test_cli_to_config_mapping_txt(monkeypatch, tmp_path: Path, targets_txt: Pat
 
     assert result.exit_code == 0
     cfg = captured['config']
-    assert cfg.run_mash is False
-    assert cfg.run_blast is False
+    assert cfg.run_mash is True
+    assert cfg.run_blast is True
     assert cfg.n_cpu == 2
     assert cfg.low_memory is True
     assert cfg.prefix == tmp_path.resolve(strict=True)
@@ -94,7 +94,6 @@ def test_cli_to_config_mapping_dir(monkeypatch, tmp_path: Path, targets_dir: Pat
         [
             '--tar-dir', str(targets_dir),
             '--neg-dir', str(non_targets_dir),
-            '--no-mash',
             '--threads', '1',
             '--prefix', str(tmp_path),
             '--title', 'cli-dir-mode',
@@ -107,6 +106,8 @@ def test_cli_to_config_mapping_dir(monkeypatch, tmp_path: Path, targets_dir: Pat
     assert cfg.neg_dir == non_targets_dir.resolve(strict=True)
     assert cfg.prefix == tmp_path.resolve(strict=True)
     assert cfg.title == 'cli-dir-mode'
+    assert cfg.run_mash is False
+    assert cfg.run_blast is False
 
 
 def test_cli_api_key_mapping(monkeypatch, tmp_path: Path, targets_txt: Path, non_targets_txt: Path) -> None:

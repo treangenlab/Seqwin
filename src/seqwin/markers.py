@@ -775,7 +775,7 @@ def get_markers(
         if run_blast:
             logger.error('BLAST+ is not installed. Signature evaluation is skipped.')
         else:
-            logger.warning(f'Signature evaluation is turned off (--no-blast), skip running BLAST')
+            logger.warning(f'Signature evaluation is turned off, skip running BLAST')
         blastdb = None
 
     # save to fasta

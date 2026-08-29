@@ -89,11 +89,11 @@ class Config(BaseModel):
         kmerlen (int): K-mer length. [21]
         windowsize (int): Window size for minimizer sketch. [200]
         penalty_th (float | None): Node penalty threshold, from 0 to 1. If None, Seqwin computes it automatically (capped by `penalty_th_cap`). [None]
-        run_mash (bool): If True, use MinHash sketches (Mash) to estimate `penalty_th`; else use minimizer sketches (faster but might be biased). [True]
+        run_mash (bool): If True, use MinHash sketches (Mash) to estimate `penalty_th`; else use minimizer sketches (faster but might be biased). [False]
         stringency (int): If `penalty_th` is None, multiply the computed penalty threshold with `(1 - x/10)`. [5]
         min_len (int): Minimum length of output signatures. [200]
         max_len (int | None): Estimated maximum length of output signatures. If None, no explicit limit is applied (capped by `max_nodes_cap`). [None]
-        run_blast (bool): If True, evaluate signature sequences with BLAST. [True]
+        run_blast (bool): If True, evaluate signature sequences with BLAST. [False]
         blast_neg_only (bool, deprecated): If True, only include non-target assemblies in the BLAST database. [False]
 
         penalty_th_cap (float): If `penalty_th` is None, penalty threshold cannot be higher than this value. [0.2]
@@ -134,11 +134,11 @@ class Config(BaseModel):
     kmerlen: int = 21
     windowsize: int = 200
     penalty_th: float | None = None
-    run_mash: bool = True
+    run_mash: bool = False
     stringency: int = 5
     min_len: int = 200
     max_len: int | None = None
-    run_blast: bool = True
+    run_blast: bool = False
     blast_neg_only: bool = False # NOTE: need to fix when this is turned on
 
     # Graph filtering options (not included in CLI)

@@ -109,11 +109,10 @@ def main(
         help='Node penalty threshold, from 0 to 1. If not provided, Seqwin computes it automatically.',
         rich_help_panel='Signature options'
     ),
-    # always default flags to False (can be reversed later in the function body)
-    no_mash: bool = typer.Option(
-        False, '--no-mash', show_default=False,
-        help='Do not run Mash to estimate node penalty threshold. Instead, use minimizer sketches. '
-        'This is much faster but the estimation might be biased. '
+    run_mash: bool = typer.Option(
+        False, '--mash', show_default=False,
+        help='Run Mash to estimate node penalty threshold instead of using minimizer sketches. '
+        'This may reduce estimation bias but requires extra running time, especially when the number of input assemblies is large. '
         'Only used when --penalty-th is not provided.',
         rich_help_panel='Signature options'
     ),
@@ -135,9 +134,10 @@ def main(
         help='Estimated maximum length of output signatures. If not provided, no explicit limit is applied.',
         rich_help_panel='Signature options'
     ),
-    no_blast: bool = typer.Option(
-        False, '--no-blast', show_default=False,
-        help='Do not evaluate signature sequences with BLAST.',
+    run_blast: bool = typer.Option(
+        False, '--blast', show_default=False,
+        help='Evaluate signature sequences with BLAST. This requires extra running time, '
+        'especially when the number of input assemblies is large.',
         rich_help_panel='Signature options'
     ),
     # blast_neg_only: bool = typer.Option(
@@ -232,11 +232,11 @@ def main(
         kmerlen=kmerlen,
         windowsize=windowsize,
         penalty_th=penalty_th,
-        run_mash=not no_mash,
+        run_mash=run_mash,
         stringency=stringency,
         min_len=min_len,
         max_len=max_len,
-        run_blast=not no_blast,
+        run_blast=run_blast,
         #blast_neg_only=blast_neg_only,
         level=level,
         source=source,

@@ -115,8 +115,6 @@ def run_seqwin(test_dir: Path) -> None:
         "seqwin",
         "--tar-paths", "targets.txt",
         "--neg-paths", "non-targets.txt",
-        "--no-mash",
-        "--no-blast",
         "--threads", str(THREADS),
     ]
 

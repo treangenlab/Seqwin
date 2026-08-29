@@ -14,8 +14,6 @@ _shared_config = (
     '--windowsize', '10',
     '--min-len', '17',
     '--max-len', '200',
-    '--no-mash',
-    '--no-blast',
 )
 
 
