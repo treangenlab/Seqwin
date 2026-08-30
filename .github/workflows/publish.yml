@@ -122,6 +122,7 @@ jobs:
             seqwin --help &&
             python -c "import seqwin; print(seqwin.__version__)" &&
             python -c "from seqwin.graph import KmerGraph; print(KmerGraph.__name__)" &&
+            pytest -q {project}/tests/unit &&
             pytest -q {project}/tests/smoke &&
             python {project}/tests/run_example.py
 

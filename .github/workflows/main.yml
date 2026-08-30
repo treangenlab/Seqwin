@@ -51,9 +51,10 @@ jobs:
           python -c "from seqwin.graph import KmerGraph; print(KmerGraph.__name__)"
           python -m pip check
 
-      - name: Run smoke test suite
+      - name: Run pytest suites
         run: |
           python -m pip install pytest
+          pytest -q tests/unit
           pytest -q tests/smoke
 
       - name: Run integration test

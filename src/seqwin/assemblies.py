@@ -26,12 +26,11 @@ Functions:
 __author__ = 'Michael X. Wang'
 __license__ = 'GPL 3.0'
 
-import re, gzip, logging, subprocess
+import gzip, logging, subprocess
 import multiprocessing as mp
 from pathlib import Path
-from io import BufferedWriter
 from time import time
-from queue import Empty
+from collections import deque
 from collections.abc import Sequence
 
 logger = logging.getLogger(__name__)
@@ -176,46 +175,65 @@ class Assemblies:
         mkdir(prefix, overwrite)
         blastdb = prefix / title
 
-        # load fasta files and stream to stdin to save memory
-        with mp.Manager() as manager:
-            # only Manager().Queue() can be shared between processes (e.g, when used with Pool())
-            # so that different processes can put items in the same queue.
-            queue = manager.Queue(maxsize=BLASTCONFIG.queue_size+n_cpu) # set queue size to limit memory usage
+        # create a process for makeblastdb
+        makeblastdb_args = [
+            'makeblastdb',
+            '-title', title,
+            '-dbtype', 'nucl',
+            '-out', blastdb
+        ]
+        proc = subprocess.Popen(
+            makeblastdb_args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=False # use bytes
+        )
 
-            # create a process for makeblastdb
-            makeblastdb_args = [
-                'makeblastdb',
-                '-title', title,
-                '-dbtype', 'nucl',
-                '-out', blastdb
-            ]
-            proc = subprocess.Popen(
-                makeblastdb_args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                text=False # use bytes
-            )
+        try:
+            # keep only one prepared assembly per worker in memory and consume results in submission order
+            jobs = iter(assembly_indices)
+            n_workers = min(n_cpu, len(assembly_indices))
+            if n_workers:
+                with mp.Pool(processes=n_workers) as pool:
+                    pending = deque()
+                    for assembly_idx in jobs:
+                        pending.append(pool.apply_async(
+                            _prepare_fasta,
+                            args=(
+                                self.paths[assembly_idx],
+                                assembly_idx,
+                                self.is_targets[assembly_idx]
+                            )
+                        ))
+                        if len(pending) == n_workers:
+                            break
 
-            # process fasta files in parallel and add file contents to queue
-            pool = mp.Pool(processes=n_cpu)
-            for queue_idx, assembly_idx in enumerate(assembly_indices):
-                pool.apply_async(
-                    _add_fasta_to_queue,
-                    args=(
-                        self.paths[assembly_idx],
-                        assembly_idx,
-                        self.is_targets[assembly_idx],
-                        queue_idx,
-                        queue
-                    )
-                )
-            pool.close() # no more task to be added to pool
+                    while pending:
+                        content = pending.popleft().get()
+                        proc.stdin.write(content)
+                        del content
+                        try:
+                            assembly_idx = next(jobs)
+                        except StopIteration:
+                            continue
+                        pending.append(pool.apply_async(
+                            _prepare_fasta,
+                            args=(
+                                self.paths[assembly_idx],
+                                assembly_idx,
+                                self.is_targets[assembly_idx]
+                            )
+                        ))
 
-            # dequeue and stream to stdin
-            _stream_to_stdin(queue, len(assembly_indices), proc.stdin)
-
-            # wait for everything to finish
-            pool.join()
+            proc.stdin.flush() # empty stdin but don't close the process
             stdout, stderr = proc.communicate()
             stdout, stderr = stdout.decode(), stderr.decode()
+        except BaseException:
+            if proc.poll() is None:
+                proc.terminate()
+            try:
+                proc.communicate()
+            except BaseException:
+                pass # preserve the original preprocessing or pipe exception
+            raise
 
         # save command, stdout and stderr
         blast_log = prefix / WORKINGDIR.blast_log
@@ -232,21 +250,15 @@ class Assemblies:
         return blastdb
 
 
-def _add_fasta_to_queue(path: Path, assembly_idx: int, is_target: bool, queue_idx: int, queue: mp.Queue) -> None:
-    """
-    1. Add assembly index and is_target into the header lines of an assembly FASTA file.
-    2. Put the modified FASTA file content, as well as its queue_idx in a queue.
-
-    The use of queue_idx is to make sure that items in the queue can be fetched in order (in `_stream_to_stdin()`),
-    so that the behavior is exactly the same as reading all FASTA files into memory using a single thread.
+def _prepare_fasta(path: Path, assembly_idx: int, is_target: bool) -> bytes:
+    """Add assembly index and target status to all headers in an assembly FASTA file.
 
     Args:
         path (Path): Path to the assembly FASTA file.
         assembly_idx (int): Assembly index.
         is_target (bool): True for target assemblies.
-        queue_idx (int): Used to determine the order of assemblies in the queue. Must start from 0.
-        queue (mp.Queue): queue_idx and modified FASTA file content are put into this queue.
-            Use `mp.Manager().Queue()` to share this queue across different processes (e.g., when this function is called by `mp.Pool()`).
+    Returns:
+        bytes: Complete FASTA content with modified headers.
     """
     # read file content as bytes
     if path.suffix == GZIP_EXT:
@@ -259,37 +271,11 @@ def _add_fasta_to_queue(path: Path, assembly_idx: int, is_target: bool, queue_id
     # string to be inserted into fasta header
     mod_str = f'>{assembly_idx}{BLASTCONFIG.header_sep}{BLASTCONFIG.bool2str[is_target]}{BLASTCONFIG.header_sep}'.encode()
 
-    # modify header lines and put modified content in queue
-    # set re.MULTILINE to search for '>' at the beginning of each line
-    content = re.sub(pattern=rb'^>', repl=mod_str, string=content, flags=re.MULTILINE)
-    queue.put((queue_idx, content))
-
-
-def _stream_to_stdin(queue: mp.Queue, n_items: int, proc_stdin: BufferedWriter) -> None:
-    """Get items from an indexed queue, and write them to the stdin of a process by the order of their indices.
-
-    Args:
-        queue (mp.Queue): Each queue item should be a tuple of (idx, data).
-        n_items (int): Total number of items in the queue.
-        proc_stdin (io.BufferedWriter): Standard input of a process (e.g., `subprocess.Popen().stdin`).
-    """
-    next_idx = 0
-    buffer: dict[int, bytes] = dict()
-
-    while next_idx < n_items:
-        try:
-            idx, data = queue.get()
-            buffer[idx] = data
-
-            while next_idx in buffer:
-                proc_stdin.write(
-                    buffer.pop(next_idx)
-                )
-                next_idx += 1
-        except Empty:
-            continue
-
-    proc_stdin.flush() # empty stdin but don't close the process
+    # modify header lines
+    content = content.replace(b'\n>', b'\n' + mod_str) # faster than re.sub()
+    if content.startswith(b'>'):
+        content = mod_str + content[1:]
+    return content
 
 
 def _fetch_seq(loc: pd.DataFrame, src_fasta: Path) -> pd.Series:
