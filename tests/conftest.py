@@ -6,13 +6,13 @@ from seqwin.utils import read_text
 
 
 @pytest.fixture(scope='session')
-def smoke_root() -> Path:
+def tests_root() -> Path:
     return Path(__file__).resolve().parent
 
 
 @pytest.fixture(scope='session')
-def fixtures_dir(smoke_root: Path) -> Path:
-    return smoke_root / 'fixtures'
+def fixtures_dir(tests_root: Path) -> Path:
+    return tests_root / 'fixtures'
 
 
 @pytest.fixture(scope='session')

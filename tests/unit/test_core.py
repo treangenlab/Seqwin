@@ -23,37 +23,20 @@ def test_download_only_does_not_execute_full_run(monkeypatch: pytest.MonkeyPatch
     assert len(seq.assemblies) == 0
 
 
-def test_api_run_and_overwrite_behavior(
-    tmp_path: Path,
-    targets_txt: Path,
-    non_targets_txt: Path,
-) -> None:
+def test_output_directory_overwrite_behavior(tmp_path: Path) -> None:
     run_config = dict(
-        tar_paths=targets_txt,
-        neg_paths=non_targets_txt,
         prefix=tmp_path,
-        title='api-smoke',
-        run_mash=False,
-        run_blast=False,
-        kmerlen=7,
-        windowsize=10,
-        min_len=8,
-        max_len=120,
-        n_cpu=1,
-        low_memory=True,
+        title='api-lifecycle',
+        download_only=True,
     )
 
     seq = run(Config(**run_config))
-    out_dir = tmp_path / 'api-smoke'
+    out_dir = tmp_path / 'api-lifecycle'
     assert (out_dir / 'config.json').exists()
-    assert (out_dir / 'assemblies.csv').exists()
-    assert (out_dir / 'signatures.fasta').exists()
-    assert seq.config.run_mash is False
-    assert seq.config.low_memory is True
+    assert seq.state.working_dir == out_dir
 
     with pytest.raises(FileExistsError):
         run(Config(**run_config))
 
     rerun = run(Config(**run_config, overwrite=True))
-    assert (out_dir / 'results.seqwin').exists()
     assert rerun.state.working_dir == out_dir

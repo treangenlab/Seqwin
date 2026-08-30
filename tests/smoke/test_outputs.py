@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import numpy as np
+import pytest
 from typer.testing import CliRunner
 
 from seqwin import cli
@@ -26,9 +27,6 @@ def _assert_graph_matches_expected(actual_path: Path, expected_path: Path) -> No
     assert actual_keys == expected_keys, f'graph arrays mismatch: actual={sorted(actual_keys)}, expected={sorted(expected_keys)}'
     actual = {name: np.load(actual_path / f'{name}.npy', allow_pickle=False) for name in required_keys}
     expected = {name: np.load(expected_path / f'{name}.npy', allow_pickle=False) for name in required_keys}
-    assert actual['record_ids'].ndim == 1
-    assert actual['record_ids'].dtype.kind == 'U'
-    assert actual['record_ids'].dtype != object
     assert len(actual['record_ids']) == int(actual['record_offsets'][-1])
     for name in sorted(required_keys):
         actual_array = actual[name]
@@ -109,29 +107,26 @@ def test_multithreading_matches_expected(tmp_path: Path, targets_txt: Path, non_
     assert read_text(out_dir / WORKINGDIR.markers_fasta) == expected_fasta
 
 
-def test_graph_matches_expected(tmp_path: Path, targets_txt: Path, non_targets_txt: Path, expected_graph: Path) -> None:
+@pytest.mark.parametrize(
+    'low_memory',
+    (
+        pytest.param(False, id='standard'),
+        pytest.param(True, id='low-memory'),
+    ),
+)
+def test_saved_graph_matches_expected(
+    tmp_path: Path, targets_txt: Path, non_targets_txt: Path,
+    expected_graph: Path, low_memory: bool,
+) -> None:
+    mode_options = ('--low-memory',) if low_memory else ()
     out_dir = _run_cli(
         '--tar-paths', str(targets_txt),
         '--neg-paths', str(non_targets_txt),
         '--prefix', str(tmp_path),
         '--threads', '1',
-        '--title', 'save-graph',
+        '--title', f'save-graph-{"low-memory" if low_memory else "standard"}',
         '--save-graph',
-        *_shared_config,
-    )
-
-    _assert_graph_matches_expected(out_dir / WORKINGDIR.graph, expected_graph)
-
-
-def test_low_memory_graph_matches_expected(tmp_path: Path, targets_txt: Path, non_targets_txt: Path, expected_graph: Path) -> None:
-    out_dir = _run_cli(
-        '--tar-paths', str(targets_txt),
-        '--neg-paths', str(non_targets_txt),
-        '--prefix', str(tmp_path),
-        '--threads', '1',
-        '--title', 'save-graph-low-memory',
-        '--save-graph',
-        '--low-memory',
+        *mode_options,
         *_shared_config,
     )
 

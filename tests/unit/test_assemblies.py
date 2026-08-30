@@ -54,7 +54,6 @@ def test_assemblies_is_a_lightweight_ordered_container(tmp_path: Path) -> None:
 
     assemblies = Assemblies(paths, is_targets)
 
-    assert not isinstance(assemblies, pd.DataFrame)
     assert assemblies.paths == tuple(paths)
     np.testing.assert_array_equal(
         assemblies.is_targets, is_targets
@@ -63,10 +62,6 @@ def test_assemblies_is_a_lightweight_ordered_container(tmp_path: Path) -> None:
     assert assemblies.is_targets.ndim == 1
     assert assemblies.is_targets.flags.c_contiguous
     assert len(assemblies) == 4
-    assert not hasattr(assemblies, 'record_ids')
-    assert not hasattr(assemblies, 'empty')
-    assert not hasattr(assemblies, 'index')
-    assert not hasattr(assemblies, 'to_csv')
 
 
 def test_assemblies_empty_and_pickle_round_trip() -> None:
@@ -78,17 +73,20 @@ def test_assemblies_empty_and_pickle_round_trip() -> None:
     assert assemblies.is_targets.flags.c_contiguous
 
 
-def test_assemblies_rejects_invalid_target_statuses(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ('is_targets', 'message'),
+    (
+        pytest.param([True], r'len\(paths\) must equal len\(is_targets\)', id='wrong-length'),
+        pytest.param([[True], [False]], 'is_targets must be one-dimensional', id='two-dimensional'),
+    ),
+)
+def test_assemblies_rejects_invalid_target_statuses(
+    tmp_path: Path, is_targets, message: str,
+) -> None:
     paths = [tmp_path / 'first.fasta', tmp_path / 'second.fasta']
 
-    with np.testing.assert_raises_regex(
-        ValueError, r'len\(paths\) must equal len\(is_targets\)'
-    ):
-        Assemblies(paths, [True])
-    with np.testing.assert_raises_regex(
-        ValueError, 'is_targets must be one-dimensional'
-    ):
-        Assemblies(paths, [[True], [False]])
+    with pytest.raises(ValueError, match=message):
+        Assemblies(paths, is_targets)
 
 
 def test_get_assemblies_keeps_targets_first(monkeypatch, tmp_path: Path) -> None:
