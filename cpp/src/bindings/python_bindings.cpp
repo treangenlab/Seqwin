@@ -1,5 +1,6 @@
 #include <cstdint>
 #include <memory>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -156,5 +157,47 @@ PYBIND11_MODULE(_core, m) {
         py::arg("kmers").noconvert(),
         py::arg("nodes").noconvert(),
         py::arg("used_hashes")
+    );
+
+    m.def("_get_subgraphs_native",
+        [](py::array_t<seqwin::Node, py::array::c_style> nodes,
+           py::array_t<seqwin::Edge, py::array::c_style> edges,
+           const std::vector<std::uint64_t>& seeds,
+           double penalty_th,
+           std::size_t min_nodes,
+           py::object max_nodes
+        ) {
+            auto nodes_buf = nodes.request();
+            auto edges_buf = edges.request();
+            const auto* nodes_ptr = static_cast<const seqwin::Node*>(nodes_buf.ptr);
+            const auto* edges_ptr = static_cast<const seqwin::Edge*>(edges_buf.ptr);
+            const auto n_nodes = static_cast<std::size_t>(nodes_buf.shape[0]);
+            const auto n_edges = static_cast<std::size_t>(edges_buf.shape[0]);
+            const auto max_nodes_native = max_nodes.is_none()
+                ? std::numeric_limits<std::size_t>::max()
+                : max_nodes.cast<std::size_t>();
+
+            std::pair<seqwin::Subgraphs, std::vector<std::uint64_t>> result;
+            {
+                py::gil_scoped_release release;
+                result = seqwin::get_subgraphs(
+                    nodes_ptr,
+                    n_nodes,
+                    edges_ptr,
+                    n_edges,
+                    seeds,
+                    penalty_th,
+                    min_nodes,
+                    max_nodes_native
+                );
+            }
+            return result;
+        },
+        py::arg("nodes").noconvert(),
+        py::arg("edges").noconvert(),
+        py::arg("seeds"),
+        py::arg("penalty_th"),
+        py::arg("min_nodes"),
+        py::arg("max_nodes")
     );
 }

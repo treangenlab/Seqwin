@@ -35,7 +35,7 @@ from collections.abc import Iterable
 import numpy as np
 from numpy.typing import NDArray
 
-from ._core import _build_native, _get_penalty_native, _filter_kmers_native
+from ._core import _build_native, _get_penalty_native, _filter_kmers_native, _get_subgraphs_native
 
 from .utils import OrderedKmers
 

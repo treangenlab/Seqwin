@@ -5,9 +5,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <queue>
 #include <stdexcept>
 #include <vector>
 
+#include "seqwin/filter_internals.hpp"
 #include "utils/thread_pool.hpp"
 
 namespace seqwin {
@@ -198,6 +200,100 @@ Graph filter_kmers(
     }
 
     return graph;
+}
+
+std::pair<Subgraphs, std::vector<std::uint64_t>> get_subgraphs(
+    const Node* nodes,
+    std::size_t n_nodes,
+    const Edge* edges,
+    std::size_t n_edges,
+    const std::vector<std::uint64_t>& seeds,
+    double penalty_th,
+    std::size_t min_nodes,
+    std::size_t max_nodes
+) {
+    const internal::GraphTopology graph(nodes, n_nodes, edges, n_edges);
+    struct FrontierNode {
+        double penalty;
+        std::size_t index;
+    };
+    // Nodes are sorted by hash, so index order reproduces the Python
+    // (penalty, node_hash) heap ordering without storing each hash again.
+    const auto lower_priority = [](const FrontierNode& left, const FrontierNode& right) {
+        if (left.penalty != right.penalty) {
+            return left.penalty > right.penalty;
+        }
+        return left.index > right.index;
+    };
+
+    std::vector<std::uint8_t> used(n_nodes, 0);
+    std::vector<std::uint8_t> in_subgraph(n_nodes, 0);
+    std::vector<std::uint8_t> in_frontier(n_nodes, 0);
+    Subgraphs subgraphs;
+    std::vector<std::uint64_t> used_hashes;
+
+    for (const auto seed_hash : seeds) {
+        // From now on, graph nodes are represented by their internal index
+        const auto seed = graph.node_index(seed_hash);
+        if (used[seed]) {
+            continue;
+        }
+
+        std::vector<std::size_t> subgraph{seed};
+        in_subgraph[seed] = 1;
+        double sum_penalty = nodes[seed].penalty;
+        std::priority_queue<
+            FrontierNode, std::vector<FrontierNode>, decltype(lower_priority)
+        > frontier(lower_priority);
+
+        const auto add_neighbors = [&](std::size_t node) {
+            for (const auto neighbor : graph.neighbors(node)) {
+                if (!used[neighbor] && !in_subgraph[neighbor] && !in_frontier[neighbor]) {
+                    frontier.push({nodes[neighbor].penalty, neighbor});
+                    in_frontier[neighbor] = 1;
+                }
+            }
+        };
+        add_neighbors(seed);
+
+        while (!frontier.empty() && subgraph.size() < max_nodes) {
+            const auto candidate = frontier.top();
+            frontier.pop();
+            if (!in_frontier[candidate.index]) {
+                continue;
+            }
+
+            const double new_sum_penalty = sum_penalty + candidate.penalty;
+            if (
+                new_sum_penalty / static_cast<double>(subgraph.size() + 1) <= penalty_th
+            ) {
+                subgraph.push_back(candidate.index);
+                in_subgraph[candidate.index] = 1;
+                sum_penalty = new_sum_penalty;
+                add_neighbors(candidate.index);
+            }
+            in_frontier[candidate.index] = 0;
+        }
+
+        while (!frontier.empty()) {
+            in_frontier[frontier.top().index] = 0;
+            frontier.pop();
+        }
+        if (subgraph.size() >= min_nodes) {
+            auto& hashes = subgraphs.emplace_back();
+            hashes.reserve(subgraph.size());
+            for (const auto node : subgraph) {
+                hashes.push_back(nodes[node].hash);
+                used_hashes.push_back(nodes[node].hash);
+                used[node] = 1;
+            }
+        }
+        for (const auto node : subgraph) {
+            in_subgraph[node] = 0;
+        }
+    }
+
+    return {std::move(subgraphs), std::move(used_hashes)};
 }
 
 } // namespace seqwin

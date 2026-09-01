@@ -29,7 +29,6 @@ __license__ = 'GPL 3.0'
 import logging
 from random import Random
 from time import time
-from heapq import heappush, heappop
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +36,7 @@ import numpy as np
 import networkx as nx
 from numpy.typing import NDArray
 
-from .graph import KmerGraph, _get_penalty, _filter_kmers
+from .graph import KmerGraph, _get_penalty, _filter_kmers, _get_subgraphs_native
 from .assemblies import Assemblies
 from .utils import print_time_delta, log_and_raise
 from .config import Config, RunState, HAS_MASH, WORKINGDIR, EDGE_W, NODE_P
@@ -110,7 +109,7 @@ def _get_filtered_graph(
     nodes, edges, nx_graph = _filter_edges_and_nodes(graph.nodes, graph.edges, edge_weight_th)
 
     # get low-penalty subgraphs
-    subgraphs, used_hashes = _get_subgraphs(nx_graph, penalty_th, min_nodes, max_nodes, rng)
+    subgraphs, used_hashes = _get_subgraphs(nodes, edges, penalty_th, min_nodes, max_nodes, rng)
 
     # remove unused k-mers
     logger.info(' - Removing k-mers not included in any of the subgraphs...')
@@ -132,7 +131,7 @@ def _get_filtered_graph(
 def _filter_edges_and_nodes(
     nodes: NDArray, edges: NDArray, edge_weight_th: float
 ) -> tuple[NDArray, NDArray, nx.Graph]:
-    """Remove low-weight edges and isolated nodes, and create the graph instance.
+    """Remove low-weight edges and isolated nodes, and create the NetworkX graph instance.
 
     Args:
         nodes (NDArray): See `KmerGraph.nodes`.
@@ -141,9 +140,9 @@ def _filter_edges_and_nodes(
 
     Returns:
         tuple: A tuple containing
-            1. NDArray: Filtered nodes.
+            1. NDArray: Filtered nodes, sorted by hash.
             2. NDArray: Filtered edges.
-            3. nx.Graph: See `KmerGraph.graph`.
+            3. nx.Graph: See `FilteredGraph.nx_graph`.
     """
     logger.info(' - Filtering graph edges and nodes...')
     n_nodes, n_edges = len(nodes), len(edges)
@@ -174,7 +173,8 @@ def _filter_edges_and_nodes(
 
 
 def _get_subgraphs(
-    graph: nx.Graph,
+    nodes: NDArray,
+    edges: NDArray,
     penalty_th: float,
     min_nodes: int,
     max_nodes: int | None,
@@ -183,21 +183,11 @@ def _get_subgraphs(
     tuple[frozenset[np.uint64], ...],
     frozenset[np.uint64]
 ]:
-    """Find disjoint (no shared node) subgraphs whose average node-penalty ≤ `penalty_th` and size within `size_th`.
-    1. Remove low-weight edges and isolated nodes from `graph`.
-    2. Find nodes with penalty ≤ `penalty_th` as seeds of subgraphs.
-    3. Greedy seed-expansion with breadth first search (BFS), where the neighboring node with the lowest penalty is
-        selected in each iteration.
-
-    A heap frontier (nodes to be visited in BFS) is used to accelerate the expansion process.
-    The heap is implemented with the built-in Python `heapq` module, which is a min-heap.
-    E.g., when tuples of `(penalty, node)` are pushed to the heap, it will always pop the tuple with the smallest `penalty` first.
-    This is faster than calling `min()` every time to fetch the node with the lowest penalty.
-    When tested on the Salmonella dataset (576 genomes, no edge filtering), this implementation is more than 3x faster than the naive one.
-    However, the performance gain becomes less significant when more low-weight edges are removed.
+    """Find disjoint low-penalty subgraphs using greedy BFS expansion.
 
     Args:
-        graph (nx.Graph): See `KmerGraph.graph`.
+        nodes (NDArray): Filtered nodes, sorted by hash.
+        edges (NDArray): Filtered edges.
         penalty_th (float): See `Config` in `config.py`.
         min_nodes (int): See `Config` in `config.py`.
         max_nodes (int | None): See `Config` in `config.py`.
@@ -208,93 +198,12 @@ def _get_subgraphs(
             1. tuple[frozenset[np.uint64], ...]: See `KmerGraph.subgraphs`.
             2. frozenset[np.uint64]: Union of k-mer hash values in all subgraphs.
     """
-    # a dict mapping node to penalty for faster lookup
-    node_penalty: dict[int, float] = dict(
-        # sort nodes for reproducibility (nodes order decides seeds order)
-        sorted(graph.nodes(data=NODE_P))
-    )
-
     # collect all seed nodes and shuffle
     # use <=, otherwise there will be no seed when penalty_th = 0
-    seeds = list(n for n, p in node_penalty.items() if p <= penalty_th)
+    seeds = list(nodes['hash'][nodes['penalty'] <= penalty_th])
     rng.shuffle(seeds)
     logger.info(f' - Expanding subgraphs from {len(seeds)} seed nodes (penalty<={penalty_th:.5f})...')
-
-    used: set[int] = set() # nodes already assigned to a subgraph
-    subgraphs: list[set[int]] = list() # list of subgraphs to return
-
-    for s in seeds:
-        if s in used:
-            continue
-
-        # initialize the subgraph (sg)
-        sg = {s}
-        sum_penalty = node_penalty[s]
-
-        #---------- subgraph expansion (the naive way) ----------#
-        # # add initial neighbors to frontier
-        # frontier = set(graph.neighbors(s)) - used - sg
-
-        # # expand the subgraph by adding the node in the frontier with the lowest penalty
-        # while frontier and len(sg) < max_size:
-        #     node = min(frontier, key=lambda n: (node_penalty[n], n))
-
-        #     # whether to accept this node
-        #     new_sum_penalty = sum_penalty + node_penalty[node]
-        #     if new_sum_penalty / (len(sg)+1) <= penalty_th:
-        #         # accept
-        #         sg.add(node)
-        #         sum_penalty = new_sum_penalty
-
-        #         # bring in its neighbors
-        #         frontier |= (set(graph.neighbors(node)) - used - sg)
-
-        #     # whether accepted or not, never reconsider this node
-        #     frontier.remove(node)
-        #---------- subgraph expansion (the naive way) ----------#
-
-        #---------- subgraph expansion (heap frontier) ----------#
-        # min‐heap of (penalty, node)
-        frontier_heap: list[tuple[float, int]] = list()
-        # a set synced with frontier_heap
-        # for faster membership checking, also guarantees every node in the heap is unique
-        frontier_set: set[int] = set()
-
-        # add initial neighbors to frontier
-        for nbr in graph.neighbors(s):
-            if (nbr not in used) and (nbr not in sg):
-                heappush(frontier_heap, (node_penalty[nbr], nbr))
-                frontier_set.add(nbr)
-
-        # expand the subgraph by adding the node in the frontier with the lowest penalty
-        while frontier_heap and ((max_nodes is None) or (len(sg) < max_nodes)):
-            penalty, node = heappop(frontier_heap)
-            # keep frontier_heap and frontier_set consistent (might not be necessary but to be safe)
-            if node not in frontier_set:
-                continue
-
-            # whether to accept this node
-            new_sum_penalty = sum_penalty + penalty
-            # use <=, otherwise there will be no new node when penalty_th = 0
-            if new_sum_penalty / (len(sg)+1) <= penalty_th:
-                # accept
-                sg.add(node)
-                sum_penalty = new_sum_penalty
-
-                # bring in its neighbors
-                for nbr in graph.neighbors(node):
-                    if (nbr not in used) and (nbr not in sg) and (nbr not in frontier_set):
-                        heappush(frontier_heap, (node_penalty[nbr], nbr))
-                        frontier_set.add(nbr)
-
-            # whether accepted or not, never reconsider this node
-            frontier_set.remove(node)
-        #---------- subgraph expansion (heap frontier) ----------#
-
-        # keep or discard the subgraph
-        if len(sg) >= min_nodes:
-            subgraphs.append(sg)
-            used |= sg
+    subgraphs, used = _get_subgraphs_native(nodes, edges, seeds, penalty_th, min_nodes, max_nodes)
 
     if len(subgraphs) > 0:
         logger.info(f' - Found {len(subgraphs)} low-penalty subgraphs')
@@ -309,7 +218,10 @@ def _get_subgraphs(
     # by shuffling the subgraphs, we can get a more balanced distribution of sizes in downstream multiprocessing
     rng.shuffle(subgraphs)
 
-    return tuple(frozenset(sg) for sg in subgraphs), frozenset(used)
+    return (
+        tuple(frozenset(map(np.uint64, sg)) for sg in subgraphs),
+        frozenset(map(np.uint64, used))
+    )
 
 
 def _expected_frac(jaccard_mtx: NDArray) -> np.floating:
