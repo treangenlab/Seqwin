@@ -81,123 +81,80 @@ PYBIND11_MODULE(_core, m) {
         py::arg("low_memory") = false
     );
 
-    m.def("_get_penalty_native",
+    m.def("_filter_native",
         [](py::array_t<seqwin::Kmer, py::array::c_style> kmers,
            py::array_t<seqwin::Node, py::array::c_style> nodes,
+           py::array_t<seqwin::Edge, py::array::c_style> edges,
            py::array_t<std::uint32_t, py::array::c_style> record_offsets,
            py::array_t<bool, py::array::c_style> is_targets,
+           py::object jaccard_object,
+           py::object penalty_th,
+           double stringency,
+           double penalty_th_cap,
+           double edge_w_th_mul,
+           std::size_t windowsize,
+           std::size_t min_len,
+           py::object max_len,
+           std::size_t min_nodes_floor,
+           py::object max_nodes_cap,
+           std::uint64_t seed,
            std::size_t n_cpu
         ) {
             auto kmers_buf = kmers.request();
             auto nodes_buf = nodes.request();
-            auto record_offsets_buf = record_offsets.request();
-            auto is_targets_buf = is_targets.request();
-
-            if (nodes_buf.readonly) {
-                throw std::invalid_argument("nodes must be writable");
-            }
-
-            const auto* kmers_ptr = static_cast<const seqwin::Kmer*>(kmers_buf.ptr);
-            auto* nodes_ptr = static_cast<seqwin::Node*>(nodes_buf.ptr);
-            const auto* record_offsets_ptr = static_cast<const std::uint32_t*>(record_offsets_buf.ptr);
-            const auto* is_targets_ptr = static_cast<const bool*>(is_targets_buf.ptr);
-            const auto n_nodes = static_cast<std::size_t>(nodes_buf.shape[0]);
-            const auto n_record_offsets = static_cast<std::size_t>(record_offsets_buf.shape[0]);
-            const auto n_assemblies = static_cast<std::size_t>(is_targets_buf.shape[0]);
-
-            {
-                py::gil_scoped_release release;
-                seqwin::get_penalty(
-                    kmers_ptr,
-                    nodes_ptr,
-                    n_nodes,
-                    record_offsets_ptr,
-                    n_record_offsets,
-                    is_targets_ptr,
-                    n_assemblies,
-                    n_cpu
-                );
-            }
-        },
-        py::arg("kmers").noconvert(),
-        py::arg("nodes").noconvert(),
-        py::arg("record_offsets").noconvert(),
-        py::arg("is_targets").noconvert(),
-        py::arg("n_cpu") = 1
-    );
-
-    m.def("_filter_kmers_native",
-        [](py::array_t<seqwin::Kmer, py::array::c_style> kmers,
-           py::array_t<seqwin::Node, py::array::c_style> nodes,
-           const std::vector<std::uint64_t>& used_hashes
-        ) {
-            auto kmers_buf = kmers.request();
-            auto nodes_buf = nodes.request();
-
-            const auto* kmers_ptr = static_cast<const seqwin::Kmer*>(kmers_buf.ptr);
-            const auto* nodes_ptr = static_cast<const seqwin::Node*>(nodes_buf.ptr);
-            const auto n_nodes = static_cast<std::size_t>(nodes_buf.shape[0]);
-
-            seqwin::Graph graph;
-            {
-                py::gil_scoped_release release;
-                graph = seqwin::filter_kmers(
-                    kmers_ptr,
-                    nodes_ptr,
-                    n_nodes,
-                    used_hashes
-                );
-            }
-
-            auto kmers_new = array_to_numpy(std::move(graph.kmers));
-            auto nodes_new = array_to_numpy(std::move(graph.nodes));
-
-            return py::make_tuple(kmers_new, nodes_new);
-        },
-        py::arg("kmers").noconvert(),
-        py::arg("nodes").noconvert(),
-        py::arg("used_hashes")
-    );
-
-    m.def("_get_subgraphs_native",
-        [](py::array_t<seqwin::Node, py::array::c_style> nodes,
-           py::array_t<seqwin::Edge, py::array::c_style> edges,
-           const std::vector<std::uint64_t>& seeds,
-           double penalty_th,
-           std::size_t min_nodes,
-           py::object max_nodes
-        ) {
-            auto nodes_buf = nodes.request();
             auto edges_buf = edges.request();
-            const auto* nodes_ptr = static_cast<const seqwin::Node*>(nodes_buf.ptr);
-            const auto* edges_ptr = static_cast<const seqwin::Edge*>(edges_buf.ptr);
-            const auto n_nodes = static_cast<std::size_t>(nodes_buf.shape[0]);
-            const auto n_edges = static_cast<std::size_t>(edges_buf.shape[0]);
-            const auto max_nodes_native = max_nodes.is_none()
-                ? std::numeric_limits<std::size_t>::max()
-                : max_nodes.cast<std::size_t>();
+            auto offsets_buf = record_offsets.request();
+            auto targets_buf = is_targets.request();
+            if (nodes_buf.readonly) throw std::invalid_argument("nodes must be writable");
 
-            std::pair<seqwin::Subgraphs, std::vector<std::uint64_t>> result;
+            py::array_t<double, py::array::c_style> jaccard;
+            const double* jaccard_ptr = nullptr;
+            std::size_t jaccard_rows = 0;
+            std::size_t jaccard_cols = 0;
+            if (!jaccard_object.is_none()) {
+                jaccard = jaccard_object.cast<py::array_t<double, py::array::c_style>>();
+                auto buf = jaccard.request();
+                if (buf.ndim != 2) throw std::invalid_argument("jaccard must be a two-dimensional array");
+                jaccard_ptr = static_cast<const double*>(buf.ptr);
+                jaccard_rows = static_cast<std::size_t>(buf.shape[0]);
+                jaccard_cols = static_cast<std::size_t>(buf.shape[1]);
+            }
+            seqwin::FilterConfig config{
+                penalty_th.is_none() ? std::nullopt : std::optional<double>(penalty_th.cast<double>()),
+                stringency, penalty_th_cap, edge_w_th_mul, windowsize, min_len,
+                max_len.is_none() ? std::nullopt : std::optional<std::size_t>(max_len.cast<std::size_t>()),
+                min_nodes_floor,
+                max_nodes_cap.is_none() ? std::nullopt : std::optional<std::size_t>(max_nodes_cap.cast<std::size_t>()),
+                seed, n_cpu
+            };
+            seqwin::FilterResult result;
             {
                 py::gil_scoped_release release;
-                result = seqwin::get_subgraphs(
-                    nodes_ptr,
-                    n_nodes,
-                    edges_ptr,
-                    n_edges,
-                    seeds,
-                    penalty_th,
-                    min_nodes,
-                    max_nodes_native
+                result = seqwin::filter(
+                    static_cast<const seqwin::Kmer*>(kmers_buf.ptr),
+                    static_cast<seqwin::Node*>(nodes_buf.ptr), static_cast<std::size_t>(nodes_buf.shape[0]),
+                    static_cast<const seqwin::Edge*>(edges_buf.ptr), static_cast<std::size_t>(edges_buf.shape[0]),
+                    static_cast<const std::uint32_t*>(offsets_buf.ptr), static_cast<std::size_t>(offsets_buf.shape[0]),
+                    static_cast<const bool*>(targets_buf.ptr), static_cast<std::size_t>(targets_buf.shape[0]),
+                    jaccard_ptr, jaccard_rows, jaccard_cols, config
                 );
             }
-            return result;
+            auto result_kmers = array_to_numpy(std::move(result.kmers));
+            auto result_nodes = array_to_numpy(std::move(result.nodes));
+            auto result_edges = array_to_numpy(std::move(result.edges));
+            py::object result_max_nodes = result.max_nodes
+                ? py::cast(*result.max_nodes) : py::none();
+            return py::make_tuple(result_kmers, result_nodes, result_edges,
+                std::move(result.subgraphs), result.penalty_th, result.edge_weight_th,
+                result.min_nodes, result_max_nodes);
         },
-        py::arg("nodes").noconvert(),
-        py::arg("edges").noconvert(),
-        py::arg("seeds"),
-        py::arg("penalty_th"),
-        py::arg("min_nodes"),
-        py::arg("max_nodes")
+        py::arg("kmers").noconvert(), py::arg("nodes").noconvert(),
+        py::arg("edges").noconvert(), py::arg("record_offsets").noconvert(),
+        py::arg("is_targets").noconvert(), py::arg("jaccard").noconvert(),
+        py::arg("penalty_th"), py::arg("stringency"), py::arg("penalty_th_cap"),
+        py::arg("edge_w_th_mul"), py::arg("windowsize"), py::arg("min_len"),
+        py::arg("max_len"), py::arg("min_nodes_floor"), py::arg("max_nodes_cap"),
+        py::arg("seed"), py::arg("n_cpu")
     );
+
 }
