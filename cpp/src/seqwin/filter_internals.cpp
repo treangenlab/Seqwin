@@ -1,4 +1,4 @@
-#include "seqwin/filter.hpp"
+#include "seqwin/filter_internals.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -9,10 +9,11 @@
 #include <stdexcept>
 #include <vector>
 
-#include "seqwin/filter_internals.hpp"
+#include "seqwin/filter.hpp"
+#include "utils/logging.hpp"
 #include "utils/thread_pool.hpp"
 
-namespace seqwin {
+namespace seqwin::internal {
 
 void get_penalty(
     const Kmer* kmers,
@@ -65,7 +66,7 @@ void get_penalty(
     if (n_nodes > 0) {
         n_workers = std::min(n_workers, n_nodes);
     }
-    internal::ThreadPool pool(n_workers);
+    ThreadPool pool(n_workers);
 
     const std::uint32_t n_records = record_offsets[n_assemblies];
     NoInitArray<RecordInfo> record_info(n_records);
@@ -138,87 +139,102 @@ void get_penalty(
     });
 }
 
-Graph filter_kmers(
-    const Kmer* kmers,
-    const Node* nodes,
-    std::size_t n_nodes,
-    std::vector<std::uint64_t> used_hashes
-) {
-    std::sort(used_hashes.begin(), used_hashes.end());
-
-    Graph graph;
-
-    std::vector<std::size_t> used_node_indices;
-    used_node_indices.reserve(used_hashes.size());
-
-    std::size_t n_kmers = 0;
-    std::size_t node_i = 0;
-    std::size_t used_i = 0;
-    while (node_i < n_nodes && used_i < used_hashes.size()) {
-        const auto node_hash = nodes[node_i].hash;
-        const auto used_hash = used_hashes[used_i];
-
-        if (node_hash < used_hash) {
-            ++node_i;
-            continue;
-        }
-        if (used_hash < node_hash) {
-            ++used_i;
-            continue;
-        }
-
-        used_node_indices.push_back(node_i);
-        n_kmers += nodes[node_i].stop - nodes[node_i].start;
-        ++node_i;
-        ++used_i;
-    }
-
-    graph.nodes = NoInitArray<Node>(used_node_indices.size());
-    graph.kmers = NoInitArray<Kmer>(n_kmers);
-
-    std::size_t new_start = 0;
-    for (std::size_t out_node_i = 0; out_node_i < used_node_indices.size(); ++out_node_i) {
-        const auto in_node_i = used_node_indices[out_node_i];
-        const Node& old_node = nodes[in_node_i];
-
-        const auto old_start = old_node.start;
-        const auto old_stop = old_node.stop;
-        const auto size = old_stop - old_start;
-
-        Node new_node = old_node;
-        new_node.start = new_start;
-        new_node.stop = new_start + size;
-        graph.nodes[out_node_i] = new_node;
-
-        for (std::size_t k = 0; k < size; ++k) {
-            const auto out_i = new_start + k;
-            const auto in_i = old_start + k;
-            graph.kmers[out_i] = kmers[in_i];
-        }
-
-        new_start += size;
-    }
-
-    return graph;
-}
-
-std::pair<Subgraphs, std::vector<std::uint64_t>> get_subgraphs(
+PrunedGraph prune_graph(
     const Node* nodes,
     std::size_t n_nodes,
     const Edge* edges,
     std::size_t n_edges,
-    const std::vector<std::uint64_t>& seeds,
+    double edge_weight_th
+) {
+    ankerl::unordered_dense::set<std::uint64_t> connected;
+    connected.reserve(n_nodes);
+
+    PrunedGraph graph;
+    graph.edges.reserve(n_edges);
+    const auto integer_threshold = static_cast<std::size_t>(edge_weight_th);
+    for (std::size_t i = 0; i < n_edges; ++i) {
+        if (edges[i].weight > integer_threshold) {
+            graph.edges.push_back(edges[i]);
+            connected.insert(edges[i].first);
+            connected.insert(edges[i].second);
+        }
+    }
+
+    graph.nodes.reserve(n_nodes);
+    for (std::size_t i = 0; i < n_nodes; ++i) {
+        if (connected.count(nodes[i].hash)) {
+            graph.nodes.push_back(nodes[i]);
+        }
+    }
+    return graph;
+}
+
+CompactedGraph compact_graph(
+    const Kmer* kmers,
+    const std::vector<Node>& nodes,
+    const std::vector<Edge>& edges,
+    std::vector<std::size_t> used_nodes // Node indices
+) {
+    // Restore node order (sorted by hash)
+    std::sort(used_nodes.begin(), used_nodes.end());
+
+    CompactedGraph graph;
+    std::size_t n_kmers = 0;
+    for (const auto node : used_nodes) {
+        n_kmers += nodes[node].stop - nodes[node].start;
+    }
+    graph.nodes = NoInitArray<Node>(used_nodes.size());
+    graph.kmers = NoInitArray<Kmer>(n_kmers);
+
+    std::size_t new_start = 0;
+    for (std::size_t i = 0; i < used_nodes.size(); ++i) {
+        const Node& old_node = nodes[used_nodes[i]];
+        const auto size = old_node.stop - old_node.start;
+        Node new_node = old_node;
+        new_node.start = new_start;
+        new_node.stop = new_start + size;
+        graph.nodes[i] = new_node;
+        std::copy(kmers + old_node.start, kmers + old_node.stop, graph.kmers.begin() + new_start);
+        new_start += size;
+    }
+
+    ankerl::unordered_dense::set<std::uint64_t> used_hashes;
+    used_hashes.reserve(graph.nodes.size());
+    for (const auto& node : graph.nodes) used_hashes.insert(node.hash);
+
+    graph.edges.reserve(edges.size());
+    for (const auto& edge : edges) {
+        if (used_hashes.count(edge.first) && used_hashes.count(edge.second)) {
+            graph.edges.push_back(edge);
+        }
+    }
+    return graph;
+}
+
+std::pair<Subgraphs, std::vector<std::size_t>> get_subgraphs(
+    const std::vector<Node>& nodes,
+    const std::vector<Edge>& edges,
     double penalty_th,
     std::size_t min_nodes,
-    std::size_t max_nodes
+    std::size_t max_nodes,
+    std::mt19937_64& rng
 ) {
-    const internal::GraphTopology graph(nodes, n_nodes, edges, n_edges);
+    // Graph nodes are represented by indices, instead of hashes
+    const GraphTopology graph(nodes, edges);
+
+    std::vector<std::size_t> seeds;
+    seeds.reserve(nodes.size());
+    for (std::size_t node = 0; node < nodes.size(); ++node) {
+        if (nodes[node].penalty <= penalty_th) seeds.push_back(node);
+    }
+    std::shuffle(seeds.begin(), seeds.end(), rng);
+    log_python(" - Expanding subgraphs from " + std::to_string(seeds.size()) +
+        " seed nodes (penalty<=" + std::to_string(penalty_th) + ")...");
+
     struct FrontierNode {
         double penalty;
         std::size_t index;
     };
-    // Nodes are sorted by hash, so index order reproduces the Python
-    // (penalty, node_hash) heap ordering without storing each hash again.
     const auto lower_priority = [](const FrontierNode& left, const FrontierNode& right) {
         if (left.penalty != right.penalty) {
             return left.penalty > right.penalty;
@@ -226,21 +242,20 @@ std::pair<Subgraphs, std::vector<std::uint64_t>> get_subgraphs(
         return left.index > right.index;
     };
 
-    std::vector<std::uint8_t> used(n_nodes, 0);
-    std::vector<std::uint8_t> in_subgraph(n_nodes, 0);
-    std::vector<std::uint8_t> in_frontier(n_nodes, 0);
+    // Marks nodes accepted in any of the subgraphs
+    std::vector<std::uint8_t> used(nodes.size(), 0);
+    // Marks nodes in the frontier or accepted into the current subgraph
+    std::vector<std::uint8_t> seen(nodes.size(), 0);
     Subgraphs subgraphs;
-    std::vector<std::uint64_t> used_hashes;
+    std::vector<std::size_t> used_nodes;
 
-    for (const auto seed_hash : seeds) {
-        // From now on, graph nodes are represented by their internal index
-        const auto seed = graph.node_index(seed_hash);
+    for (const auto seed : seeds) {
         if (used[seed]) {
             continue;
         }
 
         std::vector<std::size_t> subgraph{seed};
-        in_subgraph[seed] = 1;
+        seen[seed] = 1;
         double sum_penalty = nodes[seed].penalty;
         std::priority_queue<
             FrontierNode, std::vector<FrontierNode>, decltype(lower_priority)
@@ -248,9 +263,9 @@ std::pair<Subgraphs, std::vector<std::uint64_t>> get_subgraphs(
 
         const auto add_neighbors = [&](std::size_t node) {
             for (const auto neighbor : graph.neighbors(node)) {
-                if (!used[neighbor] && !in_subgraph[neighbor] && !in_frontier[neighbor]) {
+                if (!used[neighbor] && !seen[neighbor]) {
                     frontier.push({nodes[neighbor].penalty, neighbor});
-                    in_frontier[neighbor] = 1;
+                    seen[neighbor] = 1;
                 }
             }
         };
@@ -259,41 +274,38 @@ std::pair<Subgraphs, std::vector<std::uint64_t>> get_subgraphs(
         while (!frontier.empty() && subgraph.size() < max_nodes) {
             const auto candidate = frontier.top();
             frontier.pop();
-            if (!in_frontier[candidate.index]) {
-                continue;
-            }
-
+            seen[candidate.index] = 0; // Rejected candidate can be discovered again later
             const double new_sum_penalty = sum_penalty + candidate.penalty;
             if (
                 new_sum_penalty / static_cast<double>(subgraph.size() + 1) <= penalty_th
             ) {
                 subgraph.push_back(candidate.index);
-                in_subgraph[candidate.index] = 1;
+                seen[candidate.index] = 1;
                 sum_penalty = new_sum_penalty;
                 add_neighbors(candidate.index);
             }
-            in_frontier[candidate.index] = 0;
         }
 
+        // Clear node states for the next seed
         while (!frontier.empty()) {
-            in_frontier[frontier.top().index] = 0;
+            seen[frontier.top().index] = 0;
             frontier.pop();
         }
+        for (const auto node : subgraph) {
+            seen[node] = 0;
+        }
+
         if (subgraph.size() >= min_nodes) {
             auto& hashes = subgraphs.emplace_back();
             hashes.reserve(subgraph.size());
             for (const auto node : subgraph) {
                 hashes.push_back(nodes[node].hash);
-                used_hashes.push_back(nodes[node].hash);
+                used_nodes.push_back(node);
                 used[node] = 1;
             }
         }
-        for (const auto node : subgraph) {
-            in_subgraph[node] = 0;
-        }
     }
-
-    return {std::move(subgraphs), std::move(used_hashes)};
+    return {std::move(subgraphs), std::move(used_nodes)};
 }
 
-} // namespace seqwin
+} // namespace seqwin::internal

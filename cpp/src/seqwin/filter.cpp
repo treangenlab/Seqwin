@@ -11,8 +11,7 @@
 #include <string>
 #include <vector>
 
-#include <ankerl/unordered_dense.h>
-
+#include "seqwin/filter_internals.hpp"
 #include "utils/logging.hpp"
 
 namespace seqwin {
@@ -50,23 +49,20 @@ double expected_frac(
     return sum / static_cast<double>(count);
 }
 
-} // namespace
-
-FilterResult filter(
-    const Kmer* kmers, Node* nodes, std::size_t n_nodes,
-    const Edge* edges, std::size_t n_edges, const std::uint32_t* record_offsets,
-    std::size_t n_record_offsets, const bool* is_targets, std::size_t n_assemblies,
-    const double* jaccard, std::size_t jaccard_rows, std::size_t jaccard_cols,
+FilterResult calculate_thresholds(
+    const Node* nodes,
+    std::size_t n_nodes,
+    const bool* is_targets,
+    std::size_t n_assemblies,
+    const double* jaccard,
+    std::size_t jaccard_rows,
+    std::size_t jaccard_cols,
     const FilterConfig& config
 ) {
-    internal::log_python(" - Calculating node penalty scores...");
-    get_penalty(kmers, nodes, n_nodes, record_offsets, n_record_offsets,
-                is_targets, n_assemblies, config.n_cpu);
-    std::size_t n_targets = 0;
-    std::size_t n_non_targets = 0;
-    for (std::size_t i = 0; i < n_assemblies; ++i) {
-        is_targets[i] ? ++n_targets : ++n_non_targets;
-    }
+    const auto n_targets = static_cast<std::size_t>(
+        std::count(is_targets, is_targets + n_assemblies, true)
+    );
+    const auto n_non_targets = n_assemblies - n_targets;
 
     double penalty_th;
     if (config.penalty_th) {
@@ -124,59 +120,70 @@ FilterResult filter(
             std::to_string(min_nodes), "warning");
     }
 
-    internal::log_python(" - Filtering graph edges and nodes...");
-    ankerl::unordered_dense::set<std::uint64_t> connected;
-    connected.reserve(n_nodes);
-    std::vector<Edge> retained_edges;
-    retained_edges.reserve(n_edges);
-    const auto edge_weight_th_int = static_cast<std::size_t>(edge_weight_th);
-    for (std::size_t i = 0; i < n_edges; ++i) {
-        if (edges[i].weight > edge_weight_th_int) {
-            retained_edges.push_back(edges[i]);
-            connected.insert(edges[i].first);
-            connected.insert(edges[i].second);
-        }
-    }
-    std::vector<Node> retained_nodes;
-    retained_nodes.reserve(n_nodes);
-    for (std::size_t i = 0; i < n_nodes; ++i) if (connected.count(nodes[i].hash)) retained_nodes.push_back(nodes[i]);
-    internal::log_python(" - Removed " + std::to_string(n_edges - retained_edges.size()) +
-        " edges with weight<" + format_value(edge_weight_th, 3) + ", " +
-        std::to_string(retained_edges.size()) + " edges left");
-    internal::log_python(" - Removed " + std::to_string(n_nodes - retained_nodes.size()) +
-        " isolated nodes, " + std::to_string(retained_nodes.size()) + " nodes left");
+    FilterResult result;
+    result.penalty_th = penalty_th;
+    result.edge_weight_th = edge_weight_th;
+    result.min_nodes = min_nodes;
+    result.max_nodes = max_nodes;
+    return result;
+}
 
-    std::vector<std::uint64_t> seeds;
-    seeds.reserve(retained_nodes.size());
-    for (const auto& node : retained_nodes) if (node.penalty <= penalty_th) seeds.push_back(node.hash);
-    // One engine deliberately drives both shuffles, making the complete operation reproducible.
+} // namespace
+
+FilterResult filter(
+    const Kmer* kmers,
+    Node* nodes,
+    std::size_t n_nodes,
+    const Edge* edges,
+    std::size_t n_edges,
+    const std::uint32_t* record_offsets,
+    std::size_t n_record_offsets,
+    const bool* is_targets,
+    std::size_t n_assemblies,
+    const double* jaccard,
+    std::size_t jaccard_rows,
+    std::size_t jaccard_cols,
+    const FilterConfig& config
+) {
+    internal::log_python(" - Calculating node penalty scores...");
+    internal::get_penalty(
+        kmers, nodes, n_nodes, record_offsets, n_record_offsets, is_targets, n_assemblies, config.n_cpu
+    );
+    auto result = calculate_thresholds(
+        nodes, n_nodes, is_targets, n_assemblies, jaccard, jaccard_rows, jaccard_cols, config
+    );
+
+    internal::log_python(" - Filtering graph edges and nodes...");
+    auto pruned = internal::prune_graph(
+        nodes, n_nodes, edges, n_edges, result.edge_weight_th
+    );
+    internal::log_python(" - Removed " + std::to_string(n_edges - pruned.edges.size()) +
+        " edges with weight<" + format_value(result.edge_weight_th, 3) + ", " +
+        std::to_string(pruned.edges.size()) + " edges left");
+    internal::log_python(" - Removed " + std::to_string(n_nodes - pruned.nodes.size()) +
+        " isolated nodes, " + std::to_string(pruned.nodes.size()) + " nodes left");
+
     std::mt19937_64 rng(config.seed);
-    std::shuffle(seeds.begin(), seeds.end(), rng);
-    internal::log_python(" - Expanding subgraphs from " + std::to_string(seeds.size()) +
-        " seed nodes (penalty<=" + format_value(penalty_th, 5) + ")...");
-    auto extracted = get_subgraphs(retained_nodes.data(), retained_nodes.size(),
-        retained_edges.data(), retained_edges.size(), seeds, penalty_th, min_nodes,
-        max_nodes.value_or(std::numeric_limits<std::size_t>::max()));
-    if (extracted.first.empty()) {
+    auto [subgraphs, used_nodes] = internal::get_subgraphs(
+        pruned.nodes, pruned.edges, result.penalty_th, result.min_nodes,
+        result.max_nodes.value_or(std::numeric_limits<std::size_t>::max()), rng
+    );
+    if (subgraphs.empty()) {
         throw std::runtime_error("No low-penalty subgraph was found. Try decrease --stringency, or increase --penalty-th");
     }
-    std::shuffle(extracted.first.begin(), extracted.first.end(), rng);
-    internal::log_python(" - Found " + std::to_string(extracted.first.size()) + " low-penalty subgraphs");
+    std::shuffle(subgraphs.begin(), subgraphs.end(), rng);
+    internal::log_python(" - Found " + std::to_string(subgraphs.size()) + " low-penalty subgraphs");
 
-    Graph compact = filter_kmers(kmers, retained_nodes.data(), retained_nodes.size(), std::move(extracted.second));
-    ankerl::unordered_dense::set<std::uint64_t> final_hashes;
-    final_hashes.reserve(compact.nodes.size());
-    for (const auto& node : compact.nodes) final_hashes.insert(node.hash);
-    std::vector<Edge> final_edges;
-    final_edges.reserve(retained_edges.size());
-    for (const auto& edge : retained_edges) {
-        if (final_hashes.count(edge.first) && final_hashes.count(edge.second)) {
-            final_edges.push_back(edge);
-        }
-    }
-    internal::log_python(" - " + std::to_string(compact.kmers.size()) + " k-mers left");
-    return {std::move(compact.kmers), std::move(compact.nodes), std::move(final_edges),
-            std::move(extracted.first), penalty_th, edge_weight_th, min_nodes, max_nodes};
+    auto compacted = internal::compact_graph(
+        kmers, pruned.nodes, pruned.edges, std::move(used_nodes)
+    );
+    internal::log_python(" - " + std::to_string(compacted.kmers.size()) + " k-mers left");
+
+    result.kmers = std::move(compacted.kmers);
+    result.nodes = std::move(compacted.nodes);
+    result.edges = std::move(compacted.edges);
+    result.subgraphs = std::move(subgraphs);
+    return result;
 }
 
 } // namespace seqwin

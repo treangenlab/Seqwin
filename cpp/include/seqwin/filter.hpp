@@ -3,7 +3,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
-#include <utility>
 #include <vector>
 
 #include "seqwin/graph.hpp"
@@ -12,7 +11,9 @@ namespace seqwin {
 
 using Subgraphs = std::vector<std::vector<std::uint64_t>>;
 
-/** Graph-filtering configurations. */
+/**
+ * @brief Graph-filtering configurations.
+ */
 struct FilterConfig {
     std::optional<double> penalty_th;
     double stringency;
@@ -27,7 +28,9 @@ struct FilterConfig {
     std::size_t n_cpu;
 };
 
-/** Graph-filtering results. */
+/**
+ * @brief Graph-filtering results.
+ */
 struct FilterResult {
     NoInitArray<Kmer> kmers;
     NoInitArray<Node> nodes;
@@ -39,7 +42,9 @@ struct FilterResult {
     std::optional<std::size_t> max_nodes;
 };
 
-/** Filter the minimizer graph and extract low-penalty subgraphs. */
+/**
+ * @brief Filter the minimizer graph and extract low-penalty subgraphs.
+ */
 FilterResult filter(
     const Kmer* kmers,
     Node* nodes,
@@ -54,35 +59,6 @@ FilterResult filter(
     std::size_t jaccard_rows,
     std::size_t jaccard_cols,
     const FilterConfig& config
-);
-
-void get_penalty(
-    const Kmer* kmers,
-    Node* nodes,
-    std::size_t n_nodes,
-    const std::uint32_t* record_offsets,
-    std::size_t n_record_offsets,
-    const bool* is_targets,
-    std::size_t n_assemblies,
-    std::size_t n_cpu = 1
-);
-
-Graph filter_kmers(
-    const Kmer* kmers,
-    const Node* nodes,
-    std::size_t n_nodes,
-    std::vector<std::uint64_t> used_hashes
-);
-
-std::pair<Subgraphs, std::vector<std::uint64_t>> get_subgraphs(
-    const Node* nodes,
-    std::size_t n_nodes,
-    const Edge* edges,
-    std::size_t n_edges,
-    const std::vector<std::uint64_t>& seeds,
-    double penalty_th,
-    std::size_t min_nodes,
-    std::size_t max_nodes
 );
 
 } // namespace seqwin

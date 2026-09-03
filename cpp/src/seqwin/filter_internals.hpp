@@ -3,12 +3,13 @@
 #include <cstddef>
 #include <cstdint>
 #include <stdexcept>
+#include <random>
 #include <utility>
 #include <vector>
 
 #include <ankerl/unordered_dense.h>
 
-#include "seqwin/graph.hpp"
+#include "seqwin/filter.hpp"
 
 namespace seqwin::internal {
 
@@ -32,25 +33,21 @@ public:
         Iterator end_;
     };
 
-    GraphTopology(
-        const Node* nodes,
-        std::size_t n_nodes,
-        const Edge* edges,
-        std::size_t n_edges
-    )
-        : offsets_(n_nodes + 1, 0)
+    GraphTopology(const std::vector<Node>& nodes, const std::vector<Edge>& edges)
+        : offsets_(nodes.size() + 1, 0)
     {
-        node_indices_.reserve(n_nodes);
-        for (std::size_t i = 0; i < n_nodes; ++i) {
-            node_indices_.emplace(nodes[i].hash, i);
+        ankerl::unordered_dense::map<std::uint64_t, std::size_t> node_indices;
+        node_indices.reserve(nodes.size());
+        for (std::size_t i = 0; i < nodes.size(); ++i) {
+            node_indices.emplace(nodes[i].hash, i);
         }
 
         std::vector<std::pair<std::size_t, std::size_t>> endpoints;
-        endpoints.reserve(n_edges);
-        for (std::size_t i = 0; i < n_edges; ++i) {
-            const auto first = node_indices_.find(edges[i].first);
-            const auto second = node_indices_.find(edges[i].second);
-            if (first == node_indices_.end() || second == node_indices_.end()) {
+        endpoints.reserve(edges.size());
+        for (const auto& edge : edges) {
+            const auto first = node_indices.find(edge.first);
+            const auto second = node_indices.find(edge.second);
+            if (first == node_indices.end() || second == node_indices.end()) {
                 throw std::invalid_argument("Edge endpoint does not correspond to a node");
             }
             endpoints.emplace_back(first->second, second->second);
@@ -69,15 +66,6 @@ public:
         }
     }
 
-    std::size_t node_index(std::uint64_t hash) const
-    {
-        const auto it = node_indices_.find(hash);
-        if (it == node_indices_.end()) {
-            throw std::invalid_argument("Seed hash does not correspond to a node");
-        }
-        return it->second;
-    }
-
     NeighborRange neighbors(std::size_t node_index) const
     {
         return {
@@ -87,9 +75,76 @@ public:
     }
 
 private:
-    ankerl::unordered_dense::map<std::uint64_t, std::size_t> node_indices_;
     std::vector<std::size_t> offsets_;
     std::vector<std::size_t> neighbors_;
 };
+
+/**
+ * @brief Nodes and edges follow their original order (sorted by hash).
+*/
+struct PrunedGraph {
+    std::vector<Node> nodes;
+    std::vector<Edge> edges;
+};
+
+/**
+ * @brief Node ranges are rewritten to index the compacted `kmers`.
+ * `edges` contains only edges with two selected endpoints.
+ */
+struct CompactedGraph {
+    NoInitArray<Kmer> kmers;
+    NoInitArray<Node> nodes;
+    std::vector<Edge> edges;
+};
+
+/**
+ * @brief Populate node target counts and penalty scores in place.
+ */
+void get_penalty(
+    const Kmer* kmers,
+    Node* nodes,
+    std::size_t n_nodes,
+    const std::uint32_t* record_offsets,
+    std::size_t n_record_offsets,
+    const bool* is_targets,
+    std::size_t n_assemblies,
+    std::size_t n_cpu
+);
+
+/**
+ * @brief Remove low-weight edges and isolated nodes.
+ */
+PrunedGraph prune_graph(
+    const Node* nodes,
+    std::size_t n_nodes,
+    const Edge* edges,
+    std::size_t n_edges,
+    double edge_weight_th
+);
+
+/**
+ * @brief Grow disjoint low-penalty subgraphs from eligible, randomly ordered seeds.
+ *
+ * @return Subgraphs represented by node hashes;
+ * indices of all accepted nodes in `PrunedGraph.nodes`.
+ */
+std::pair<Subgraphs, std::vector<std::size_t>> get_subgraphs(
+    const std::vector<Node>& nodes,
+    const std::vector<Edge>& edges,
+    double penalty_th,
+    std::size_t min_nodes,
+    std::size_t max_nodes,
+    std::mt19937_64& rng
+);
+
+/**
+ * @brief Restrict a pruned graph to nodes used by accepted subgraphs.
+ */
+CompactedGraph compact_graph(
+    const Kmer* kmers,
+    const std::vector<Node>& nodes,
+    const std::vector<Edge>& edges,
+    std::vector<std::size_t> used_nodes
+);
 
 } // namespace seqwin::internal
