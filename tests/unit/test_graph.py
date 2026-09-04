@@ -3,7 +3,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from seqwin.graph import KMER_DTYPE, NODE_DTYPE, EDGE_DTYPE, KmerGraph, _get_penalty, _filter_kmers
+from seqwin.graph import KMER_DTYPE, NODE_DTYPE, EDGE_DTYPE, KmerGraph
 
 
 def _build(*args, **kwargs):
@@ -41,24 +41,6 @@ def test_graph_save_load_round_trip(tmp_path: Path, targets_dir: Path, non_targe
         assert loaded_array.mode == expected_mode
         assert loaded_array.flags.writeable is (name == 'nodes')
     assert loaded.record_ids.dtype.kind == 'U'
-
-
-def test_graph_mmap_nodes_support_native_scoring_without_changing_file(
-    tmp_path: Path,
-    targets_dir: Path,
-    non_targets_dir: Path,
-) -> None:
-    graph_path = tmp_path / 'graph'
-    graph_path.mkdir()
-    graph = _small_graph(targets_dir, non_targets_dir)
-    graph.save(graph_path)
-    saved_nodes = graph.nodes.copy()
-
-    loaded = KmerGraph.load(graph_path)
-    _get_penalty(loaded.kmers, loaded.nodes, loaded.record_offsets, [True, False])
-
-    assert np.any(loaded.nodes['n_tar'] != saved_nodes['n_tar'])
-    assert np.array_equal(np.load(graph_path / 'nodes.npy', allow_pickle=False), saved_nodes)
 
 
 @pytest.mark.parametrize(
@@ -246,38 +228,6 @@ def test_build_empty_record_offsets(tmp_path: Path) -> None:
             assert len(record_ids) == int(record_offsets[-1])
 
 
-def test_filter_kmers() -> None:
-    kmers = np.array([
-        (10, 0),
-        (11, 0),
-        (20, 1),
-        (30, 2),
-        (31, 2),
-        (32, 2),
-    ], dtype=KMER_DTYPE)
-    nodes = np.array([
-        (10, 0, 2, 1, 0, 0.1),
-        (20, 2, 3, 1, 0, 0.2),
-        (30, 3, 6, 1, 1, 0.3),
-    ], dtype=NODE_DTYPE)
-
-    kmers_new, nodes_new = _filter_kmers(kmers, nodes, {30, 10})
-
-    assert np.array_equal(nodes_new['hash'], np.array([10, 30], dtype=np.uint64))
-    assert np.array_equal(nodes_new['start'], np.array([0, 2], dtype=np.uintp))
-    assert np.array_equal(nodes_new['stop'], np.array([2, 5], dtype=np.uintp))
-
-    expected_kmers = np.array([
-        (10, 0),
-        (11, 0),
-        (30, 2),
-        (31, 2),
-        (32, 2),
-    ], dtype=KMER_DTYPE)
-    assert np.array_equal(kmers_new, expected_kmers)
-    _assert_node_ranges(kmers_new, nodes_new)
-
-
 def test_low_memory_build_matches_standard(targets_dir, non_targets_dir) -> None:
     assembly_paths = [
         targets_dir / 'target-1.fasta',
@@ -293,108 +243,3 @@ def test_low_memory_build_matches_standard(targets_dir, non_targets_dir) -> None
     )
 
     _assert_graph_outputs_equal(standard, low_memory)
-
-
-def _synthetic_penalty_inputs() -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    kmers = np.array([
-        (0, 0), (1, 0), (2, 1), (3, 2), (4, 4),  # node 10: asm 0, 1, 2 => tar 2 neg 1
-        (5, 2), (6, 3),                           # node 20: asm 1 => neg 1
-        (7, 5), (8, 6),                           # node 30: asm 3 => neg 1
-        (9, 4),                                   # node 40: asm 2 => tar 1
-    ], dtype=KMER_DTYPE)
-    nodes = np.array([
-        (10, 0, 5, 0, 0, 0.0),
-        (20, 5, 7, 0, 0, 0.0),
-        (30, 7, 9, 0, 0, 0.0),
-        (40, 9, 10, 0, 0, 0.0),
-        (50, 10, 10, 9, 9, 9.0),
-        (60, 5, 9, 0, 0, 0.0),
-    ], dtype=NODE_DTYPE)
-    record_offsets = np.array([0, 2, 4, 5, 7], dtype=np.uint32)
-    is_targets = np.array([True, False, True, False], dtype=np.bool_)
-    return kmers, nodes, record_offsets, is_targets
-
-
-def test_get_penalty_exact_scoring() -> None:
-    kmers, nodes, record_offsets, is_targets = _synthetic_penalty_inputs()
-
-    assert _get_penalty(kmers, nodes, record_offsets, is_targets, n_cpu=1) is None
-
-    assert np.array_equal(nodes['n_tar'], np.array([2, 0, 0, 1, 0, 0], dtype=np.uint32))
-    assert np.array_equal(nodes['n_neg'], np.array([1, 1, 1, 0, 0, 2], dtype=np.uint32))
-    np.testing.assert_allclose(
-        nodes['penalty'],
-        np.array([0.5, np.hypot(1.0, 0.5), np.hypot(1.0, 0.5), 0.5, 1.0, np.sqrt(2.0)])
-    )
-
-
-def test_get_penalty_parallel_equivalence() -> None:
-    kmers, nodes_1, record_offsets, is_targets = _synthetic_penalty_inputs()
-    nodes_2 = nodes_1.copy()
-    nodes_many = nodes_1.copy()
-
-    _get_penalty(kmers, nodes_1, record_offsets, is_targets, n_cpu=1)
-    _get_penalty(kmers, nodes_2, record_offsets, is_targets, n_cpu=2)
-    _get_penalty(kmers, nodes_many, record_offsets, is_targets, n_cpu=99)
-
-    assert np.array_equal(nodes_1, nodes_2)
-    assert np.array_equal(nodes_1, nodes_many)
-
-
-def test_get_penalty_skips_zero_record_assemblies() -> None:
-    kmers = np.array([(0, 0), (1, 1)], dtype=KMER_DTYPE)
-    nodes = np.array([(10, 0, 2, 0, 0, 0.0)], dtype=NODE_DTYPE)
-    record_offsets = np.array([0, 1, 1, 1, 2], dtype=np.uint32)
-    is_targets = np.array([True, False, True, False], dtype=np.bool_)
-
-    _get_penalty(kmers, nodes, record_offsets, is_targets, n_cpu=2)
-
-    assert nodes[0]['n_tar'] == 1
-    assert nodes[0]['n_neg'] == 1
-    assert nodes[0]['penalty'] == np.sqrt(0.5)
-
-
-@pytest.mark.parametrize(
-    ('case', 'error'),
-    (
-        pytest.param('read-only-nodes', ValueError, id='read-only-nodes'),
-        pytest.param('offset-count', ValueError, id='invalid-offset-count'),
-        pytest.param('offset-start', ValueError, id='offsets-do-not-start-at-zero'),
-        pytest.param('offset-order', ValueError, id='offsets-not-sorted'),
-        pytest.param('offset-dtype', TypeError, id='wrong-offset-dtype'),
-        pytest.param('all-nontarget', ValueError, id='all-nontarget-mask'),
-        pytest.param('all-target', ValueError, id='all-target-mask'),
-        pytest.param('node-range', ValueError, id='invalid-node-range'),
-        pytest.param('record-index-bounds', ValueError, id='record-index-out-of-bounds'),
-        pytest.param('record-index-order', ValueError, id='record-indices-not-ordered'),
-        pytest.param('target-dimensions', ValueError, id='malformed-target-mask'),
-    ),
-)
-def test_get_penalty_validation(case: str, error: type[Exception]) -> None:
-    kmers, nodes, record_offsets, is_targets = _synthetic_penalty_inputs()
-
-    if case == 'read-only-nodes':
-        nodes.flags.writeable = False
-    elif case == 'offset-count':
-        record_offsets = record_offsets[:-1]
-    elif case == 'offset-start':
-        record_offsets = np.array([1, 2, 4, 5, 7], dtype=np.uint32)
-    elif case == 'offset-order':
-        record_offsets = np.array([0, 3, 2, 5, 7], dtype=np.uint32)
-    elif case == 'offset-dtype':
-        record_offsets = record_offsets.astype(np.uint64)
-    elif case == 'all-nontarget':
-        is_targets = np.zeros(4, dtype=np.bool_)
-    elif case == 'all-target':
-        is_targets = np.ones(4, dtype=np.bool_)
-    elif case == 'node-range':
-        nodes[0]['stop'] = len(kmers) + 1
-    elif case == 'record-index-bounds':
-        kmers[0]['record_idx'] = 7
-    elif case == 'record-index-order':
-        kmers[3]['record_idx'] = 0
-    elif case == 'target-dimensions':
-        is_targets = np.array([[True, False], [True, False]])
-
-    with pytest.raises(error):
-        _get_penalty(kmers, nodes, record_offsets, is_targets)

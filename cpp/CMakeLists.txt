@@ -43,6 +43,7 @@ Python_add_library(_core MODULE WITH_SOABI
     src/bindings/python_bindings.cpp
     src/seqwin/build.cpp
     src/seqwin/build_internals.cpp
+    src/seqwin/filter_internals.cpp
     src/seqwin/filter.cpp
     src/utils/fasta_reader.cpp
     src/utils/logging.cpp

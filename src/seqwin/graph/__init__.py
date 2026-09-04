@@ -35,7 +35,7 @@ from collections.abc import Iterable
 import numpy as np
 from numpy.typing import NDArray
 
-from ._core import _build_native, _get_penalty_native, _filter_kmers_native
+from ._core import _build_native, _filter_native
 
 from .utils import OrderedKmers
 
@@ -217,53 +217,3 @@ class KmerGraph:
         for name, array in arrays.items():
             setattr(graph, name, array)
         return graph
-
-
-def _get_penalty(
-    kmers: NDArray[np.void],
-    nodes: NDArray[np.void],
-    record_offsets: NDArray[np.uint32],
-    is_targets: Iterable[bool],
-    n_cpu: int = 1
-) -> None:
-    """Populate node target counts and penalty scores in place.
-
-    Args:
-        kmers (NDArray): See `KmerGraph.kmers`.
-        nodes (NDArray): See `KmerGraph.nodes`.
-        record_offsets (NDArray[np.uint32]): See `KmerGraph.record_offsets`.
-        is_targets (Iterable[bool]): Whether each assembly is a target assembly.
-        n_cpu (int, optional): Number of worker threads to use. [1]
-    """
-    _get_penalty_native(
-        kmers,
-        nodes,
-        record_offsets,
-        np.asarray(is_targets, dtype=np.bool_, order='C'),
-        int(n_cpu)
-    )
-
-
-def _filter_kmers(
-    kmers: NDArray[np.void],
-    nodes: NDArray[np.void],
-    used_hashes: frozenset[np.uint64]
-) -> tuple[
-    NDArray[np.void],
-    NDArray[np.void]
-]:
-    """
-    1. Remove k-mers (`kmers` and `nodes`) not included in `used_hashes`.
-    2. Update 'start' and 'stop' in nodes.
-
-    Args:
-        kmers (NDArray): See `KmerGraph.kmers`.
-        nodes (NDArray): See `KmerGraph.nodes`.
-        used_hashes (frozenset[np.uint64]): K-mers and nodes with these hash values are kept.
-
-    Returns:
-        tuple: A tuple containing
-            1. NDArray: See `KmerGraph.kmers`.
-            2. NDArray: See `KmerGraph.nodes`.
-    """
-    return _filter_kmers_native(kmers, nodes, used_hashes)

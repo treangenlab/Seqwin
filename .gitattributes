@@ -1,3 +1,4 @@
 cpp/vendor/** linguist-vendored
 tests/**/*.py linguist-vendored
 *.npy binary
+tests/expected-output/** binary
