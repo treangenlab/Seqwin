@@ -94,6 +94,11 @@ def main(
         help='Overwrite existing output files.',
         rich_help_panel='Output options'
     ),
+    save_graph: bool = typer.Option(
+            False, '--save-graph', show_default=False,
+            help='Save the raw minimizer graph before extracting signatures.',
+            rich_help_panel='Output options'
+        ),
     kmerlen: int = typer.Option(
         21, '--kmerlen', '-k',
         help='K-mer length.',
@@ -180,11 +185,6 @@ def main(
         help='Only download genome sequences without running Seqwin.',
         rich_help_panel='NCBI download options'
     ),
-    seed: int = typer.Option(
-        42, '--seed',
-        help='Random seed for reproducibility.',
-        rich_help_panel='Miscellaneous'
-    ),
     n_cpu: int = typer.Option(
         4, '--threads', '-p',
         help='Number of parallel processes or threads to use.',
@@ -193,11 +193,6 @@ def main(
     low_memory: bool = typer.Option(
         False, '--low-memory', show_default=False,
         help='Reduce peak memory by recomputing minimizers in a second pass.',
-        rich_help_panel='Miscellaneous'
-    ),
-    save_graph: bool = typer.Option(
-        False, '--save-graph', show_default=False,
-        help='Save the minimizer graph produced by the build phase before filtering.',
         rich_help_panel='Miscellaneous'
     ),
     version: bool = typer.Option(
@@ -245,7 +240,6 @@ def main(
         gzip=not no_gzip,
         api_key=api_key,
         download_only=download_only,
-        seed=seed,
         n_cpu=n_cpu,
         low_memory=low_memory,
         save_graph=save_graph

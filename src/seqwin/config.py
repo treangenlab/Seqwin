@@ -52,7 +52,6 @@ logging.basicConfig(
 )
 
 from pathlib import Path
-from random import Random
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from collections.abc import Mapping
@@ -85,6 +84,7 @@ class Config(BaseModel):
         prefix (Path): Parent path where the output directory will be created. Use the current working directory by default. [cwd]
         title (str): Name of the output directory created under `prefix`. ['seqwin-out']
         overwrite (bool): If True, overwrite existing output files. [False]
+        save_graph (bool): Save the raw minimizer graph before extracting signatures. [False]
 
         kmerlen (int): K-mer length. [21]
         windowsize (int): Window size for minimizer sketch. [200]
@@ -111,10 +111,8 @@ class Config(BaseModel):
         api_key (SecretStr | None): NCBI API key passed to the Datasets command-line tools. [None]
         download_only (bool): If True, only download genome sequences without running Seqwin. [False]
 
-        seed (int): Random seed for reproducibility. [42]
         n_cpu (int): Number of parallel processes or threads to use. [4]
         low_memory (bool): If True, reduce peak memory by recomputing minimizers in a second pass. [False]
-        save_graph (bool): Save the minimizer graph produced by the build phase before filtering. [False]
         version (str): Seqwin version.
     """
     # Inputs
@@ -129,6 +127,7 @@ class Config(BaseModel):
     prefix: Path = Field(default_factory=Path.cwd) # pass a func for dynamic default
     title: str = 'seqwin-out'
     overwrite: bool = False
+    save_graph: bool = False
 
     # Signature options
     kmerlen: int = 21
@@ -158,10 +157,8 @@ class Config(BaseModel):
     gzip: bool = True
     api_key: SecretStr | None = None
     download_only: bool = False
-    save_graph: bool = False
 
     # Miscellaneous
-    seed: int = 42
     n_cpu: int = 4
     low_memory: bool = False
 
@@ -228,7 +225,6 @@ class RunState:
 
     Attributes:
         working_dir (Path): Working directory, defined by prefix and title.
-        rng (random.Random): Built-in `random.Random` instance for reproducibility.
         n_tar (int | None): Number of target assemblies.
         n_neg (int | None): Number of non-target assemblies.
         penalty_th (float | None): Node penalty threshold (user input or auto-computed).
@@ -238,7 +234,6 @@ class RunState:
         blastdb (Path | None): Path to the BLAST database inside the working directory.
     """
     working_dir: Path
-    rng: Random
     n_tar: int | None = None
     n_neg: int | None = None
     penalty_th: float | None = None

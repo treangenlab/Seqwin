@@ -29,7 +29,6 @@ __license__ = 'GPL 3.0'
 
 import logging, pickle
 from pathlib import Path
-from random import Random
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +73,6 @@ class Seqwin(object):
         prefix = config.prefix
         title = config.title
         overwrite = config.overwrite
-        seed = config.seed
         n_cpu = config.n_cpu
         version = config.version
 
@@ -107,7 +105,7 @@ class Seqwin(object):
         logger.info(f'Run configurations saved as {config_path}')
 
         # initiate run states
-        state = RunState(working_dir=working_dir, rng=Random(seed))
+        state = RunState(working_dir=working_dir)
 
         # load assemblies
         assemblies = get_assemblies(config, state)
