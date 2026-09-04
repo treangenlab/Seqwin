@@ -161,48 +161,6 @@ PrunedGraph prune_graph(
     return graph;
 }
 
-CompactedGraph compact_graph(
-    const Kmer* kmers,
-    const std::vector<Node>& nodes,
-    const std::vector<Edge>& edges,
-    std::vector<std::size_t> used_nodes // Node indices
-) {
-    // Restore node order (sorted by hash)
-    std::sort(used_nodes.begin(), used_nodes.end());
-
-    CompactedGraph graph;
-    graph.nodes = NoInitArray<Node>(used_nodes.size());
-    std::size_t n_kmers = 0;
-    for (std::size_t i = 0; i < used_nodes.size(); ++i) {
-        graph.nodes[i] = nodes[used_nodes[i]];
-        n_kmers += graph.nodes[i].stop - graph.nodes[i].start;
-    }
-    graph.kmers = NoInitArray<Kmer>(n_kmers);
-
-    std::size_t new_start = 0;
-    for (auto& node : graph.nodes) {
-        const auto old_start = node.start;
-        const auto old_stop = node.stop;
-        const auto size = old_stop - old_start;
-        node.start = new_start;
-        node.stop = new_start + size;
-        std::copy(kmers + old_start, kmers + old_stop, graph.kmers.begin() + new_start);
-        new_start += size;
-    }
-
-    ankerl::unordered_dense::set<std::uint64_t> used_hashes;
-    used_hashes.reserve(graph.nodes.size());
-    for (const auto& node : graph.nodes) used_hashes.insert(node.hash);
-
-    graph.edges.reserve(edges.size());
-    for (const auto& edge : edges) {
-        if (used_hashes.count(edge.first) && used_hashes.count(edge.second)) {
-            graph.edges.push_back(edge);
-        }
-    }
-    return graph;
-}
-
 std::pair<Subgraphs, std::vector<std::size_t>> get_subgraphs(
     const std::vector<Node>& nodes,
     const std::vector<Edge>& edges,
@@ -301,6 +259,48 @@ std::pair<Subgraphs, std::vector<std::size_t>> get_subgraphs(
         }
     }
     return {std::move(subgraphs), std::move(used_nodes)};
+}
+
+CompactedGraph compact_graph(
+    const Kmer* kmers,
+    const std::vector<Node>& nodes,
+    const std::vector<Edge>& edges,
+    std::vector<std::size_t> used_nodes // Node indices
+) {
+    // Restore node order (sorted by hash)
+    std::sort(used_nodes.begin(), used_nodes.end());
+
+    CompactedGraph graph;
+    graph.nodes = NoInitArray<Node>(used_nodes.size());
+    std::size_t n_kmers = 0;
+    for (std::size_t i = 0; i < used_nodes.size(); ++i) {
+        graph.nodes[i] = nodes[used_nodes[i]];
+        n_kmers += graph.nodes[i].stop - graph.nodes[i].start;
+    }
+    graph.kmers = NoInitArray<Kmer>(n_kmers);
+
+    std::size_t new_start = 0;
+    for (auto& node : graph.nodes) {
+        const auto old_start = node.start;
+        const auto old_stop = node.stop;
+        const auto size = old_stop - old_start;
+        node.start = new_start;
+        node.stop = new_start + size;
+        std::copy(kmers + old_start, kmers + old_stop, graph.kmers.begin() + new_start);
+        new_start += size;
+    }
+
+    ankerl::unordered_dense::set<std::uint64_t> used_hashes;
+    used_hashes.reserve(graph.nodes.size());
+    for (const auto& node : graph.nodes) used_hashes.insert(node.hash);
+
+    graph.edges.reserve(edges.size());
+    for (const auto& edge : edges) {
+        if (used_hashes.count(edge.first) && used_hashes.count(edge.second)) {
+            graph.edges.push_back(edge);
+        }
+    }
+    return graph;
 }
 
 } // namespace seqwin::internal
