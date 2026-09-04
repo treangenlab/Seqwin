@@ -24,7 +24,6 @@ struct FilterConfig {
     std::optional<std::size_t> max_len;
     std::size_t min_nodes_floor;
     std::optional<std::size_t> max_nodes_cap;
-    std::uint64_t seed;
     std::size_t n_cpu;
 };
 

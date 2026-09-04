@@ -42,23 +42,18 @@ void get_penalty(
     if (n_assemblies > std::numeric_limits<std::uint32_t>::max()) {
         throw std::invalid_argument("Number of assemblies exceeds uint32 range");
     }
-
-    std::size_t total_targets = 0;
-    std::size_t total_non_targets = 0;
     for (std::size_t i = 0; i < n_assemblies; ++i) {
         if (record_offsets[i + 1] < record_offsets[i]) {
             throw std::invalid_argument("record_offsets must be nondecreasing");
         }
-        if (is_targets[i]) {
-            ++total_targets;
-        } else {
-            ++total_non_targets;
-        }
     }
-    if (total_targets == 0) {
+
+    const std::size_t total_tar = std::count(is_targets, is_targets + n_assemblies, true);
+    const auto total_neg = n_assemblies - total_tar;
+    if (total_tar == 0) {
         throw std::invalid_argument("is_targets must contain at least one target assembly");
     }
-    if (total_non_targets == 0) {
+    if (total_neg == 0) {
         throw std::invalid_argument("is_targets must contain at least one non-target assembly");
     }
 
@@ -88,9 +83,6 @@ void get_penalty(
             );
         }
     });
-
-    const double inv_total_targets = 1.0 / static_cast<double>(total_targets);
-    const double inv_total_non_targets = 1.0 / static_cast<double>(total_non_targets);
 
     pool.parallel_for(n_nodes, [&](std::size_t start, std::size_t end, std::size_t) {
         for (std::size_t node_i = start; node_i < end; ++node_i) {
@@ -132,8 +124,8 @@ void get_penalty(
 
             node.n_tar = n_tar;
             node.n_neg = n_neg;
-            const double frac_tar = static_cast<double>(n_tar) * inv_total_targets;
-            const double frac_neg = static_cast<double>(n_neg) * inv_total_non_targets;
+            const double frac_tar = static_cast<double>(n_tar) / total_tar;
+            const double frac_neg = static_cast<double>(n_neg) / total_neg;
             node.penalty = std::sqrt((1.0 - frac_tar) * (1.0 - frac_tar) + frac_neg * frac_neg);
         }
     });
@@ -151,9 +143,9 @@ PrunedGraph prune_graph(
 
     PrunedGraph graph;
     graph.edges.reserve(n_edges);
-    const auto integer_threshold = static_cast<std::size_t>(edge_weight_th);
+    const std::size_t th = edge_weight_th;
     for (std::size_t i = 0; i < n_edges; ++i) {
-        if (edges[i].weight > integer_threshold) {
+        if (edges[i].weight > th) {
             graph.edges.push_back(edges[i]);
             connected.insert(edges[i].first);
             connected.insert(edges[i].second);
@@ -179,22 +171,22 @@ CompactedGraph compact_graph(
     std::sort(used_nodes.begin(), used_nodes.end());
 
     CompactedGraph graph;
-    std::size_t n_kmers = 0;
-    for (const auto node : used_nodes) {
-        n_kmers += nodes[node].stop - nodes[node].start;
-    }
     graph.nodes = NoInitArray<Node>(used_nodes.size());
+    std::size_t n_kmers = 0;
+    for (std::size_t i = 0; i < used_nodes.size(); ++i) {
+        graph.nodes[i] = nodes[used_nodes[i]];
+        n_kmers += graph.nodes[i].stop - graph.nodes[i].start;
+    }
     graph.kmers = NoInitArray<Kmer>(n_kmers);
 
     std::size_t new_start = 0;
-    for (std::size_t i = 0; i < used_nodes.size(); ++i) {
-        const Node& old_node = nodes[used_nodes[i]];
-        const auto size = old_node.stop - old_node.start;
-        Node new_node = old_node;
-        new_node.start = new_start;
-        new_node.stop = new_start + size;
-        graph.nodes[i] = new_node;
-        std::copy(kmers + old_node.start, kmers + old_node.stop, graph.kmers.begin() + new_start);
+    for (auto& node : graph.nodes) {
+        const auto old_start = node.start;
+        const auto old_stop = node.stop;
+        const auto size = old_stop - old_start;
+        node.start = new_start;
+        node.stop = new_start + size;
+        std::copy(kmers + old_start, kmers + old_stop, graph.kmers.begin() + new_start);
         new_start += size;
     }
 
@@ -216,8 +208,7 @@ std::pair<Subgraphs, std::vector<std::size_t>> get_subgraphs(
     const std::vector<Edge>& edges,
     double penalty_th,
     std::size_t min_nodes,
-    std::size_t max_nodes,
-    std::mt19937_64& rng
+    std::size_t max_nodes
 ) {
     // Graph nodes are represented by indices, instead of hashes
     const GraphTopology graph(nodes, edges);
@@ -225,11 +216,14 @@ std::pair<Subgraphs, std::vector<std::size_t>> get_subgraphs(
     std::vector<std::size_t> seeds;
     seeds.reserve(nodes.size());
     for (std::size_t node = 0; node < nodes.size(); ++node) {
-        if (nodes[node].penalty <= penalty_th) seeds.push_back(node);
+        if (nodes[node].penalty <= penalty_th) {
+            seeds.push_back(node);
+        }
     }
-    std::shuffle(seeds.begin(), seeds.end(), rng);
-    log_python(" - Expanding subgraphs from " + std::to_string(seeds.size()) +
-        " seed nodes (penalty<=" + std::to_string(penalty_th) + ")...");
+    log_python(
+        " - Expanding subgraphs from " + std::to_string(seeds.size()) +
+        " seed nodes (penalty<=" + std::to_string(penalty_th) + ")..."
+    );
 
     struct FrontierNode {
         double penalty;
@@ -245,6 +239,7 @@ std::pair<Subgraphs, std::vector<std::size_t>> get_subgraphs(
     // Marks nodes accepted in any of the subgraphs
     std::vector<std::uint8_t> used(nodes.size(), 0);
     // Marks nodes in the frontier or accepted into the current subgraph
+    // Cleared for each seed
     std::vector<std::uint8_t> seen(nodes.size(), 0);
     Subgraphs subgraphs;
     std::vector<std::size_t> used_nodes;

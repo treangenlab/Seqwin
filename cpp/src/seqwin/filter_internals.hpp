@@ -3,7 +3,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <stdexcept>
-#include <random>
 #include <utility>
 #include <vector>
 
@@ -123,7 +122,7 @@ PrunedGraph prune_graph(
 );
 
 /**
- * @brief Grow disjoint low-penalty subgraphs from eligible, randomly ordered seeds.
+ * @brief Grow disjoint low-penalty subgraphs from eligible seeds.
  *
  * @return Subgraphs represented by node hashes;
  * indices of all accepted nodes in `PrunedGraph.nodes`.
@@ -133,8 +132,7 @@ std::pair<Subgraphs, std::vector<std::size_t>> get_subgraphs(
     const std::vector<Edge>& edges,
     double penalty_th,
     std::size_t min_nodes,
-    std::size_t max_nodes,
-    std::mt19937_64& rng
+    std::size_t max_nodes
 );
 
 /**

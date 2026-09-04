@@ -121,10 +121,7 @@ def build_graph(assemblies: Assemblies, config: Config) -> KmerGraph:
 def filter_graph(
     graph: KmerGraph, assemblies: Assemblies, config: Config, state: RunState
 ) -> tuple[FilteredGraph, NDArray | None]:
-    """Filter a minimizer graph through the native filtering pipeline.
-
-    Mash remains a Python-side subprocess concern; all scoring, thresholding,
-    graph filtering, and randomized subgraph extraction happen in one C++ call.
+    """Filter a minimizer graph and find low-penalty subgraphs.
     """
     logger.info('Filtering minimizer graph...')
     tik = time()
@@ -158,7 +155,6 @@ def filter_graph(
         config.max_len,
         config.min_nodes_floor,
         config.max_nodes_cap,
-        config.seed,
         config.n_cpu
     )
     kmers, nodes, edges, subgraphs, penalty_th, edge_weight_th, min_nodes, max_nodes = result

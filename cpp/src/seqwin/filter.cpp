@@ -5,7 +5,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
-#include <random>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -25,18 +24,37 @@ std::string format_value(double value, int precision)
     return out.str();
 }
 
-double expected_frac(
+/**
+ * @brief Calculate the expected k-mer presence from pairwise Jaccard indices.
+ *
+ * Definition of presence `f(h)`: for a k-mer `h` in a group of `N` genomes (k-mer sets),
+ * the fraction of genomes in a second group of `M` genomes that also contain `h`.
+ *
+ * Suppose `J` is the pairwise Jaccard matrix between genomes in the two groups, with shape `(M, N)`.
+ * Then the expected presence can be calculated as: `E[f(h)] = mean(2J / (1+J))`.
+ *
+ * Here, the input matrix `jaccard` contains both target and non-target assemblies, with shape
+ * `(M+N, M+N)`. The first group is always the target assemblies, and the second group is either
+ * targets or non-targets. So the calculation only happens for certain rows and columns in `jaccard`.
+ */
+double expected_presence(
     const double* jaccard,
     std::size_t n,
     const bool* is_targets,
-    bool rows_are_targets
+    bool vs_targets // If True, compare against target assemblies
 ) {
     double sum = 0.0;
     std::size_t count = 0;
     for (std::size_t row = 0; row < n; ++row) {
-        if (is_targets[row] != rows_are_targets) continue;
+        if (!is_targets[row]) {
+            // Always select targets for the first group
+            continue;
+        }
         for (std::size_t col = 0; col < n; ++col) {
-            if (!is_targets[col]) continue;
+            if (is_targets[col] != vs_targets) {
+                // Select targets or non-targets for the second group
+                continue;
+            }
             const double value = jaccard[row * n + col];
             if (!std::isfinite(value) || value < 0.0 || value > 1.0) {
                 throw std::invalid_argument("Jaccard values must be finite and between 0 and 1");
@@ -45,7 +63,9 @@ double expected_frac(
             ++count;
         }
     }
-    if (count == 0) throw std::invalid_argument("Jaccard groups must not be empty");
+    if (count == 0) {
+        throw std::invalid_argument("Jaccard matrix must not be empty");
+    }
     return sum / static_cast<double>(count);
 }
 
@@ -59,10 +79,8 @@ FilterResult calculate_thresholds(
     std::size_t jaccard_cols,
     const FilterConfig& config
 ) {
-    const auto n_targets = static_cast<std::size_t>(
-        std::count(is_targets, is_targets + n_assemblies, true)
-    );
-    const auto n_non_targets = n_assemblies - n_targets;
+    const std::size_t total_tar = std::count(is_targets, is_targets + n_assemblies, true);
+    const auto total_neg = n_assemblies - total_tar;
 
     double penalty_th;
     if (config.penalty_th) {
@@ -70,54 +88,69 @@ FilterResult calculate_thresholds(
         internal::log_python("Penalty threshold is provided (--penalty-th), skip auto estimation", "warning");
     } else {
         internal::log_python(" - Calculating penalty threshold...");
-        double absence;
-        double presence;
+        // Consider k-mers in target assemblies:
+        double e_absence_tar; // their expected absence in target assemblies
+        double e_presence_neg; // their expected presence in non-target assemblies
         if (jaccard) {
             if (jaccard_rows != n_assemblies || jaccard_cols != n_assemblies) {
                 throw std::invalid_argument("Jaccard matrix shape must match the number of assemblies");
             }
-            absence = 1.0 - expected_frac(jaccard, n_assemblies, is_targets, true);
-            presence = expected_frac(jaccard, n_assemblies, is_targets, false);
+            e_absence_tar = 1.0 - expected_presence(jaccard, n_assemblies, is_targets, true);
+            e_presence_neg = expected_presence(jaccard, n_assemblies, is_targets, false);
         } else {
-            double target_weight = 0.0;
-            double absence_sum = 0.0;
-            double presence_sum = 0.0;
+            // Calculate expected presence from minimizer sketches
+            // For all k-mers in targets, calculate their average presence in targets or non-targets
+            double sum_n_tar = 0.0; // Number of k-mers in all targets
+            double sum_presence_tar = 0.0;
+            double sum_presence_neg = 0.0;
             for (std::size_t i = 0; i < n_nodes; ++i) {
-                const double weight = nodes[i].n_tar;
-                target_weight += weight;
-                absence_sum += (static_cast<double>(nodes[i].n_tar) / n_targets) * weight;
-                presence_sum += (static_cast<double>(nodes[i].n_neg) / n_non_targets) * weight;
+                const double node_n_tar = nodes[i].n_tar;
+                const double node_n_neg = nodes[i].n_neg;
+                sum_n_tar += node_n_tar;
+                sum_presence_tar += (node_n_tar / total_tar) * node_n_tar;
+                sum_presence_neg += (node_n_neg / total_neg) * node_n_tar;
             }
-            if (target_weight == 0.0) throw std::invalid_argument("No target minimizers are available for threshold estimation");
-            absence = 1.0 - absence_sum / target_weight;
-            presence = presence_sum / target_weight;
+            if (sum_n_tar == 0.0) {
+                throw std::invalid_argument("No target minimizers are available for threshold estimation");
+            }
+            e_absence_tar = 1.0 - sum_presence_tar / sum_n_tar;
+            e_presence_neg = sum_presence_neg / sum_n_tar;
         }
-        internal::log_python(" - Expected k-mer absence in targets: " +
-            format_value(absence, 5));
-        internal::log_python(" - Expected k-mer presence in non-targets: " +
-            format_value(presence, 5));
-        penalty_th = (1.0 - config.stringency / 10.0) * std::sqrt(absence * presence);
-        internal::log_python(" - Calculated penalty threshold: " +
-            format_value(penalty_th, 5));
+        internal::log_python(" - Expected k-mer absence in targets: " + format_value(e_absence_tar, 5));
+        internal::log_python(" - Expected k-mer presence in non-targets: " + format_value(e_presence_neg, 5));
+        penalty_th = (1.0 - config.stringency / 10.0) * std::sqrt(e_absence_tar * e_presence_neg);
+        internal::log_python(" - Calculated penalty threshold: " + format_value(penalty_th, 5));
+
         if (penalty_th > config.penalty_th_cap) {
             penalty_th = config.penalty_th_cap;
-            internal::log_python(" - Calculated penalty threshold is too large (capped at " +
-                format_value(penalty_th, 5) + ")", "warning");
+            internal::log_python(
+                " - Calculated penalty threshold is too large (capped at " + format_value(penalty_th, 5) + ")",
+                "warning"
+            );
         }
     }
 
-    const double edge_weight_th = config.edge_w_th_mul * (1.0 - penalty_th) * n_targets;
+    // Calculate edge weight threshold
+    // Consider N as the number of assemblies that include a certain k-mer. Since we want k-mers with
+    // penalty lower than penalty_th, based on the definition of penalty, N ≥ (1 - penalty_th) * total_tar.
+    // So edge weight threshold is calculated based on the lower bound of N, times a multiplier < 1.
+    const double edge_weight_th = config.edge_w_th_mul * (1.0 - penalty_th) * total_tar;
+
+    // Calculate size range of subgraphs
     const std::size_t gap_len = (config.windowsize + 1) / 2;
     const std::size_t min_nodes = std::max(config.min_nodes_floor, config.min_len / gap_len + 1);
     const std::optional<std::size_t> max_nodes = config.max_len
         ? std::optional<std::size_t>(*config.max_len / gap_len + 1)
         : config.max_nodes_cap;
     if (max_nodes) {
-        internal::log_python(" - Subgraph size limit is set to [" +
-            std::to_string(min_nodes) + ", " + std::to_string(*max_nodes) + "]");
+        internal::log_python(
+            " - Subgraph size limit is set to [" + std::to_string(min_nodes) + ", " + std::to_string(*max_nodes) + "]"
+        );
     } else {
-        internal::log_python(" - Upper limit of subgraph size is not set. Lower limit is set to " +
-            std::to_string(min_nodes), "warning");
+        internal::log_python(
+            " - Upper limit of subgraph size is not set. Lower limit is set to " + std::to_string(min_nodes),
+            "warning"
+        );
     }
 
     FilterResult result;
@@ -157,21 +190,22 @@ FilterResult filter(
     auto pruned = internal::prune_graph(
         nodes, n_nodes, edges, n_edges, result.edge_weight_th
     );
-    internal::log_python(" - Removed " + std::to_string(n_edges - pruned.edges.size()) +
-        " edges with weight<" + format_value(result.edge_weight_th, 3) + ", " +
-        std::to_string(pruned.edges.size()) + " edges left");
-    internal::log_python(" - Removed " + std::to_string(n_nodes - pruned.nodes.size()) +
-        " isolated nodes, " + std::to_string(pruned.nodes.size()) + " nodes left");
+    internal::log_python(
+        " - Removed " + std::to_string(n_edges - pruned.edges.size()) + " edges with weight<" +
+        format_value(result.edge_weight_th, 3) + ", " + std::to_string(pruned.edges.size()) + " edges left"
+    );
+    internal::log_python(
+        " - Removed " + std::to_string(n_nodes - pruned.nodes.size()) + " isolated nodes, " +
+        std::to_string(pruned.nodes.size()) + " nodes left"
+    );
 
-    std::mt19937_64 rng(config.seed);
     auto [subgraphs, used_nodes] = internal::get_subgraphs(
         pruned.nodes, pruned.edges, result.penalty_th, result.min_nodes,
-        result.max_nodes.value_or(std::numeric_limits<std::size_t>::max()), rng
+        result.max_nodes.value_or(std::numeric_limits<std::size_t>::max())
     );
     if (subgraphs.empty()) {
         throw std::runtime_error("No low-penalty subgraph was found. Try decrease --stringency, or increase --penalty-th");
     }
-    std::shuffle(subgraphs.begin(), subgraphs.end(), rng);
     internal::log_python(" - Found " + std::to_string(subgraphs.size()) + " low-penalty subgraphs");
 
     auto compacted = internal::compact_graph(

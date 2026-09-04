@@ -23,14 +23,14 @@ def _inputs():
     )
 
 
-def _filter(*, penalty_th=0.3, jaccard=None, seed=7, n_cpu=1,
+def _filter(*, penalty_th=0.3, jaccard=None, n_cpu=1,
             penalty_th_cap=0.2, edge_w_th_mul=0.3, min_nodes_floor=1,
             max_nodes_cap=None):
     kmers, nodes, edges, offsets, targets = _inputs()
     result = _filter_native(
         kmers, nodes, edges, offsets, targets, jaccard, penalty_th, 5,
         penalty_th_cap, edge_w_th_mul, 10, 0, None, min_nodes_floor,
-        max_nodes_cap, seed, n_cpu,
+        max_nodes_cap, n_cpu,
     )
     return result, nodes
 
@@ -78,12 +78,10 @@ def test_low_weight_edges_isolated_nodes_and_no_subgraph_error():
         _filter(edge_w_th_mul=1, min_nodes_floor=2)
 
 
-def test_seed_is_deterministic_and_different_seeds_are_valid():
-    first, _ = _filter(seed=99)
-    second, _ = _filter(seed=99)
-    different, _ = _filter(seed=100)
+def test_subgraph_extraction_is_deterministic():
+    first, _ = _filter()
+    second, _ = _filter()
     assert first[3] == second[3]
-    assert all(subgraph for subgraph in different[3])
 
 
 def test_jaccard_shape_validation():
