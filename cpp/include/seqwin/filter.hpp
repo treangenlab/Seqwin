@@ -37,6 +37,8 @@ struct FilterResult {
     Subgraphs subgraphs;
     std::size_t total_tar;
     std::size_t total_neg;
+    double e_absence_tar;
+    double e_presence_neg;
     double penalty_th;
     double edge_weight_th;
     std::size_t min_nodes;
