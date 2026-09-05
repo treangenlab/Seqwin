@@ -15,7 +15,7 @@
 
 namespace seqwin::internal {
 
-void get_penalty(
+FilterResult get_penalty(
     const Kmer* kmers,
     Node* nodes,
     std::size_t n_nodes,
@@ -129,6 +129,11 @@ void get_penalty(
             node.penalty = std::sqrt((1.0 - frac_tar) * (1.0 - frac_tar) + frac_neg * frac_neg);
         }
     });
+
+    FilterResult result;
+    result.total_tar = total_tar;
+    result.total_neg = total_neg;
+    return result;
 }
 
 PrunedGraph prune_graph(

@@ -120,7 +120,7 @@ def build_graph(assemblies: Assemblies, config: Config) -> KmerGraph:
 
 def filter_graph(
     graph: KmerGraph, assemblies: Assemblies, config: Config, state: RunState
-) -> tuple[FilteredGraph, NDArray | None]:
+) -> tuple[FilteredGraph, NDArray[np.float64] | None]:
     """Filter a minimizer graph and find low-penalty subgraphs.
     """
     logger.info('Filtering minimizer graph...')
@@ -135,16 +135,16 @@ def filter_graph(
                 overwrite=config.overwrite,
                 n_cpu=config.n_cpu
             )
-            jaccard = np.asarray(jaccard, dtype=np.float64, order='C')
         else:
             logger.error('Mash is not installed. Falling back to minimizer sketches.')
 
-    result = _filter_native(
+    (kmers, nodes, edges, subgraphs,
+     total_tar, total_neg, penalty_th, edge_weight_th, min_nodes, max_nodes) =  _filter_native(
         graph.kmers,
         graph.nodes,
         graph.edges,
         graph.record_offsets,
-        np.asarray(assemblies.is_targets, dtype=np.bool_, order='C'),
+        assemblies.is_targets,
         jaccard,
         config.penalty_th,
         config.stringency,
@@ -157,7 +157,7 @@ def filter_graph(
         config.max_nodes_cap,
         config.n_cpu
     )
-    kmers, nodes, edges, subgraphs, penalty_th, edge_weight_th, min_nodes, max_nodes = result
+
     filtered = FilteredGraph(
         kmers=kmers,
         nodes=nodes,
@@ -166,9 +166,12 @@ def filter_graph(
         record_ids=graph.record_ids,
         subgraphs=tuple(frozenset(map(np.uint64, subgraph)) for subgraph in subgraphs)
     )
+    state.total_tar = total_tar
+    state.total_neg = total_neg
     state.penalty_th = penalty_th
     state.edge_weight_th = edge_weight_th
     state.min_nodes = min_nodes
     state.max_nodes = max_nodes
+
     print_time_delta(time() - tik)
     return filtered, jaccard

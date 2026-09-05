@@ -97,9 +97,10 @@ struct CompactedGraph {
 };
 
 /**
- * @brief Populate node target counts and penalty scores in place.
+ * @brief Populate node target counts and penalty scores in place,
+ * and calculate `total_tar` and `total_neg`.
  */
-void get_penalty(
+FilterResult get_penalty(
     const Kmer* kmers,
     Node* nodes,
     std::size_t n_nodes,

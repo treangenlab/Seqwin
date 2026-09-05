@@ -225,8 +225,8 @@ class RunState:
 
     Attributes:
         working_dir (Path): Working directory, defined by prefix and title.
-        n_tar (int | None): Number of target assemblies.
-        n_neg (int | None): Number of non-target assemblies.
+        total_tar (int | None): Number of target assemblies.
+        total_neg (int | None): Number of non-target assemblies.
         penalty_th (float | None): Node penalty threshold (user input or auto-computed).
         edge_weight_th (float | None): Graph edge weight threshold.
         min_nodes (int | None): Min number of nodes for a low-penalty subgraph.
@@ -234,8 +234,8 @@ class RunState:
         blastdb (Path | None): Path to the BLAST database inside the working directory.
     """
     working_dir: Path
-    n_tar: int | None = None
-    n_neg: int | None = None
+    total_tar: int | None = None
+    total_neg: int | None = None
     penalty_th: float | None = None
     edge_weight_th: float | None = None
     min_nodes: int | None = None

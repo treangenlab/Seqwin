@@ -12,7 +12,7 @@ namespace seqwin {
 using Subgraphs = std::vector<std::vector<std::uint64_t>>;
 
 /**
- * @brief Graph-filtering configurations.
+ * @brief Part of Seqwin configurations.
  */
 struct FilterConfig {
     std::optional<double> penalty_th;
@@ -28,13 +28,15 @@ struct FilterConfig {
 };
 
 /**
- * @brief Graph-filtering results.
+ * @brief Includes filtered graph arrays, subgraphs and calculated values.
  */
 struct FilterResult {
     NoInitArray<Kmer> kmers;
     NoInitArray<Node> nodes;
     std::vector<Edge> edges;
     Subgraphs subgraphs;
+    std::size_t total_tar;
+    std::size_t total_neg;
     double penalty_th;
     double edge_weight_th;
     std::size_t min_nodes;

@@ -69,7 +69,8 @@ double expected_presence(
     return sum / static_cast<double>(count);
 }
 
-FilterResult calculate_thresholds(
+/** Calculate thresholds and add them to `result`. */
+void calculate_thresholds(
     const Node* nodes,
     std::size_t n_nodes,
     const bool* is_targets,
@@ -77,10 +78,11 @@ FilterResult calculate_thresholds(
     const double* jaccard,
     std::size_t jaccard_rows,
     std::size_t jaccard_cols,
-    const FilterConfig& config
+    const FilterConfig& config,
+    FilterResult& result
 ) {
-    const std::size_t total_tar = std::count(is_targets, is_targets + n_assemblies, true);
-    const auto total_neg = n_assemblies - total_tar;
+    const auto total_tar = result.total_tar;
+    const auto total_neg = result.total_neg;
 
     double penalty_th;
     if (config.penalty_th) {
@@ -153,12 +155,10 @@ FilterResult calculate_thresholds(
         );
     }
 
-    FilterResult result;
     result.penalty_th = penalty_th;
     result.edge_weight_th = edge_weight_th;
     result.min_nodes = min_nodes;
     result.max_nodes = max_nodes;
-    return result;
 }
 
 } // namespace
@@ -179,11 +179,11 @@ FilterResult filter(
     const FilterConfig& config
 ) {
     internal::log_python(" - Calculating node penalty scores...");
-    internal::get_penalty(
+    auto result = internal::get_penalty(
         kmers, nodes, n_nodes, record_offsets, n_record_offsets, is_targets, n_assemblies, config.n_cpu
     );
-    auto result = calculate_thresholds(
-        nodes, n_nodes, is_targets, n_assemblies, jaccard, jaccard_rows, jaccard_cols, config
+    calculate_thresholds(
+        nodes, n_nodes, is_targets, n_assemblies, jaccard, jaccard_rows, jaccard_cols, config, result
     );
 
     internal::log_python(" - Filtering graph edges and nodes...");
