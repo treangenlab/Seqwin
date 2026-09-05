@@ -7,7 +7,6 @@ Seqwin entry point.
 Dependencies:
 -------------
 - numpy
-- pandas
 - .assemblies
 - .graph
 - .markers
@@ -32,7 +31,8 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-import pandas as pd
+import numpy as np
+from numpy.typing import NDArray
 
 from .assemblies import Assemblies, get_assemblies
 from .kmers import FilteredGraph, build_graph, filter_graph
@@ -49,15 +49,15 @@ class Seqwin(object):
         state (RunState): See `RunState` in `config.py`.
         assemblies (Assemblies): See `Assemblies` in `assemblies.py`.
         graph (FilteredGraph | None): See `FilteredGraph` in `kmers.py`. Generated with `self.run()`.
-        mash (pd.DataFrame | None): Tabular output of `mash dist`. Generated with `self.run()`.
+        jaccard (NDArray[np.float64] | None): Pairwise assembly Jaccard matrix. Generated with `self.run()`.
         markers (list[ConnectedKmers] | None): See `ConnectedKmers` in `markers.py`. Generated with `self.run()`.
     """
-    __slots__ = ('config', 'state', 'assemblies', 'graph', 'mash', 'markers')
+    __slots__ = ('config', 'state', 'assemblies', 'graph', 'jaccard', 'markers')
     config: Config
     state: RunState
     assemblies: Assemblies
     graph: FilteredGraph | None
-    mash: pd.DataFrame | None
+    jaccard: NDArray[np.float64] | None
     markers: list[ConnectedKmers] | None
 
     def __init__(self, config: Config) -> None:
@@ -114,11 +114,12 @@ class Seqwin(object):
         self.state = state
         self.assemblies = assemblies
         self.graph = None
-        self.mash = None
+        self.jaccard = None
         self.markers = None
 
     def run(self) -> None:
-        """Build and filter the k-mer graph, then extract candidate markers."""
+        """Build and filter the k-mer graph, then extract candidate markers.
+        """
         config = self.config
         state = self.state
         assemblies = self.assemblies
@@ -138,7 +139,7 @@ class Seqwin(object):
         markers = get_markers(graph, assemblies, config, state)
 
         self.graph = graph
-        self.mash = jaccard
+        self.jaccard = jaccard
         self.markers = markers
 
         # save run instance
