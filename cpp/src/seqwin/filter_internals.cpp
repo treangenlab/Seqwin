@@ -137,8 +137,8 @@ FilterResult get_penalty(
 
             node.n_tar = n_tar;
             node.n_neg = n_neg;
-            const double frac_tar = static_cast<double>(n_tar) / total_tar;
-            const double frac_neg = static_cast<double>(n_neg) / total_neg;
+            const double frac_tar = n_tar / total_tar;
+            const double frac_neg = n_neg / total_neg;
             node.penalty = std::sqrt((1.0 - frac_tar) * (1.0 - frac_tar) + frac_neg * frac_neg);
 
             sums.n_tar += n_tar;
@@ -263,15 +263,16 @@ std::pair<Subgraphs, std::vector<std::size_t>> get_subgraphs(
         while (!frontier.empty() && subgraph.size() < max_nodes_value) {
             const auto candidate = frontier.top();
             frontier.pop();
-            seen[candidate.index] = 0; // Rejected candidate can be discovered again later
             const double new_sum_penalty = sum_penalty + candidate.penalty;
-            if (
-                new_sum_penalty / static_cast<double>(subgraph.size() + 1) <= penalty_th
-            ) {
+            if (new_sum_penalty / (subgraph.size() + 1) <= penalty_th) {
                 subgraph.push_back(candidate.index);
-                seen[candidate.index] = 1;
                 sum_penalty = new_sum_penalty;
                 add_neighbors(candidate.index);
+            } else {
+                // All remaining candidates have at least this penalty, so they
+                // cannot lower the subgraph average below the threshold.
+                seen[candidate.index] = 0;
+                break;
             }
         }
 
