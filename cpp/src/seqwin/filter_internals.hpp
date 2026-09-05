@@ -133,7 +133,7 @@ std::pair<Subgraphs, std::vector<std::size_t>> get_subgraphs(
     const std::vector<Edge>& edges,
     double penalty_th,
     std::size_t min_nodes,
-    std::size_t max_nodes
+    std::optional<std::size_t> max_nodes
 );
 
 /**

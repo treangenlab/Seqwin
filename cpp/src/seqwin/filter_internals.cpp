@@ -171,7 +171,7 @@ std::pair<Subgraphs, std::vector<std::size_t>> get_subgraphs(
     const std::vector<Edge>& edges,
     double penalty_th,
     std::size_t min_nodes,
-    std::size_t max_nodes
+    std::optional<std::size_t> max_nodes
 ) {
     // Graph nodes are represented by indices, instead of hashes
     const GraphTopology graph(nodes, edges);
@@ -207,6 +207,9 @@ std::pair<Subgraphs, std::vector<std::size_t>> get_subgraphs(
     Subgraphs subgraphs;
     std::vector<std::size_t> used_nodes;
 
+    const std::size_t max_nodes_value = max_nodes.value_or(
+        std::numeric_limits<std::size_t>::max()
+    );
     for (const auto seed : seeds) {
         if (used[seed]) {
             continue;
@@ -229,7 +232,7 @@ std::pair<Subgraphs, std::vector<std::size_t>> get_subgraphs(
         };
         add_neighbors(seed);
 
-        while (!frontier.empty() && subgraph.size() < max_nodes) {
+        while (!frontier.empty() && subgraph.size() < max_nodes_value) {
             const auto candidate = frontier.top();
             frontier.pop();
             seen[candidate.index] = 0; // Rejected candidate can be discovered again later

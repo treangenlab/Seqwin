@@ -4,7 +4,6 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -69,7 +68,7 @@ double expected_presence(
     return sum / static_cast<double>(count);
 }
 
-/** Calculate thresholds and add them to `result`. */
+/** @brief Calculate thresholds and add them to `result`. */
 void calculate_thresholds(
     const Node* nodes,
     std::size_t n_nodes,
@@ -200,8 +199,7 @@ FilterResult filter(
     );
 
     auto [subgraphs, used_nodes] = internal::get_subgraphs(
-        pruned.nodes, pruned.edges, result.penalty_th, result.min_nodes,
-        result.max_nodes.value_or(std::numeric_limits<std::size_t>::max())
+        pruned.nodes, pruned.edges, result.penalty_th, result.min_nodes, result.max_nodes
     );
     if (subgraphs.empty()) {
         throw std::runtime_error("No low-penalty subgraph was found. Try decrease --stringency, or increase --penalty-th");
