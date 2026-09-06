@@ -12,7 +12,7 @@ namespace seqwin {
 /**
  * @brief Fixed-size owning array that avoids value-initializing elements.
  *
- * Unlike `std::vector<T>(n) or std::make_unique<T[]>(n)`, this class allocates
+ * Unlike `std::vector<T>(n)` or `std::make_unique<T[]>(n)`, this class allocates
  * with `new T[n]`. For scalar and trivially default-initialized element types,
  * this avoids value-initializing every element, which can be expensive for very
  * large arrays.
@@ -109,11 +109,20 @@ struct Node {
     std::size_t start;
     /** End of the half-open range for this node's minimizer entries. */
     std::size_t stop;
-    /** Node scoring placeholder. */
+    /**
+     * Number of target assemblies containing this node's minimizer.
+     * Initialized to 0; populated during the filtering phase.
+     */
     std::uint32_t n_tar = 0;
-    /** Node scoring placeholder. */
+    /**
+     * Number of non-target assemblies containing this node's minimizer.
+     * Initialized to 0; populated during the filtering phase.
+     */
     std::uint32_t n_neg = 0;
-    /** Node scoring placeholder. */
+    /**
+     * Node penalty score.
+     * Initialized to 0; calculated from `n_tar` and `n_neg`.
+     */
     double penalty = 0.0;
 };
 

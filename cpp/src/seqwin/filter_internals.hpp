@@ -12,7 +12,9 @@
 
 namespace seqwin::internal {
 
-/** Undirected graph stored as contiguous adjacency lists. */
+/**
+ * @brief Undirected graph stored as contiguous adjacency lists.
+ */
 class GraphTopology {
 public:
     class NeighborRange {
@@ -97,7 +99,8 @@ struct CompactedGraph {
 };
 
 /**
- * @brief Populate node target counts and penalty scores in place
+ * @brief Calculate `n_tar`, `n_neg` and `penalty` for each node,
+ * and update `nodes` in place.
  *
  * Also calculate `total_tar`, `total_neg`, `e_absence_tar` and `e_presence_neg`,
  * and add them to `FilterResult`.

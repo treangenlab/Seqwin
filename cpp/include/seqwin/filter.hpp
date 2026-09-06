@@ -28,7 +28,7 @@ struct FilterConfig {
 };
 
 /**
- * @brief Includes filtered graph arrays, subgraphs and calculated values.
+ * @brief Includes filtered graph arrays, low-penalty subgraphs and calculated values.
  */
 struct FilterResult {
     NoInitArray<Kmer> kmers;

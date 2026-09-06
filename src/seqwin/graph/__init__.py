@@ -104,9 +104,9 @@ class KmerGraph:
             - 'hash' (uint64): Hash value of the minimizers represented by this node.
             - 'start' (uintp): Start of the half-open range for this node's minimizer entries.
             - 'stop' (uintp): End of the half-open range for this node's minimizer entries.
-            - 'n_tar' (uint32): Node scoring placeholder initialized to 0.
-            - 'n_neg' (uint32): Node scoring placeholder initialized to 0.
-            - 'penalty' (float64): Node scoring placeholder initialized to 0.0.
+            - 'n_tar' (uint32): Number of target assemblies containing this node's minimizer. Initialized to 0.
+            - 'n_neg' (uint32): Number of non-target assemblies containing this node's minimizer. Initialized to 0.
+            - 'penalty' (float64): Node penalty score. Initialized to 0.0.
         edges (NDArray[np.void]): A 1-D NumPy structured array of weighted, undirected edges.
             Dtype: `EDGE_DTYPE`
             - 'first' (uint64): Smaller endpoint hash of the undirected edge.
