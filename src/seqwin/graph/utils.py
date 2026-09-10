@@ -6,18 +6,15 @@ Graph utilities.
 
 Dependencies:
 -------------
-- networkx
+- networkx (optional)
 - matplotlib (optional)
 
 Classes:
 --------
-- WeightedGraph
 - OrderedKmers
 
 Functions:
 ----------
-- compose_weighted_graphs
-- add_path_weighted
 - draw_weighted_graph
 
 Attributes:
@@ -30,13 +27,16 @@ __license__ = 'GPL 3.0'
 
 import logging
 from math import sqrt
-from itertools import chain, tee
-from collections import Counter
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable
 
 logger = logging.getLogger(__name__)
 
-import networkx as nx
+try:
+    import networkx as nx
+    _HAS_NX = True
+except ImportError:
+    nx = None
+    _HAS_NX = False
 try:
     from matplotlib import pyplot as plt
     _HAS_MPL = True
@@ -44,49 +44,6 @@ except ImportError:
     _HAS_MPL = False
 
 EDGE_W: str = 'w' # Key for edge weight, used in networkx graphs. ['w']
-
-
-class WeightedGraph(Counter):
-    """A weighted graph object inherited from `collections.Counter`, with data structure of {edge: weight}.
-    An edge should contain two hashable elements and ordering matters, with edge direction of (first -> second).
-    """
-    def __init__(self, edges: Iterable[tuple]=()) -> None:
-        """Create a weighted graph with an Iterable of edges.
-        Each edge should be a tuple containing two hashable elements as nodes.
-        Note that the ordering of the two nodes matters, with edge direction of (first node -> second node).
-
-        Args:
-            edges (Iterable[tuple], optional): Each edge should be a tuple containing two hashable elements as nodes.
-            Note that the ordering of the two nodes matters, with edge direction of (first node -> second node).
-        """
-        super().__init__(edges)
-
-    def add_path(self, nodes: Iterable, cyclic=False) -> None:
-        """Add a path to the weighted graph.
-
-        Args:
-            nodes (Iterable): A path will be constructed from the nodes (in order) and added to the graph.
-            cyclic (bool, optional): If True, connect the last node back to the first node. [False]
-        """
-        nodes = iter(nodes)
-        start_nodes, stop_nodes = tee(nodes, n=2) # edge direction: start node -> stop node
-        try:
-            first_node = next(stop_nodes)
-        except StopIteration:
-            # no node is provided
-            return
-        if cyclic:
-            stop_nodes = chain(stop_nodes, (first_node,))
-
-        # add edges to graph
-        self.update(
-            tuple((u, v)) for u, v in zip(start_nodes, stop_nodes)
-        )
-
-    def to_nxGraph(self) -> nx.Graph:
-        """Convert to networkx.Graph (undirected), with edge weights set as edge attribute EDGE_W.
-        """
-        return nx.Graph((*edge, {EDGE_W: weight}) for edge, weight in self.items())
 
 
 class OrderedKmers(tuple):
@@ -222,47 +179,7 @@ class OrderedKmers(tuple):
                 return '?'
 
 
-def compose_weighted_graphs(graphs: Iterable[WeightedGraph]):
-    """Compose multiple WeightedGraph objects by adding the weights of same edges together.
-
-    Args:
-        graphs (Iterable[WeightedGraph]): Graphs to be composed.
-
-    Returns:
-        WeightedGraph: The composed graph.
-    """
-    graphs = iter(graphs)
-    try:
-        merged_graph = next(graphs)
-    except StopIteration:
-        raise ValueError('No graph is given to compose. ')
-
-    merged_graph = merged_graph.copy() # a shallow copy
-    for g in graphs:
-        merged_graph.update(g)
-    return merged_graph
-
-
-def add_path_weighted(graph: nx.Graph, path: Sequence) -> None:
-    """Add a path to a weighted, undirected graph. Increment edge weight by 1 if the edge already exists.
-
-    Args:
-        graph (nx.Graph): A weighted, undirected graph.
-        path (Sequence): A path (sequence of nodes) to be added to graph.
-    """
-    # loop through each consecutive pair of nodes in the path
-    for i in range(len(path) - 1):
-        u, v = path[i], path[i+1]
-
-        # if edge already exists, increment the weight
-        try:
-            graph[u][v]['weight'] += 1
-        except KeyError:
-            # otherwise, add the edge with an initial weight of 1
-            graph.add_edge(u, v, weight=1)
-
-
-if _HAS_MPL:
+if _HAS_MPL and _HAS_NX:
     def draw_weighted_graph(
         graph: nx.Graph,
         save_path: str | None=None,
@@ -308,4 +225,8 @@ else:
     def draw_weighted_graph(
         graph, save_path=None, figsize=None, node_size=None, edge_width=None, font_size=None, seed=None
     ) -> None:
-        raise ImportError('Matplotlib is needed for drawing a graph') from None
+        missing = ' and '.join(
+            name for name, available in (('NetworkX', _HAS_NX), ('Matplotlib', _HAS_MPL))
+            if not available
+        )
+        raise ImportError(f'{missing} is needed for drawing a graph') from None

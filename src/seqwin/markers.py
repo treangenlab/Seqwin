@@ -9,7 +9,6 @@ Dependencies:
 -------------
 - numpy
 - pandas
-- networkx
 - .assemblies
 - .kmers
 - .ncbi
@@ -43,7 +42,6 @@ logger = logging.getLogger(__name__)
 
 import numpy as np
 import pandas as pd
-import networkx as nx
 from numpy.typing import NDArray
 
 from .assemblies import Assemblies
@@ -93,17 +91,15 @@ _BASELINE_METRICS = MarkerMetrics(**{f: .0 for f in _METRIC_NAMES})
 
 
 class ConnectedKmers(object):
-    """The candidate marker Class, created from a low-penalty subgraph of the k-mer graph `FilteredGraph.nx_graph`.
+    """A candidate marker created from a low-penalty k-mer subgraph.
 
     Attributes:
-        graph (nx.Graph): A low-penalty subgraph of the k-mer graph `FilteredGraph.nx_graph`.
         kmers (pd.DataFrame): K-mers of each node in the subgraph, from all assemblies.
             It's a subset of `FilteredGraph.kmers`, with index inherited.
             K-mers with adjacent indices are also adjacent in the assembly sequence.
         loc (pd.DataFrame): Location of the subgraph in each assembly.
             Columns: ['assembly_idx', 'record_idx', 'start', 'stop', 'n_kmers',
             'kmers', 'is_target', 'n_repeats', 'len', 'seq'].
-        path (OrderedKmers | None): K-mer ordering in the graph. None if the graph is not linear.
         rep (pd.Series): Representative sequence of the subgraph (a certain row in `loc`).
         len (int): Length of the representative sequence.
         n_rep (int): Number of assemblies having the same k-mer order as the representative.
@@ -114,13 +110,11 @@ class ConnectedKmers(object):
         is_bad (bool): Set as True if `warnings` has anything listed in `_BAD_WARNINGS`.
     """
     __slots__ = (
-        'graph', 'kmers', 'loc', 'path', 'rep', 'len', 'n_rep', 'blast',
+        'kmers', 'loc', 'rep', 'len', 'n_rep', 'blast',
         'metrics', 'rep_ratio', 'warnings', 'is_bad'
     )
-    graph: nx.Graph
     kmers: pd.DataFrame
     loc: pd.DataFrame
-    path: OrderedKmers | None
     rep: pd.Series
     len: int
     n_rep: int
@@ -130,14 +124,12 @@ class ConnectedKmers(object):
     warnings: set
     is_bad: bool
 
-    def __init__(self, graph: nx.Graph, kmers: pd.DataFrame, kmerlen: int, windowsize: int) -> None:
-        """Given a subgraph of the k-mer graph,
+    def __init__(self, kmers: pd.DataFrame, kmerlen: int, windowsize: int) -> None:
+        """Given the k-mers in a subgraph,
         1. Determine the boundary of the subgraph in each assembly.
         2. Determine the representative k-mer order.
-        3. (deprecated) Determine the orientation (strand, +/-) of the subgraph in each assembly.
 
         Args:
-            graph (nx.Graph): A connected low-penalty subgraph of the k-mer graph `FilteredGraph.nx_graph`.
             kmers (pd.DataFrame): K-mers of each node in the subgraph, from all assemblies.
                 It's a subset of `FilteredGraph.kmers`, with index inherited.
                 K-mers with adjacent indices are also adjacent in the assembly sequence.
@@ -159,27 +151,13 @@ class ConnectedKmers(object):
         # in this way, there will be fewer assemblies to be loaded when fetching the actual sequences
         rep = loc[loc['kmers'] == rep_order].iloc[0]
 
-        # determine the representative path in the graph
-        graph_order = ConnectedKmers.__get_graph_order(graph, rep_order, warnings)
-
-        # determine the orientation (+/-) of the subgraph in each assembly, based on k-mer ordering
-        # if graph_order is not None:
-        #     loc = ConnectedKmers.__get_strand(loc, graph_order, warnings)
-        # else:
-        #     loc = ConnectedKmers.__get_strand(loc, rep_order, warnings)
-
         # if is_bad is True, this instance is not considered in downstream processing
         is_bad = len(warnings.intersection(_BAD_WARNINGS)) > 0
 
         # saving kmers and loc might take a lot of memory
-        # self.graph = graph
-        # self.kmers = kmers
-        # self.loc = loc
-        self.graph = None
         self.kmers = None
         self.loc = None
 
-        self.path = graph_order
         self.rep = rep
         self.len = rep['len']
         self.n_rep = n_rep
@@ -298,63 +276,7 @@ class ConnectedKmers(object):
 
         return rep_order, c_canonical[rep_canonical]
 
-    @staticmethod
-    def __get_graph_order(graph: nx.Graph, rep_order: OrderedKmers, warnings: set) -> OrderedKmers | None:
-        """Determine k-mer order in the subgraph.
-        1. Check if the subgraph is linear. Return None if not linear.
-        2. If linear, determine its k-mer ordering and check if it has the same orientation as `rep_order`.
-
-        Args:
-            graph (nx.Graph): See `ConnectedKmers.__init__()`.
-            rep_order (OrderedKmers): See `ConnectedKmers.__get_rep_order()`.
-            warnings (set): See `ConnectedKmers.warnings`.
-
-        Returns:
-            OrderedKmers | None: If the graph is linear, return the k-mer order in the graph; else return None.
-        """
-        # check linearity
-        leaf_nodes = tuple(node for node in graph if graph.degree[node] == 1)
-        if len(leaf_nodes) != 2:
-            # non-linear graph, cannot determine k-mer ordering
-            warnings.add('non-linear')
-            return None
-
-        # get k-mer ordering in the graph
-        all_paths: list[list] = list(nx.all_simple_paths(graph, *leaf_nodes))
-        if len(all_paths) == 1:
-            graph_order = all_paths[0]
-        else:
-            # multiple paths, choose the best one
-            warnings.add('multi-paths')
-            graph_order = None
-            # choose the one that is the same as rep_order, if possible
-            for path in all_paths:
-                # convert to tuple before comparing to rep_order
-                path = tuple(path)
-                if path == rep_order:
-                    graph_order = path
-                    break
-                elif path == rep_order.rev:
-                    graph_order = path[::-1]
-                    break
-            # failed to find the same one, choose the longest one
-            if graph_order is None:
-                graph_order = max(all_paths, key=len)
-
-        # make sure rep_order and graph_order have the same orientation
-        if rep_order.which_strand(graph_order) == '-':
-            graph_order = graph_order[::-1]
-
-        # check if graph_order the same as rep_order
-        graph_order = OrderedKmers(graph_order)
-        if graph_order != rep_order:
-            warnings.add('inconsistent')
-
-        return graph_order
-
-
 def _create_ck(
-    graph: nx.Graph,
     nodes: tuple[np.uint64],
     kmers: tuple,
     record_offsets: NDArray[np.uint32],
@@ -383,12 +305,12 @@ def _create_ck(
     kmers_df['assembly_idx'] = assembly_idx
     kmers_df['is_target'] = is_targets[assembly_idx]
 
-    return ConnectedKmers(graph, kmers_df, kmerlen, windowsize)
+    return ConnectedKmers(kmers_df, kmerlen, windowsize)
 
 
 def _get_create_ck_args(
     graph: FilteredGraph, assemblies: Assemblies, kmerlen: int, windowsize: int
-) -> Generator[tuple[nx.Graph, pd.DataFrame, int], None, None]:
+) -> Generator[tuple, None, None]:
     """Generate input arguments for `_create_ck()`.
 
     Args:
@@ -402,7 +324,6 @@ def _get_create_ck_args(
     """
     kmers = graph.kmers
     nodes = graph.nodes
-    nx_graph = graph.nx_graph
     subgraphs = graph.subgraphs
     record_offsets = graph.record_offsets
     is_targets = assemblies.is_targets
@@ -416,14 +337,12 @@ def _get_create_ck_args(
     # yield function args
     for sg in subgraphs:
         # each subgraph is a set of nodes, so it's not ordered
-        arg_graph = nx_graph.subgraph(sg).copy()
-
         arg_nodes = tuple(sg) # fixate node order
         arg_kmers = tuple(
             kmer_groups.pop(h) for h in arg_nodes
         )
 
-        yield arg_graph, arg_nodes, arg_kmers, record_offsets, is_targets, kmerlen, windowsize
+        yield arg_nodes, arg_kmers, record_offsets, is_targets, kmerlen, windowsize
 
 
 def _fetch_cks_seq(
