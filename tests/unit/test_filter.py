@@ -1,7 +1,6 @@
 import numpy as np
 import pytest
 
-from seqwin.config import EDGE_W, NODE_P
 from seqwin.graph import EDGE_DTYPE, KMER_DTYPE, NODE_DTYPE, _filter_native
 from seqwin.kmers import FilteredGraph
 
@@ -89,15 +88,3 @@ def test_subgraph_extraction_is_deterministic():
 def test_jaccard_shape_validation():
     with pytest.raises(ValueError, match='Jaccard matrix shape'):
         _filter(penalty_th=None, jaccard=np.ones((2, 2), dtype=np.float64))
-
-
-def test_filtered_graph_builds_exact_networkx_graph_and_attributes():
-    result, _ = _filter()
-    kmers, nodes, edges, subgraphs = result[:4]
-    graph = FilteredGraph(kmers, nodes, edges, np.array([0, 1], dtype=np.uint32),
-                          np.array(['record']), tuple(frozenset(s) for s in subgraphs))
-    assert set(graph.nx_graph) == set(nodes['hash'])
-    assert set(graph.nx_graph.edges) == {(np.uint64(10), np.uint64(20))}
-    assert graph.nx_graph[10][20][EDGE_W] == 1
-    assert graph.nx_graph.nodes[10][NODE_P] == 0
-    assert set(graph.nx_graph.subgraph(graph.subgraphs[0])) == set(graph.subgraphs[0])

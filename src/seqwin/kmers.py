@@ -7,7 +7,6 @@ A core module of Seqwin. Build a k-mer graph from all input assemblies and extra
 Dependencies:
 -------------
 - numpy
-- networkx
 - .graph
 - .assemblies
 - .utils
@@ -32,13 +31,12 @@ from time import time
 logger = logging.getLogger(__name__)
 
 import numpy as np
-import networkx as nx
 from numpy.typing import NDArray
 
 from .graph import KmerGraph, _filter_native
 from .assemblies import Assemblies
 from .utils import print_time_delta
-from .config import Config, RunState, HAS_MASH, WORKINGDIR, EDGE_W, NODE_P
+from .config import Config, RunState, HAS_MASH, WORKINGDIR
 
 
 class FilteredGraph(KmerGraph):
@@ -50,11 +48,9 @@ class FilteredGraph(KmerGraph):
         edges (NDArray[np.void]): Low-weight edges are filtered.
         record_offsets (NDArray[np.uint32]): Inherited from `KmerGraph.record_offsets`.
         record_ids (NDArray[np.str\_]): Inherited from `KmerGraph.record_ids`.
-        nx_graph (nx.Graph): The NetworkX graph instance built from filtered nodes and edges.
         subgraphs (tuple[frozenset[np.uint64], ...]): Low-penalty subgraphs. Each subgraph is a set of k-mer hash values.
     """
-    __slots__ = ('nx_graph', 'subgraphs')
-    nx_graph: nx.Graph
+    __slots__ = ('subgraphs',)
     subgraphs: tuple[frozenset[np.uint64], ...]
 
     def __init__(
@@ -68,23 +64,11 @@ class FilteredGraph(KmerGraph):
     ) -> None:
         """Initialized a filtered minimizer graph from computed graph data.
         """
-        nx_graph = nx.Graph()
-        nx_graph.add_nodes_from(nodes['hash'])
-        nx_graph.add_weighted_edges_from(
-            edges.view(np.uint64).reshape(-1, 3),
-            weight=EDGE_W
-        )
-        nx.set_node_attributes(
-            nx_graph,
-            values=dict(zip(nodes['hash'], nodes['penalty'])),
-            name=NODE_P
-        )
         self.kmers = kmers
         self.nodes = nodes
         self.edges = edges
         self.record_offsets = record_offsets
         self.record_ids = record_ids
-        self.nx_graph = nx_graph
         self.subgraphs = subgraphs
 
 
