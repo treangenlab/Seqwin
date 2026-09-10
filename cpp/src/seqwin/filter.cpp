@@ -4,7 +4,6 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -69,25 +68,21 @@ double expected_presence(
     return sum / static_cast<double>(count);
 }
 
-FilterResult calculate_thresholds(
-    const Node* nodes,
-    std::size_t n_nodes,
+/** @brief Calculate thresholds and add them to `result`. */
+void calculate_thresholds(
     const bool* is_targets,
     std::size_t n_assemblies,
     const double* jaccard,
     std::size_t jaccard_rows,
     std::size_t jaccard_cols,
-    const FilterConfig& config
+    const FilterConfig& config,
+    FilterResult& result
 ) {
-    const std::size_t total_tar = std::count(is_targets, is_targets + n_assemblies, true);
-    const auto total_neg = n_assemblies - total_tar;
-
     double penalty_th;
     if (config.penalty_th) {
         penalty_th = *config.penalty_th;
         internal::log_python("Penalty threshold is provided (--penalty-th), skip auto estimation", "warning");
     } else {
-        internal::log_python(" - Calculating penalty threshold...");
         // Consider k-mers in target assemblies:
         double e_absence_tar; // their expected absence in target assemblies
         double e_presence_neg; // their expected presence in non-target assemblies
@@ -98,23 +93,9 @@ FilterResult calculate_thresholds(
             e_absence_tar = 1.0 - expected_presence(jaccard, n_assemblies, is_targets, true);
             e_presence_neg = expected_presence(jaccard, n_assemblies, is_targets, false);
         } else {
-            // Calculate expected presence from minimizer sketches
-            // For all k-mers in targets, calculate their average presence in targets or non-targets
-            double sum_n_tar = 0.0; // Number of k-mers in all targets
-            double sum_presence_tar = 0.0;
-            double sum_presence_neg = 0.0;
-            for (std::size_t i = 0; i < n_nodes; ++i) {
-                const double node_n_tar = nodes[i].n_tar;
-                const double node_n_neg = nodes[i].n_neg;
-                sum_n_tar += node_n_tar;
-                sum_presence_tar += (node_n_tar / total_tar) * node_n_tar;
-                sum_presence_neg += (node_n_neg / total_neg) * node_n_tar;
-            }
-            if (sum_n_tar == 0.0) {
-                throw std::invalid_argument("No target minimizers are available for threshold estimation");
-            }
-            e_absence_tar = 1.0 - sum_presence_tar / sum_n_tar;
-            e_presence_neg = sum_presence_neg / sum_n_tar;
+            // Use values calculated by `get_penalty()`
+            e_absence_tar = result.e_absence_tar;
+            e_presence_neg = result.e_presence_neg;
         }
         internal::log_python(" - Expected k-mer absence in targets: " + format_value(e_absence_tar, 5));
         internal::log_python(" - Expected k-mer presence in non-targets: " + format_value(e_presence_neg, 5));
@@ -134,7 +115,7 @@ FilterResult calculate_thresholds(
     // Consider N as the number of assemblies that include a certain k-mer. Since we want k-mers with
     // penalty lower than penalty_th, based on the definition of penalty, N ≥ (1 - penalty_th) * total_tar.
     // So edge weight threshold is calculated based on the lower bound of N, times a multiplier < 1.
-    const double edge_weight_th = config.edge_w_th_mul * (1.0 - penalty_th) * total_tar;
+    const double edge_weight_th = config.edge_w_th_mul * (1.0 - penalty_th) * result.total_tar;
 
     // Calculate size range of subgraphs
     const std::size_t gap_len = (config.windowsize + 1) / 2;
@@ -153,12 +134,10 @@ FilterResult calculate_thresholds(
         );
     }
 
-    FilterResult result;
     result.penalty_th = penalty_th;
     result.edge_weight_th = edge_weight_th;
     result.min_nodes = min_nodes;
     result.max_nodes = max_nodes;
-    return result;
 }
 
 } // namespace
@@ -179,11 +158,11 @@ FilterResult filter(
     const FilterConfig& config
 ) {
     internal::log_python(" - Calculating node penalty scores...");
-    internal::get_penalty(
+    auto result = internal::get_penalty(
         kmers, nodes, n_nodes, record_offsets, n_record_offsets, is_targets, n_assemblies, config.n_cpu
     );
-    auto result = calculate_thresholds(
-        nodes, n_nodes, is_targets, n_assemblies, jaccard, jaccard_rows, jaccard_cols, config
+    calculate_thresholds(
+        is_targets, n_assemblies, jaccard, jaccard_rows, jaccard_cols, config, result
     );
 
     internal::log_python(" - Filtering graph edges and nodes...");
@@ -200,8 +179,7 @@ FilterResult filter(
     );
 
     auto [subgraphs, used_nodes] = internal::get_subgraphs(
-        pruned.nodes, pruned.edges, result.penalty_th, result.min_nodes,
-        result.max_nodes.value_or(std::numeric_limits<std::size_t>::max())
+        pruned.nodes, pruned.edges, result.penalty_th, result.min_nodes, result.max_nodes
     );
     if (subgraphs.empty()) {
         throw std::runtime_error("No low-penalty subgraph was found. Try decrease --stringency, or increase --penalty-th");

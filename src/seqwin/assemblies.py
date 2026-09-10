@@ -80,7 +80,7 @@ class Assemblies:
         """Return the number of assemblies."""
         return len(self.paths)
 
-    def mash(self, kmerlen: int, sketchsize: int, out_path: Path, overwrite: bool, n_cpu: int) -> NDArray[np.floating]:
+    def mash(self, kmerlen: int, sketchsize: int, out_path: Path, overwrite: bool, n_cpu: int) -> NDArray[np.float64]:
         """Calculate the Jaccard indices of all assembly pairs with Mash.
 
         Args:
@@ -91,7 +91,7 @@ class Assemblies:
             n_cpu (int): Number of processes to run in parallel.
 
         Returns:
-            NDArray[np.floating]: A matrix of Jaccard indices of all assembly pairs.
+            NDArray[np.float64]: A matrix of Jaccard indices of all assembly pairs.
         """
         mash_sketch = sketch(
             self.paths,
@@ -102,7 +102,7 @@ class Assemblies:
             n_cpu=n_cpu
         )
         return np.fromiter(
-            get_jaccard(mash_sketch, n_cpu=n_cpu), dtype=float
+            get_jaccard(mash_sketch, n_cpu=n_cpu), dtype=np.float64
         ).reshape(len(self), len(self))
 
     def fetch_seq(self, loc: pd.DataFrame, n_cpu: int) -> pd.Series:
@@ -461,8 +461,10 @@ def get_assemblies(config: Config, state: RunState) -> Assemblies:
     paths = tar_paths + neg_paths
     is_targets = [True] * len(tar_paths) + [False] * len(neg_paths)
     assemblies = Assemblies(paths, is_targets)
-    n_tar, n_neg = len(tar_paths), len(neg_paths)
-    logger.info(f'Loaded {n_tar} target assemblies and {n_neg} non-target assemblies, {len(assemblies)} in total.')
+    logger.info(
+        (f'Loaded {len(tar_paths)} target assemblies and {len(neg_paths)} '
+        f'non-target assemblies, {len(assemblies)} in total.')
+    )
 
     # save assemblies as csv
     assemblies_path = working_dir / WORKINGDIR.assemblies_csv
@@ -473,8 +475,4 @@ def get_assemblies(config: Config, state: RunState) -> Assemblies:
     }).to_csv(assemblies_path, index=True)
     logger.info(f'Assembly indices and paths saved as {assemblies_path}')
 
-    # load assembly sequences
-    # NOTE: loading sequences in advance will slow everything else (maybe too much RAM)
-
-    state.n_tar, state.n_neg = n_tar, n_neg
     return assemblies

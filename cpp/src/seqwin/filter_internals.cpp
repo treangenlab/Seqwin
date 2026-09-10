@@ -15,7 +15,7 @@
 
 namespace seqwin::internal {
 
-void get_penalty(
+FilterResult get_penalty(
     const Kmer* kmers,
     Node* nodes,
     std::size_t n_nodes,
@@ -31,6 +31,15 @@ void get_penalty(
         std::uint32_t last_record_idx;
         /** Whether the assembly belongs to the target set, as 0 or 1. */
         std::uint32_t is_target;
+    };
+    /**
+     * Sums over all nodes, for penalty threshold calculation.
+     * For all k-mers in targets, calculate their total presence in targets or non-targets.
+     */
+    struct NodeSums {
+        std::size_t n_tar = 0;
+        double presence_tar = 0.0; // `(node.n_tar / total_tar) * node.n_tar`
+        double presence_neg = 0.0; // `(node.n_neg / total_neg) * node.n_tar`
     };
 
     if (n_record_offsets != n_assemblies + 1) {
@@ -48,12 +57,13 @@ void get_penalty(
         }
     }
 
-    const std::size_t total_tar = std::count(is_targets, is_targets + n_assemblies, true);
+    // Use double for downstream calculation
+    const double total_tar = std::count(is_targets, is_targets + n_assemblies, true);
     const auto total_neg = n_assemblies - total_tar;
-    if (total_tar == 0) {
+    if (total_tar == 0.0) {
         throw std::invalid_argument("is_targets must contain at least one target assembly");
     }
-    if (total_neg == 0) {
+    if (total_neg == 0.0) {
         throw std::invalid_argument("is_targets must contain at least one non-target assembly");
     }
 
@@ -84,7 +94,10 @@ void get_penalty(
         }
     });
 
-    pool.parallel_for(n_nodes, [&](std::size_t start, std::size_t end, std::size_t) {
+    std::vector<NodeSums> node_sums(n_workers);
+    pool.parallel_for(n_nodes, [&](std::size_t start, std::size_t end, std::size_t worker_i) {
+        auto& sums = node_sums[worker_i];
+
         for (std::size_t node_i = start; node_i < end; ++node_i) {
             auto& node = nodes[node_i];
             if (node.start == node.stop) {
@@ -124,11 +137,31 @@ void get_penalty(
 
             node.n_tar = n_tar;
             node.n_neg = n_neg;
-            const double frac_tar = static_cast<double>(n_tar) / total_tar;
-            const double frac_neg = static_cast<double>(n_neg) / total_neg;
+            const double frac_tar = n_tar / total_tar;
+            const double frac_neg = n_neg / total_neg;
             node.penalty = std::sqrt((1.0 - frac_tar) * (1.0 - frac_tar) + frac_neg * frac_neg);
+
+            sums.n_tar += n_tar;
+            sums.presence_tar += frac_tar * n_tar;
+            sums.presence_neg += frac_neg * n_tar;
         }
     });
+    NodeSums totals;
+    for (const auto& sums : node_sums) {
+        totals.n_tar += sums.n_tar;
+        totals.presence_tar += sums.presence_tar;
+        totals.presence_neg += sums.presence_neg;
+    }
+    if (totals.n_tar == 0) {
+        throw std::invalid_argument("No target minimizers are available for threshold estimation");
+    }
+
+    FilterResult result;
+    result.total_tar = total_tar;
+    result.total_neg = total_neg;
+    result.e_absence_tar = 1.0 - totals.presence_tar / totals.n_tar;
+    result.e_presence_neg = totals.presence_neg / totals.n_tar;
+    return result;
 }
 
 PrunedGraph prune_graph(
@@ -166,7 +199,7 @@ std::pair<Subgraphs, std::vector<std::size_t>> get_subgraphs(
     const std::vector<Edge>& edges,
     double penalty_th,
     std::size_t min_nodes,
-    std::size_t max_nodes
+    std::optional<std::size_t> max_nodes
 ) {
     // Graph nodes are represented by indices, instead of hashes
     const GraphTopology graph(nodes, edges);
@@ -202,6 +235,9 @@ std::pair<Subgraphs, std::vector<std::size_t>> get_subgraphs(
     Subgraphs subgraphs;
     std::vector<std::size_t> used_nodes;
 
+    const std::size_t max_nodes_value = max_nodes.value_or(
+        std::numeric_limits<std::size_t>::max()
+    );
     for (const auto seed : seeds) {
         if (used[seed]) {
             continue;
@@ -224,18 +260,19 @@ std::pair<Subgraphs, std::vector<std::size_t>> get_subgraphs(
         };
         add_neighbors(seed);
 
-        while (!frontier.empty() && subgraph.size() < max_nodes) {
+        while (!frontier.empty() && subgraph.size() < max_nodes_value) {
             const auto candidate = frontier.top();
             frontier.pop();
-            seen[candidate.index] = 0; // Rejected candidate can be discovered again later
             const double new_sum_penalty = sum_penalty + candidate.penalty;
-            if (
-                new_sum_penalty / static_cast<double>(subgraph.size() + 1) <= penalty_th
-            ) {
+            if (new_sum_penalty / (subgraph.size() + 1) <= penalty_th) {
                 subgraph.push_back(candidate.index);
-                seen[candidate.index] = 1;
                 sum_penalty = new_sum_penalty;
                 add_neighbors(candidate.index);
+            } else {
+                // All remaining candidates have at least this penalty, so they
+                // cannot lower the subgraph average below the threshold.
+                seen[candidate.index] = 0;
+                break;
             }
         }
 

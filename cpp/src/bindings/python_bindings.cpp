@@ -174,6 +174,8 @@ PYBIND11_MODULE(_core, m) {
                 array_to_numpy(std::move(result.nodes)),
                 array_to_numpy(std::move(result.edges)),
                 std::move(result.subgraphs),
+                result.total_tar,
+                result.total_neg,
                 result.penalty_th,
                 result.edge_weight_th,
                 result.min_nodes,
