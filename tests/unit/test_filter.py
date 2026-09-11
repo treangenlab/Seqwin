@@ -34,6 +34,28 @@ def _filter(*, penalty_th=0.3, jaccard=None, n_cpu=1,
     return result, nodes
 
 
+def _filter_distinct_weights(edge_weight_th):
+    kmers = np.array(
+        [(0, record) for _ in range(4) for record in (0, 1)],
+        dtype=KMER_DTYPE,
+    )
+    nodes = np.array(
+        [(node_hash, i * 2, i * 2 + 2, 0, 0, 0.0)
+         for i, node_hash in enumerate((10, 20, 30, 40))],
+        dtype=NODE_DTYPE,
+    )
+    edges = np.array(
+        [(10, 20, 5), (20, 30, 3), (30, 40, 2)],
+        dtype=EDGE_DTYPE,
+    )
+    edge_w_th_mul = np.nextafter(edge_weight_th / 1.4, np.inf)
+    return _filter_native(
+        kmers, nodes, edges, np.array([0, 1, 2, 2, 2], dtype=np.uint32),
+        np.array([True, True, False, False], dtype=np.bool_), None, .3, 5,
+        .2, edge_w_th_mul, 10, 0, None, 1, None, 1,
+    )
+
+
 def test_native_filter_scores_compacts_and_filters_final_edges():
     result, scored = _filter()
     (kmers, nodes, edges, subgraphs,
@@ -77,6 +99,36 @@ def test_automatic_threshold_from_jaccard_and_cap():
 def test_low_weight_edges_isolated_nodes_and_no_subgraph_error():
     with pytest.raises(RuntimeError, match='adjust|Try decrease'):
         _filter(edge_w_th_mul=1, min_nodes_floor=2)
+
+
+@pytest.mark.parametrize(
+    ('edge_weight_th', 'expected'),
+    (
+        (.5, [(10, 20, 5), (20, 30, 3), (30, 40, 2)]),
+        (2.5, [(10, 20, 5), (20, 30, 3)]),
+        (3, [(10, 20, 5)]),
+    ),
+)
+def test_edge_pruning_retains_descending_prefix_with_strict_threshold(
+    edge_weight_th, expected,
+):
+    result = _filter_distinct_weights(edge_weight_th)
+    assert result[2].tolist() == expected
+
+
+@pytest.mark.parametrize('edge_weight_th', (5, 100))
+def test_edge_pruning_rejects_all_edges(edge_weight_th):
+    with pytest.raises(RuntimeError, match='adjust|Try decrease'):
+        _filter_distinct_weights(edge_weight_th)
+
+
+def test_edge_pruning_handles_empty_edge_array():
+    kmers, nodes, _, offsets, targets = _inputs()
+    with pytest.raises(RuntimeError, match='adjust|Try decrease'):
+        _filter_native(
+            kmers, nodes, np.empty(0, dtype=EDGE_DTYPE), offsets, targets,
+            None, .3, 5, .2, .3, 10, 0, None, 1, None, 1,
+        )
 
 
 def test_subgraph_extraction_is_deterministic():

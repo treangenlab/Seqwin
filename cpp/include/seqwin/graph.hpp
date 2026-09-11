@@ -149,7 +149,7 @@ struct Graph {
     NoInitArray<Kmer> kmers;
     /** Sorted by hash. */
     NoInitArray<Node> nodes;
-    /** Sorted by hash. */
+    /** Sorted by descending weight, then by ascending endpoint hashes. */
     NoInitArray<Edge> edges;
     /** Cumulative global FASTA record offsets by assembly. */
     std::vector<std::uint32_t> record_offsets;

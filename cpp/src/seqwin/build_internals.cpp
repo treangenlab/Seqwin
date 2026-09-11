@@ -81,6 +81,7 @@ static void lsd_radix_sort_key(
     T*& dst,
     std::size_t n,
     KeyPtr key,
+    bool ascending,
     std::vector<std::size_t>& counts,
     ThreadPool& pool
 ) {
@@ -99,7 +100,8 @@ static void lsd_radix_sort_key(
         });
 
         std::size_t current = 0;
-        for (std::size_t bucket = 0; bucket < bucket_count; ++bucket) {
+        for (std::size_t bucket_i = 0; bucket_i < bucket_count; ++bucket_i) {
+            const auto bucket = ascending ? bucket_i : bucket_count - bucket_i - 1;
             for (std::size_t t = 0; t < pool.size(); ++t) {
                 auto& value = counts[t * bucket_count + bucket];
                 const auto c = value;
@@ -129,6 +131,7 @@ static void lsd_radix_sort_key(
 template <typename T, typename... KeyPtrs>
 static void lsd_radix_sort(
     NoInitArray<T>& values,
+    bool ascending,
     ThreadPool& pool,
     KeyPtrs... keys
 ) {
@@ -142,7 +145,7 @@ static void lsd_radix_sort(
     auto* dst = buf.data();
     std::vector<std::size_t> counts(pool.size() * 65536);
 
-    (lsd_radix_sort_key(src, dst, n, keys, counts, pool), ...);
+    (lsd_radix_sort_key(src, dst, n, keys, ascending, counts, pool), ...);
 }
 
 /**
@@ -172,7 +175,7 @@ static MergedNodes merge_nodes(
         return merged;
     }
 
-    lsd_radix_sort(nodes, pool, &ThreadNode::hash);
+    lsd_radix_sort(nodes, true, pool, &ThreadNode::hash);
 
     // Determine final node count
     std::size_t unique_count = 0;
@@ -260,7 +263,7 @@ static void merge_edges(NoInitArray<Edge>& edges, ThreadPool& pool)
         return;
     }
 
-    lsd_radix_sort(edges, pool, &Edge::second, &Edge::first);
+    lsd_radix_sort(edges, true, pool, &Edge::second, &Edge::first);
 
     // Determine final edge count
     std::size_t unique_count = 0;
@@ -302,7 +305,9 @@ std::pair<Graph, KmerMaps> merge_thread_graphs(
 ) {
     if (graphs.size() == 1) {
         auto& graph = graphs[0];
-        merge_edges(graph.edges, pool); // Sort only
+
+        lsd_radix_sort(graph.edges, true, pool, &Edge::second, &Edge::first);
+        lsd_radix_sort(graph.edges, false, pool, &Edge::weight);
 
         auto merged = merge_nodes(graph.nodes, graphs, pool, low_memory);
         graph.nodes.reset();
@@ -359,6 +364,7 @@ std::pair<Graph, KmerMaps> merge_thread_graphs(
     // Merge edges and nodes first to reduce peak memory
     auto edges = concat_edges(graphs, pool);
     merge_edges(edges, pool);
+    lsd_radix_sort(edges, false, pool, &Edge::weight);
 
     auto thread_nodes = concat_nodes(graphs, pool);
     auto merged = merge_nodes(thread_nodes, graphs, pool, low_memory);

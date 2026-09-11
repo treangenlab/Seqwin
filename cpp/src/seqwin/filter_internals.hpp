@@ -81,7 +81,7 @@ private:
 };
 
 /**
- * @brief Nodes and edges follow their original order (sorted by hash).
+ * @brief Nodes and edges follow their original order.
 */
 struct PrunedGraph {
     std::vector<Node> nodes;

@@ -171,21 +171,32 @@ PrunedGraph prune_graph(
     std::size_t n_edges,
     double edge_weight_th
 ) {
-    ankerl::unordered_dense::set<std::uint64_t> connected;
-    connected.reserve(n_nodes);
-
     PrunedGraph graph;
-    graph.edges.reserve(n_edges);
+
     const std::size_t th = edge_weight_th;
-    for (std::size_t i = 0; i < n_edges; ++i) {
-        if (edges[i].weight > th) {
-            graph.edges.push_back(edges[i]);
-            connected.insert(edges[i].first);
-            connected.insert(edges[i].second);
-        }
+    std::size_t retained_count = 0;
+    if (n_edges != 0) {
+        const auto* retained_end = std::lower_bound(
+            edges,
+            edges + n_edges,
+            th,
+            [](const Edge& edge, std::size_t threshold) {
+                return edge.weight > threshold;
+            }
+        );
+        retained_count = static_cast<std::size_t>(retained_end - edges);
     }
 
-    graph.nodes.reserve(n_nodes);
+    graph.edges.reserve(retained_count);
+    ankerl::unordered_dense::set<std::uint64_t> connected;
+    connected.reserve(retained_count * 2);
+    for (std::size_t i = 0; i < retained_count; ++i) {
+        graph.edges.push_back(edges[i]);
+        connected.insert(edges[i].first);
+        connected.insert(edges[i].second);
+    }
+
+    graph.nodes.reserve(connected.size());
     for (std::size_t i = 0; i < n_nodes; ++i) {
         if (connected.count(nodes[i].hash)) {
             graph.nodes.push_back(nodes[i]);

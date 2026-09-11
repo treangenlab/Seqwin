@@ -75,7 +75,8 @@ class KmerGraph:
     >>> )
     ```
     - `kmers` stores minimizer occurrences in all assemblies, grouped and sorted by hash.
-    - `nodes` and `edges` are sorted by hash.
+    - `nodes` are sorted by hash.
+    - `edges` are sorted by descending weight, then by ascending endpoint hashes.
 
     The `[start, stop)` range in each node identifies minimizers with this hash.
     ```python

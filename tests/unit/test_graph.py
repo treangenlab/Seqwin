@@ -78,10 +78,12 @@ def test_graph_load_rejects_missing_array(tmp_path: Path, targets_dir: Path, non
         KmerGraph.load(graph_path)
 
 
-def _sorted_edges(edges: np.ndarray) -> np.ndarray:
-    edge_values = edges.view(np.uint64).reshape(-1, 3)
-    idx = np.lexsort((edge_values[:, 2], edge_values[:, 1], edge_values[:, 0]))
-    return edge_values[idx]
+def _assert_edges_weight_sorted(edges: np.ndarray) -> None:
+    assert np.all(edges['weight'][:-1] >= edges['weight'][1:])
+    for weight in np.unique(edges['weight']):
+        tied = edges[edges['weight'] == weight]
+        endpoints = tied[['first', 'second']].tolist()
+        assert endpoints == sorted(endpoints)
 
 
 def _assert_graph_outputs_equal(standard, low_memory) -> None:
@@ -90,7 +92,8 @@ def _assert_graph_outputs_equal(standard, low_memory) -> None:
 
     assert np.array_equal(kmers_std, kmers_lm)
     assert np.array_equal(nodes_std, nodes_lm)
-    assert np.array_equal(_sorted_edges(edges_std), _sorted_edges(edges_lm))
+    _assert_edges_weight_sorted(edges_std)
+    _assert_edges_weight_sorted(edges_lm)
     assert offsets_std.dtype == np.dtype(np.uint32)
     assert offsets_lm.dtype == np.dtype(np.uint32)
     assert np.array_equal(offsets_std, offsets_lm)
@@ -170,8 +173,11 @@ def test_build_threading_equivalence(targets_dir, non_targets_dir) -> None:
     assert np.array_equal(record_offsets_1, record_offsets_2)
     assert np.array_equal(record_offsets_1, record_offsets_many)
 
-    assert np.array_equal(_sorted_edges(edges_1), _sorted_edges(edges_2))
-    assert np.array_equal(_sorted_edges(edges_1), _sorted_edges(edges_many))
+    assert np.array_equal(edges_1, edges_2)
+    assert np.array_equal(edges_1, edges_many)
+    _assert_edges_weight_sorted(edges_1)
+    _assert_edges_weight_sorted(edges_2)
+    _assert_edges_weight_sorted(edges_many)
 
 
 def test_multi_thread_record_offsets_and_global_record_indices(tmp_path: Path) -> None:
