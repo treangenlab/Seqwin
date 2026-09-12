@@ -41,7 +41,7 @@ struct ThreadGraph {
     NoInitArray<Kmer> kmers;
     /** Unsorted. */
     NoInitArray<ThreadNode> nodes;
-    /** Unsorted. */
+    /** Unsorted; endpoints are minimizer hashes. */
     NoInitArray<Edge> edges;
     /** Thread-local cumulative FASTA record offsets by assembly. */
     std::vector<std::uint32_t> record_offsets;

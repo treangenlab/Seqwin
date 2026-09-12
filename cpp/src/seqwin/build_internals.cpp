@@ -255,44 +255,60 @@ static NoInitArray<Kmer> merge_kmers(
     return kmers;
 }
 
-static void merge_edges(NoInitArray<Edge>& edges, ThreadPool& pool)
-{
+static void finalize_edges(
+    NoInitArray<Edge>& edges,
+    const NoInitArray<Node>& nodes, // Sorted by hash
+    ThreadPool& pool
+) {
     const std::size_t n_edges = edges.size();
-    if (n_edges == 0) {
+    const std::size_t n_nodes = nodes.size();
+    if (n_edges == 0 || n_nodes == 0) {
         edges.reset();
         return;
     }
 
-    lsd_radix_sort(edges, true, pool, &Edge::second, &Edge::first);
-
-    // Determine final edge count
-    std::size_t unique_count = 0;
-    std::size_t i = 0;
-    while (i < n_edges) {
-        const auto first = edges[i].first;
-        const auto second = edges[i].second;
-        while (i < n_edges && edges[i].first == first && edges[i].second == second) {
-            ++i;
+    // Convert the second endpoints to node indices
+    lsd_radix_sort(edges, true, pool, &Edge::second);
+    std::size_t node_i = 0;
+    for (auto& edge : edges) {
+        while (node_i < n_nodes && nodes[node_i].hash < edge.second) {
+            ++node_i;
         }
-        ++unique_count;
+        if (node_i == n_nodes || nodes[node_i].hash != edge.second) {
+            throw std::logic_error("Edge endpoint does not correspond to a node");
+        }
+        edge.second = node_i;
     }
-    NoInitArray<Edge> buf(unique_count);
 
+    // Convert the first endpoints to node indices, and aggregate weights
+    lsd_radix_sort(edges, true, pool, &Edge::first);
+    node_i = 0;
     std::size_t write_i = 0;
-    i = 0;
-    while (i < n_edges) {
-        const auto first = edges[i].first;
-        const auto second = edges[i].second;
-        std::size_t weight = 0;
-
-        while (i < n_edges && edges[i].first == first && edges[i].second == second) {
-            weight += edges[i].weight;
-            ++i;
+    for (auto& edge : edges) {
+        while (node_i < n_nodes && nodes[node_i].hash < edge.first) {
+            ++node_i;
+        }
+        if (node_i == n_nodes || nodes[node_i].hash != edge.first) {
+            throw std::logic_error("Edge endpoint does not correspond to a node");
         }
 
-        buf[write_i++] = Edge{first, second, weight};
+        const Edge converted{node_i, edge.second, edge.weight};
+        if (
+            write_i != 0 &&
+            edges[write_i - 1].first == converted.first &&
+            edges[write_i - 1].second == converted.second
+        ) {
+            edges[write_i - 1].weight += converted.weight;
+        } else {
+            edges[write_i++] = converted;
+        }
     }
-    edges = std::move(buf);
+    NoInitArray<Edge> out(write_i);
+    std::copy(edges.begin(), edges.begin() + write_i, out.begin());
+    edges = std::move(out);
+
+    // Sort by descending weight
+    lsd_radix_sort(edges, false, pool, &Edge::weight);
 }
 
 } // namespace
@@ -306,11 +322,10 @@ std::pair<Graph, KmerMaps> merge_thread_graphs(
     if (graphs.size() == 1) {
         auto& graph = graphs[0];
 
-        lsd_radix_sort(graph.edges, true, pool, &Edge::second, &Edge::first);
-        lsd_radix_sort(graph.edges, false, pool, &Edge::weight);
-
         auto merged = merge_nodes(graph.nodes, graphs, pool, low_memory);
         graph.nodes.reset();
+
+        finalize_edges(graph.edges, merged.nodes, pool);
 
         NoInitArray<Kmer> kmers;
         if (!low_memory) {
@@ -361,14 +376,12 @@ std::pair<Graph, KmerMaps> merge_thread_graphs(
         std::vector<std::uint32_t>().swap(local_offsets);
     }
 
-    // Merge edges and nodes first to reduce peak memory
-    auto edges = concat_edges(graphs, pool);
-    merge_edges(edges, pool);
-    lsd_radix_sort(edges, false, pool, &Edge::weight);
-
     auto thread_nodes = concat_nodes(graphs, pool);
     auto merged = merge_nodes(thread_nodes, graphs, pool, low_memory);
     thread_nodes.reset();
+
+    auto edges = concat_edges(graphs, pool);
+    finalize_edges(edges, merged.nodes, pool);
 
     NoInitArray<Kmer> kmers;
     if (!low_memory) {

@@ -76,7 +76,7 @@ class KmerGraph:
     ```
     - `kmers` stores minimizer occurrences in all assemblies, grouped and sorted by hash.
     - `nodes` are sorted by hash.
-    - `edges` are sorted by descending weight, then by ascending endpoint hashes.
+    - `edges` endpoints are indices into `nodes`; sorted by descending weight, then by ascending endpoints.
 
     The `[start, stop)` range in each node identifies minimizers with this hash.
     ```python
@@ -110,8 +110,8 @@ class KmerGraph:
             - 'penalty' (float64): Node penalty score. Initialized to 0.0.
         edges (NDArray[np.void]): A 1-D NumPy structured array of weighted, undirected edges.
             Dtype: `EDGE_DTYPE`
-            - 'first' (uint64): Smaller endpoint hash of the undirected edge.
-            - 'second' (uint64): Larger endpoint hash of the undirected edge.
+            - 'first' (uint64): Index of the smaller endpoint in `nodes`.
+            - 'second' (uint64): Index of the larger endpoint in `nodes`.
             - 'weight' (uintp): Number of assemblies where the endpoints are adjacent.
         record_offsets (NDArray[np.uint32]): Cumulative global FASTA record offsets by assembly.
         record_ids (NDArray[np.str\_]): FASTA record IDs in global record order.

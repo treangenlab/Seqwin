@@ -9,6 +9,8 @@
 #include <stdexcept>
 #include <vector>
 
+#include <ankerl/unordered_dense.h>
+
 #include "seqwin/filter.hpp"
 #include "utils/logging.hpp"
 #include "utils/thread_pool.hpp"
@@ -187,20 +189,33 @@ PrunedGraph prune_graph(
         retained_count = static_cast<std::size_t>(retained_end - edges);
     }
 
-    graph.edges.reserve(retained_count);
-    ankerl::unordered_dense::set<std::uint64_t> connected;
+    std::vector<std::size_t> connected;
     connected.reserve(retained_count * 2);
     for (std::size_t i = 0; i < retained_count; ++i) {
-        graph.edges.push_back(edges[i]);
-        connected.insert(edges[i].first);
-        connected.insert(edges[i].second);
+        if (edges[i].first >= n_nodes || edges[i].second >= n_nodes) {
+            throw std::invalid_argument("Edge endpoint does not correspond to a node");
+        }
+        connected.push_back(edges[i].first);
+        connected.push_back(edges[i].second);
     }
+    std::sort(connected.begin(), connected.end());
+    connected.erase(std::unique(connected.begin(), connected.end()), connected.end());
 
     graph.nodes.reserve(connected.size());
-    for (std::size_t i = 0; i < n_nodes; ++i) {
-        if (connected.count(nodes[i].hash)) {
-            graph.nodes.push_back(nodes[i]);
-        }
+    ankerl::unordered_dense::map<std::size_t, std::size_t> node_indices;
+    node_indices.reserve(connected.size());
+    for (const auto node_i : connected) {
+        node_indices.emplace(node_i, graph.nodes.size());
+        graph.nodes.push_back(nodes[node_i]);
+    }
+
+    graph.edges.reserve(retained_count);
+    for (std::size_t i = 0; i < retained_count; ++i) {
+        graph.edges.push_back(Edge{
+            node_indices.at(edges[i].first),
+            node_indices.at(edges[i].second),
+            edges[i].weight
+        });
     }
     return graph;
 }
@@ -320,9 +335,12 @@ CompactedGraph compact_graph(
 
     CompactedGraph graph;
     graph.nodes = NoInitArray<Node>(used_nodes.size());
+    const auto invalid = std::numeric_limits<std::size_t>::max();
+    std::vector<std::size_t> node_indices(nodes.size(), invalid);
     std::size_t n_kmers = 0;
     for (std::size_t i = 0; i < used_nodes.size(); ++i) {
         graph.nodes[i] = nodes[used_nodes[i]];
+        node_indices[used_nodes[i]] = i;
         n_kmers += graph.nodes[i].stop - graph.nodes[i].start;
     }
     graph.kmers = NoInitArray<Kmer>(n_kmers);
@@ -338,14 +356,15 @@ CompactedGraph compact_graph(
         new_start += size;
     }
 
-    ankerl::unordered_dense::set<std::uint64_t> used_hashes;
-    used_hashes.reserve(graph.nodes.size());
-    for (const auto& node : graph.nodes) used_hashes.insert(node.hash);
-
     graph.edges.reserve(edges.size());
     for (const auto& edge : edges) {
-        if (used_hashes.count(edge.first) && used_hashes.count(edge.second)) {
-            graph.edges.push_back(edge);
+        if (edge.first >= nodes.size() || edge.second >= nodes.size()) {
+            throw std::invalid_argument("Edge endpoint does not correspond to a node");
+        }
+        const auto first = node_indices[edge.first];
+        const auto second = node_indices[edge.second];
+        if (first != invalid && second != invalid) {
+            graph.edges.push_back(Edge{first, second, edge.weight});
         }
     }
     return graph;

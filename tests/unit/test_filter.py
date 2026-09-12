@@ -16,7 +16,7 @@ def _inputs():
     return (
         np.array(kmers, dtype=KMER_DTYPE),
         np.array(nodes, dtype=NODE_DTYPE),
-        np.array([(10, 20, 1), (20, 30, 1), (30, 40, 1)], dtype=EDGE_DTYPE),
+        np.array([(0, 1, 1), (1, 2, 1), (2, 3, 1)], dtype=EDGE_DTYPE),
         np.array([0, 1, 2, 3, 4], dtype=np.uint32),
         np.array([True, True, False, False], dtype=np.bool_),
     )
@@ -45,7 +45,7 @@ def _filter_distinct_weights(edge_weight_th):
         dtype=NODE_DTYPE,
     )
     edges = np.array(
-        [(10, 20, 5), (20, 30, 3), (30, 40, 2)],
+        [(0, 1, 5), (1, 2, 3), (2, 3, 2)],
         dtype=EDGE_DTYPE,
     )
     edge_w_th_mul = np.nextafter(edge_weight_th / 1.4, np.inf)
@@ -71,8 +71,11 @@ def test_native_filter_scores_compacts_and_filters_final_edges():
     np.testing.assert_array_equal(nodes['hash'], [10, 20])
     np.testing.assert_array_equal(nodes[['start', 'stop']].tolist(), [(0, 2), (2, 4)])
     assert len(kmers) == 4
-    assert edges.tolist() == [(10, 20, 1)]
-    assert set(edges['first']) | set(edges['second']) <= set(nodes['hash'])
+    assert edges.tolist() == [(0, 1, 1)]
+    assert np.all(edges['first'] < len(nodes))
+    assert np.all(edges['second'] < len(nodes))
+    assert nodes[edges['first']]['hash'].tolist() == [10]
+    assert nodes[edges['second']]['hash'].tolist() == [20]
     assert {frozenset(s) for s in subgraphs} == {frozenset((10, 20))}
 
 
@@ -104,9 +107,9 @@ def test_low_weight_edges_isolated_nodes_and_no_subgraph_error():
 @pytest.mark.parametrize(
     ('edge_weight_th', 'expected'),
     (
-        (.5, [(10, 20, 5), (20, 30, 3), (30, 40, 2)]),
-        (2.5, [(10, 20, 5), (20, 30, 3)]),
-        (3, [(10, 20, 5)]),
+        (.5, [(0, 1, 5), (1, 2, 3), (2, 3, 2)]),
+        (2.5, [(0, 1, 5), (1, 2, 3)]),
+        (3, [(0, 1, 5)]),
     ),
 )
 def test_edge_pruning_retains_descending_prefix_with_strict_threshold(

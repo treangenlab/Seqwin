@@ -6,8 +6,6 @@
 #include <utility>
 #include <vector>
 
-#include <ankerl/unordered_dense.h>
-
 #include "seqwin/filter.hpp"
 
 namespace seqwin::internal {
@@ -37,23 +35,12 @@ public:
     GraphTopology(const std::vector<Node>& nodes, const std::vector<Edge>& edges)
         : offsets_(nodes.size() + 1, 0)
     {
-        ankerl::unordered_dense::map<std::uint64_t, std::size_t> node_indices;
-        node_indices.reserve(nodes.size());
-        for (std::size_t i = 0; i < nodes.size(); ++i) {
-            node_indices.emplace(nodes[i].hash, i);
-        }
-
-        std::vector<std::pair<std::size_t, std::size_t>> endpoints;
-        endpoints.reserve(edges.size());
         for (const auto& edge : edges) {
-            const auto first = node_indices.find(edge.first);
-            const auto second = node_indices.find(edge.second);
-            if (first == node_indices.end() || second == node_indices.end()) {
+            if (edge.first >= nodes.size() || edge.second >= nodes.size()) {
                 throw std::invalid_argument("Edge endpoint does not correspond to a node");
             }
-            endpoints.emplace_back(first->second, second->second);
-            ++offsets_[first->second + 1];
-            ++offsets_[second->second + 1];
+            ++offsets_[edge.first + 1];
+            ++offsets_[edge.second + 1];
         }
 
         for (std::size_t i = 1; i < offsets_.size(); ++i) {
@@ -61,9 +48,9 @@ public:
         }
         neighbors_.resize(offsets_.back());
         auto cursors = offsets_;
-        for (const auto& endpoint : endpoints) {
-            neighbors_[cursors[endpoint.first]++] = endpoint.second;
-            neighbors_[cursors[endpoint.second]++] = endpoint.first;
+        for (const auto& edge : edges) {
+            neighbors_[cursors[edge.first]++] = edge.second;
+            neighbors_[cursors[edge.second]++] = edge.first;
         }
     }
 

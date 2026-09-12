@@ -86,6 +86,12 @@ def _assert_edges_weight_sorted(edges: np.ndarray) -> None:
         assert endpoints == sorted(endpoints)
 
 
+def _assert_indexed_edges(nodes: np.ndarray, edges: np.ndarray) -> None:
+    assert np.all(edges['first'] < len(nodes))
+    assert np.all(edges['second'] < len(nodes))
+    assert np.all(edges['first'] <= edges['second'])
+
+
 def _assert_graph_outputs_equal(standard, low_memory) -> None:
     kmers_std, nodes_std, edges_std, offsets_std, ids_std = standard
     kmers_lm, nodes_lm, edges_lm, offsets_lm, ids_lm = low_memory
@@ -94,6 +100,9 @@ def _assert_graph_outputs_equal(standard, low_memory) -> None:
     assert np.array_equal(nodes_std, nodes_lm)
     _assert_edges_weight_sorted(edges_std)
     _assert_edges_weight_sorted(edges_lm)
+    _assert_indexed_edges(nodes_std, edges_std)
+    _assert_indexed_edges(nodes_lm, edges_lm)
+    assert np.array_equal(edges_std, edges_lm)
     assert offsets_std.dtype == np.dtype(np.uint32)
     assert offsets_lm.dtype == np.dtype(np.uint32)
     assert np.array_equal(offsets_std, offsets_lm)
@@ -178,6 +187,7 @@ def test_build_threading_equivalence(targets_dir, non_targets_dir) -> None:
     _assert_edges_weight_sorted(edges_1)
     _assert_edges_weight_sorted(edges_2)
     _assert_edges_weight_sorted(edges_many)
+    _assert_indexed_edges(nodes_1, edges_1)
 
 
 def test_multi_thread_record_offsets_and_global_record_indices(tmp_path: Path) -> None:
