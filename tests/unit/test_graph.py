@@ -207,7 +207,7 @@ def test_duplicate_edges_across_workers_are_aggregated(tmp_path: Path) -> None:
     _assert_indexed_edges(multiple_workers.nodes, multiple_workers.edges)
 
 
-def test_multi_thread_record_offsets_and_global_record_indices(tmp_path: Path) -> None:
+def test_multi_worker_record_offsets_and_global_record_indices(tmp_path: Path) -> None:
     def write_fasta(path: Path, n_records: int) -> None:
         seq = 'ACGT' * 20
         path.write_text(''.join(f'>r{i}\n{seq}\n' for i in range(n_records)))

@@ -17,10 +17,10 @@ namespace seqwin::internal {
 namespace {
 
 /**
- * @brief Describes a contiguous thread-local k-mer segment and its output position.
+ * @brief Describes a contiguous worker-local k-mer segment and its output position.
  */
 struct KmerSegment {
-    std::size_t thread_id;
+    std::size_t worker_id;
     std::size_t local_start;
     std::size_t out_start;
     std::size_t count;
@@ -33,7 +33,7 @@ struct MergedNodes {
 };
 
 template <typename T, typename MemberPtr>
-NoInitArray<T> concat(std::vector<ThreadGraph>& graphs, MemberPtr member, ThreadPool& pool)
+NoInitArray<T> concat(std::vector<WorkerGraph>& graphs, MemberPtr member, ThreadPool& pool)
 {
     if (graphs.empty()) {
         return {};
@@ -65,14 +65,14 @@ NoInitArray<T> concat(std::vector<ThreadGraph>& graphs, MemberPtr member, Thread
     return out;
 }
 
-NoInitArray<ThreadNode> concat_nodes(std::vector<ThreadGraph>& graphs, ThreadPool& pool)
+NoInitArray<WorkerNode> concat_nodes(std::vector<WorkerGraph>& graphs, ThreadPool& pool)
 {
-    return concat<ThreadNode>(graphs, &ThreadGraph::nodes, pool);
+    return concat<WorkerNode>(graphs, &WorkerGraph::nodes, pool);
 }
 
-NoInitArray<ThreadEdge> concat_edges(std::vector<ThreadGraph>& graphs, ThreadPool& pool)
+NoInitArray<WorkerEdge> concat_edges(std::vector<WorkerGraph>& graphs, ThreadPool& pool)
 {
-    return concat<ThreadEdge>(graphs, &ThreadGraph::edges, pool);
+    return concat<WorkerEdge>(graphs, &WorkerGraph::edges, pool);
 }
 
 template <typename T, typename KeyPtr>
@@ -149,12 +149,12 @@ static void lsd_radix_sort(
 }
 
 /**
- * @brief Sort thread-local nodes by hash and collect unique hashes in ascending order.
+ * @brief Sort worker-local nodes by hash and collect unique hashes in ascending order.
  *
- * The sorted `ThreadNode` array is subsequently consumed by `merge_nodes()`.
+ * The sorted `WorkerNode` array is subsequently consumed by `merge_nodes()`.
  */
 static std::pair<std::vector<std::uint64_t>, std::size_t> sort_nodes(
-    NoInitArray<ThreadNode>& nodes,
+    NoInitArray<WorkerNode>& nodes,
     ThreadPool& pool
 ) {
     const std::size_t n_nodes = nodes.size();
@@ -162,7 +162,7 @@ static std::pair<std::vector<std::uint64_t>, std::size_t> sort_nodes(
         return {};
     }
 
-    lsd_radix_sort(nodes, true, pool, &ThreadNode::hash);
+    lsd_radix_sort(nodes, true, pool, &WorkerNode::hash);
 
     std::vector<std::uint64_t> node_hashes;
     node_hashes.reserve(n_nodes);
@@ -181,15 +181,15 @@ static std::pair<std::vector<std::uint64_t>, std::size_t> sort_nodes(
 }
 
 /**
- * @brief Materialize final nodes and k-mer metadata from sorted thread nodes.
+ * @brief Materialize final nodes and k-mer metadata from sorted worker nodes.
  *
  * The input must already be sorted by hash. Nodes with identical hashes are
  * merged while producing either k-mer segments or low-memory k-mer maps.
  */
 static MergedNodes merge_nodes(
-    const NoInitArray<ThreadNode>& nodes,
+    const NoInitArray<WorkerNode>& nodes,
     std::size_t unique_count,
-    const std::vector<ThreadGraph>& graphs,
+    const std::vector<WorkerGraph>& graphs,
     bool low_memory
 ) {
     MergedNodes merged;
@@ -223,10 +223,10 @@ static MergedNodes merge_nodes(
             const auto count = nodes[i].count;
 
             if (low_memory) {
-                merged.kmer_maps[nodes[i].thread_id][hash] = n_kmers;
+                merged.kmer_maps[nodes[i].worker_id][hash] = n_kmers;
             } else {
                 merged.kmer_segments.push_back(KmerSegment{
-                    nodes[i].thread_id,
+                    nodes[i].worker_id,
                     nodes[i].start,
                     n_kmers,
                     count
@@ -242,9 +242,9 @@ static MergedNodes merge_nodes(
 }
 
 static NoInitArray<Kmer> merge_kmers(
-    const std::vector<ThreadGraph>& graphs,
+    const std::vector<WorkerGraph>& graphs,
     const std::vector<KmerSegment>& kmer_segments,
-    const std::vector<std::uint32_t>& thread_record_offsets,
+    const std::vector<std::uint32_t>& worker_record_offsets,
     ThreadPool& pool
 ) {
     std::size_t total_kmers = 0;
@@ -256,8 +256,8 @@ static NoInitArray<Kmer> merge_kmers(
     pool.parallel_for(kmer_segments.size(), [&](std::size_t start, std::size_t end, std::size_t) {
         for (std::size_t s = start; s < end; ++s) {
             const auto& segment = kmer_segments[s];
-            const auto& local_kmers = graphs[segment.thread_id].kmers;
-            const auto offset = thread_record_offsets[segment.thread_id];
+            const auto& local_kmers = graphs[segment.worker_id].kmers;
+            const auto offset = worker_record_offsets[segment.worker_id];
 
             for (std::size_t k = 0; k < segment.count; ++k) {
                 auto kmer = local_kmers[segment.local_start + k];
@@ -270,13 +270,13 @@ static NoInitArray<Kmer> merge_kmers(
 }
 
 /**
- * @brief Convert thread-local edge endpoints from hashes to node indices, and merge duplicates.
+ * @brief Convert worker-local edge endpoints from hashes to node indices, and merge duplicates.
  *
  * `node_hashes` must contain the unique node hashes in ascending order (the final node order).
  * The underlying memory of `edges` and `node_hashes` is released before returning.
  */
 static NoInitArray<Edge> finalize_edges(
-    NoInitArray<ThreadEdge>& edges,
+    NoInitArray<WorkerEdge>& edges,
     std::vector<std::uint64_t>& node_hashes,
     ThreadPool& pool
 ) {
@@ -289,7 +289,7 @@ static NoInitArray<Edge> finalize_edges(
     }
 
     // Convert the second endpoints to node indices
-    lsd_radix_sort(edges, true, pool, &ThreadEdge::second);
+    lsd_radix_sort(edges, true, pool, &WorkerEdge::second);
     std::size_t node_i = 0;
     for (auto& edge : edges) {
         while (node_i < n_nodes && node_hashes[node_i] < edge.second) {
@@ -302,7 +302,7 @@ static NoInitArray<Edge> finalize_edges(
     }
 
     // Convert the first endpoints to node indices, and aggregate weights
-    lsd_radix_sort(edges, true, pool, &ThreadEdge::first);
+    lsd_radix_sort(edges, true, pool, &WorkerEdge::first);
     node_i = 0;
     std::size_t write_i = 0;
     for (auto& edge : edges) {
@@ -313,7 +313,7 @@ static NoInitArray<Edge> finalize_edges(
             throw std::logic_error("Edge endpoint does not correspond to a node");
         }
 
-        const ThreadEdge converted{node_i, edge.second, edge.weight};
+        const WorkerEdge converted{node_i, edge.second, edge.weight};
         if (
             write_i != 0 &&
             edges[write_i - 1].first == converted.first &&
@@ -343,8 +343,8 @@ static NoInitArray<Edge> finalize_edges(
 
 } // namespace
 
-std::pair<Graph, KmerMaps> merge_thread_graphs(
-    std::vector<ThreadGraph>& graphs,
+std::pair<Graph, KmerMaps> merge_worker_graphs(
+    std::vector<WorkerGraph>& graphs,
     std::size_t n_assemblies,
     ThreadPool& pool,
     bool low_memory
@@ -382,10 +382,11 @@ std::pair<Graph, KmerMaps> merge_thread_graphs(
         };
     }
 
-    log_python(" - Merging from " + std::to_string(graphs.size()) + " threads...");
+    log_python(" - Merging from " + std::to_string(graphs.size()) + " workers...");
 
-    // Merge record offsets
-    std::vector<std::uint32_t> thread_record_offsets(graphs.size());
+    // Record index offsets in each worker
+    std::vector<std::uint32_t> worker_record_offsets(graphs.size());
+    // Record index offsets in each assembly
     std::vector<std::uint32_t> record_offsets;
     record_offsets.reserve(n_assemblies + 1);
     record_offsets.push_back(0);
@@ -395,7 +396,7 @@ std::pair<Graph, KmerMaps> merge_thread_graphs(
         auto& local_offsets = graphs[t].record_offsets;
 
         const auto base = total_records;
-        thread_record_offsets[t] = base;
+        worker_record_offsets[t] = base;
         if (local_offsets.back() > std::numeric_limits<std::uint32_t>::max() - total_records) {
             throw std::runtime_error("Total number of FASTA records exceeds uint32 range");
         }
@@ -407,17 +408,17 @@ std::pair<Graph, KmerMaps> merge_thread_graphs(
         std::vector<std::uint32_t>().swap(local_offsets);
     }
 
-    auto thread_nodes = concat_nodes(graphs, pool);
-    auto [node_hashes, unique_count] = sort_nodes(thread_nodes, pool);
-    auto thread_edges = concat_edges(graphs, pool);
-    auto edges = finalize_edges(thread_edges, node_hashes, pool);
+    auto worker_nodes = concat_nodes(graphs, pool);
+    auto [node_hashes, unique_count] = sort_nodes(worker_nodes, pool);
+    auto worker_edges = concat_edges(graphs, pool);
+    auto edges = finalize_edges(worker_edges, node_hashes, pool);
 
-    auto merged = merge_nodes(thread_nodes, unique_count, graphs, low_memory);
-    thread_nodes.reset();
+    auto merged = merge_nodes(worker_nodes, unique_count, graphs, low_memory);
+    worker_nodes.reset();
 
     NoInitArray<Kmer> kmers;
     if (!low_memory) {
-        kmers = merge_kmers(graphs, merged.kmer_segments, thread_record_offsets, pool);
+        kmers = merge_kmers(graphs, merged.kmer_segments, worker_record_offsets, pool);
         for (auto& graph : graphs) {
             graph.kmers.reset();
         }
