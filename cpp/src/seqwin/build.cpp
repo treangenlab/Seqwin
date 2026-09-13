@@ -189,10 +189,10 @@ ThreadGraph build_worker(
     }
 
     // Materialize edges first to reduce peak memory
-    graph.edges = NoInitArray<Edge>(edge_map.size());
+    graph.edges = NoInitArray<ThreadEdge>(edge_map.size());
     std::size_t edge_i = 0;
     for (const auto& [key, state] : edge_map) {
-        graph.edges[edge_i++] = Edge{key.first, key.second, state.weight};
+        graph.edges[edge_i++] = ThreadEdge{key.first, key.second, state.weight};
     }
     EdgeMap{}.swap(edge_map);
 
@@ -266,6 +266,10 @@ NoInitArray<Kmer> recompute_kmers(
     KmerMaps& kmer_maps,
     ThreadPool& pool
 ) {
+    if (kmer_maps.size() != graphs.size()) {
+        throw std::logic_error("Low-memory k-mer map count does not match worker graph count");
+    }
+
     std::size_t total_kmers = 0;
     for (const auto& graph : graphs) {
         total_kmers += graph.n_kmers;

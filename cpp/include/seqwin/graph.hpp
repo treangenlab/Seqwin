@@ -128,15 +128,13 @@ struct Node {
 
 /**
  * @brief Undirected weighted edge between two graph nodes.
- *
- * Worker-graph endpoints are minimizer hashes. In the final graph,
- * endpoints are indices into that graph's node array.
+ * Endpoints are indices into the graph's node array `Graph.nodes`.
  */
 struct Edge {
     /** Index of the smaller endpoint in the graph's node array. */
-    std::uint64_t first;
+    std::size_t first;
     /** Index of the larger endpoint in the graph's node array. */
-    std::uint64_t second;
+    std::size_t second;
     /** Number of assemblies where the endpoints are adjacent. */
     std::size_t weight;
 };

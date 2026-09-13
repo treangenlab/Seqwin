@@ -54,8 +54,8 @@ NODE_DTYPE = np.dtype([
 ])
 
 EDGE_DTYPE = np.dtype([
-    ("first", np.uint64),
-    ("second", np.uint64),
+    ("first", np.uintp),
+    ("second", np.uintp),
     ("weight", np.uintp),
 ])
 
@@ -110,8 +110,8 @@ class KmerGraph:
             - 'penalty' (float64): Node penalty score. Initialized to 0.0.
         edges (NDArray[np.void]): A 1-D NumPy structured array of weighted, undirected edges.
             Dtype: `EDGE_DTYPE`
-            - 'first' (uint64): Index of the smaller endpoint in `nodes`.
-            - 'second' (uint64): Index of the larger endpoint in `nodes`.
+            - 'first' (uintp): Index of the smaller endpoint in `nodes`.
+            - 'second' (uintp): Index of the larger endpoint in `nodes`.
             - 'weight' (uintp): Number of assemblies where the endpoints are adjacent.
         record_offsets (NDArray[np.uint32]): Cumulative global FASTA record offsets by assembly.
         record_ids (NDArray[np.str\_]): FASTA record IDs in global record order.

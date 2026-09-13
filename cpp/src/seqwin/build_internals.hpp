@@ -34,6 +34,18 @@ struct ThreadNode {
 };
 
 /**
+ * @brief Thread-local edge whose endpoints are minimizer hashes.
+ */
+struct ThreadEdge {
+    /** Hash of the smaller minimizer endpoint. */
+    std::uint64_t first;
+    /** Hash of the larger minimizer endpoint. */
+    std::uint64_t second;
+    /** Number of assemblies where the endpoints are adjacent. */
+    std::size_t weight;
+};
+
+/**
  * @brief Partial minimizer graph built by one worker thread.
  */
 struct ThreadGraph {
@@ -41,8 +53,8 @@ struct ThreadGraph {
     NoInitArray<Kmer> kmers;
     /** Unsorted. */
     NoInitArray<ThreadNode> nodes;
-    /** Unsorted; endpoints are minimizer hashes. */
-    NoInitArray<Edge> edges;
+    /** Unsorted. */
+    NoInitArray<ThreadEdge> edges;
     /** Thread-local cumulative FASTA record offsets by assembly. */
     std::vector<std::uint32_t> record_offsets;
     /** FASTA record IDs in this worker's global assembly order. */
@@ -57,12 +69,6 @@ struct ThreadGraph {
     std::size_t end_assembly = 0;
 };
 
-/**
- * @brief Per-thread maps from a minimizer hash to its start position in `Graph.kmers`.
- *
- * Each thread/hash pair owns a disjoint segment inside `Graph.kmers`.
- * When building `Graph.kmers` in the low memory mode, these starts are mutated as cursors.
- */
 using KmerMap = ankerl::unordered_dense::map<
     std::uint64_t,
     std::size_t,
@@ -72,6 +78,12 @@ using KmerMap = ankerl::unordered_dense::map<
     ankerl::unordered_dense::bucket_type::big
 >;
 
+/**
+ * @brief Per-thread maps from a minimizer hash to its start position in `Graph.kmers`.
+ *
+ * Each thread/hash pair owns a disjoint segment inside `Graph.kmers`.
+ * When building `Graph.kmers` in the low memory mode, these starts are mutated as cursors.
+ */
 using KmerMaps = std::vector<KmerMap>;
 
 /**

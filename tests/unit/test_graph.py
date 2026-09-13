@@ -137,6 +137,8 @@ def test_dtype_layouts() -> None:
     assert NODE_DTYPE.itemsize == 40
 
     assert EDGE_DTYPE.names == ("first", "second", "weight")
+    assert EDGE_DTYPE["first"] == np.dtype(np.uintp)
+    assert EDGE_DTYPE["second"] == np.dtype(np.uintp)
     assert EDGE_DTYPE["weight"] == np.dtype(np.uintp)
     assert EDGE_DTYPE.itemsize == 24
     assert EDGE_DTYPE.fields["first"][1] == 0
@@ -188,6 +190,21 @@ def test_build_threading_equivalence(targets_dir, non_targets_dir) -> None:
     _assert_edges_weight_sorted(edges_2)
     _assert_edges_weight_sorted(edges_many)
     _assert_indexed_edges(nodes_1, edges_1)
+
+
+def test_duplicate_edges_across_workers_are_aggregated(tmp_path: Path) -> None:
+    assembly_paths = [tmp_path / f'assembly-{i}.fasta' for i in range(2)]
+    for path in assembly_paths:
+        path.write_text('>record\nACGTTGCATGTCGCATGATGCATGAGAGCT\n')
+
+    single_worker = KmerGraph(assembly_paths, kmerlen=5, windowsize=6, n_cpu=1)
+    multiple_workers = KmerGraph(assembly_paths, kmerlen=5, windowsize=6, n_cpu=2)
+
+    assert len(multiple_workers.edges) > 0
+    assert np.all(multiple_workers.edges['weight'] == 2)
+    assert np.array_equal(multiple_workers.edges, single_worker.edges)
+    _assert_edges_weight_sorted(multiple_workers.edges)
+    _assert_indexed_edges(multiple_workers.nodes, multiple_workers.edges)
 
 
 def test_multi_thread_record_offsets_and_global_record_indices(tmp_path: Path) -> None:

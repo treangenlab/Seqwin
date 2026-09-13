@@ -70,9 +70,9 @@ NoInitArray<ThreadNode> concat_nodes(std::vector<ThreadGraph>& graphs, ThreadPoo
     return concat<ThreadNode>(graphs, &ThreadGraph::nodes, pool);
 }
 
-NoInitArray<Edge> concat_edges(std::vector<ThreadGraph>& graphs, ThreadPool& pool)
+NoInitArray<ThreadEdge> concat_edges(std::vector<ThreadGraph>& graphs, ThreadPool& pool)
 {
-    return concat<Edge>(graphs, &ThreadGraph::edges, pool);
+    return concat<ThreadEdge>(graphs, &ThreadGraph::edges, pool);
 }
 
 template <typename T, typename KeyPtr>
@@ -149,47 +149,60 @@ static void lsd_radix_sort(
 }
 
 /**
- * @brief Sort and merge thread-local nodes with identical hashes.
+ * @brief Sort thread-local nodes by hash and collect unique hashes in ascending order.
  *
- * 1. Sort nodes by hash.
- * 2. Merge nodes with the same hash into final graph nodes.
- * 3. Track k-mer output positions to build the final `kmers`.
+ * The sorted `ThreadNode` array is subsequently consumed by `merge_nodes()`.
+ */
+static std::pair<std::vector<std::uint64_t>, std::size_t> sort_nodes(
+    NoInitArray<ThreadNode>& nodes,
+    ThreadPool& pool
+) {
+    const std::size_t n_nodes = nodes.size();
+    if (n_nodes == 0) {
+        return {};
+    }
+
+    lsd_radix_sort(nodes, true, pool, &ThreadNode::hash);
+
+    std::vector<std::uint64_t> node_hashes;
+    node_hashes.reserve(n_nodes);
+    std::size_t i = 0;
+    while (i < n_nodes) {
+        const auto hash = nodes[i].hash;
+        node_hashes.push_back(hash);
+        while (i < n_nodes && nodes[i].hash == hash) {
+            ++i;
+        }
+    }
+    node_hashes.shrink_to_fit();
+
+    const auto unique_count = node_hashes.size();
+    return {std::move(node_hashes), unique_count};
+}
+
+/**
+ * @brief Materialize final nodes and k-mer metadata from sorted thread nodes.
  *
- * @param nodes Thread-local node array to sort and merge.
- * @param graphs Thread-local graphs used to size k-mer maps.
- * @param pool Thread pool used for radix sorting.
- * @param low_memory Whether to emit k-mer maps or k-mer segments.
- * @return Final merged nodes and mode-specific k-mer position metadata.
+ * The input must already be sorted by hash. Nodes with identical hashes are
+ * merged while producing either k-mer segments or low-memory k-mer maps.
  */
 static MergedNodes merge_nodes(
-    NoInitArray<ThreadNode>& nodes,
+    const NoInitArray<ThreadNode>& nodes,
+    std::size_t unique_count,
     const std::vector<ThreadGraph>& graphs,
-    ThreadPool& pool,
     bool low_memory
 ) {
     MergedNodes merged;
-    merged.kmer_maps = KmerMaps(graphs.size());
+    if (low_memory) {
+        merged.kmer_maps = KmerMaps(graphs.size());
+    }
 
     const std::size_t n_nodes = nodes.size();
     if (n_nodes == 0) {
         return merged;
     }
 
-    lsd_radix_sort(nodes, true, pool, &ThreadNode::hash);
-
-    // Determine final node count
-    std::size_t unique_count = 0;
-    std::size_t i = 0;
-    while (i < n_nodes) {
-        const auto hash = nodes[i].hash;
-        while (i < n_nodes && nodes[i].hash == hash) {
-            ++i;
-        }
-        ++unique_count;
-    }
     merged.nodes = NoInitArray<Node>(unique_count);
-
-    // Aggregate nodes and track final kmer output positions
     if (low_memory) {
         for (std::size_t i = 0; i < graphs.size(); ++i) {
             merged.kmer_maps[i].reserve(graphs[i].n_nodes);
@@ -198,9 +211,10 @@ static MergedNodes merge_nodes(
         merged.kmer_segments.reserve(n_nodes);
     }
 
+    // Aggregate nodes and track final kmer output positions
     std::size_t n_kmers = 0;
     std::size_t write_i = 0;
-    i = 0;
+    std::size_t i = 0;
     while (i < n_nodes) {
         const auto hash = nodes[i].hash;
         const auto start = n_kmers;
@@ -255,44 +269,51 @@ static NoInitArray<Kmer> merge_kmers(
     return kmers;
 }
 
-static void finalize_edges(
-    NoInitArray<Edge>& edges,
-    const NoInitArray<Node>& nodes, // Sorted by hash
+/**
+ * @brief Convert thread-local edge endpoints from hashes to node indices, and merge duplicates.
+ *
+ * `node_hashes` must contain the unique node hashes in ascending order (the final node order).
+ * The underlying memory of `edges` and `node_hashes` is released before returning.
+ */
+static NoInitArray<Edge> finalize_edges(
+    NoInitArray<ThreadEdge>& edges,
+    std::vector<std::uint64_t>& node_hashes,
     ThreadPool& pool
 ) {
     const std::size_t n_edges = edges.size();
-    const std::size_t n_nodes = nodes.size();
+    const std::size_t n_nodes = node_hashes.size();
     if (n_edges == 0 || n_nodes == 0) {
         edges.reset();
-        return;
+        std::vector<std::uint64_t>().swap(node_hashes);
+        return {};
     }
 
     // Convert the second endpoints to node indices
-    lsd_radix_sort(edges, true, pool, &Edge::second);
+    lsd_radix_sort(edges, true, pool, &ThreadEdge::second);
     std::size_t node_i = 0;
     for (auto& edge : edges) {
-        while (node_i < n_nodes && nodes[node_i].hash < edge.second) {
+        while (node_i < n_nodes && node_hashes[node_i] < edge.second) {
             ++node_i;
         }
-        if (node_i == n_nodes || nodes[node_i].hash != edge.second) {
+        if (node_i == n_nodes || node_hashes[node_i] != edge.second) {
             throw std::logic_error("Edge endpoint does not correspond to a node");
         }
         edge.second = node_i;
     }
 
     // Convert the first endpoints to node indices, and aggregate weights
-    lsd_radix_sort(edges, true, pool, &Edge::first);
+    lsd_radix_sort(edges, true, pool, &ThreadEdge::first);
     node_i = 0;
     std::size_t write_i = 0;
     for (auto& edge : edges) {
-        while (node_i < n_nodes && nodes[node_i].hash < edge.first) {
+        while (node_i < n_nodes && node_hashes[node_i] < edge.first) {
             ++node_i;
         }
-        if (node_i == n_nodes || nodes[node_i].hash != edge.first) {
+        if (node_i == n_nodes || node_hashes[node_i] != edge.first) {
             throw std::logic_error("Edge endpoint does not correspond to a node");
         }
 
-        const Edge converted{node_i, edge.second, edge.weight};
+        const ThreadEdge converted{node_i, edge.second, edge.weight};
         if (
             write_i != 0 &&
             edges[write_i - 1].first == converted.first &&
@@ -303,12 +324,21 @@ static void finalize_edges(
             edges[write_i++] = converted;
         }
     }
+    std::vector<std::uint64_t>().swap(node_hashes);
+
     NoInitArray<Edge> out(write_i);
-    std::copy(edges.begin(), edges.begin() + write_i, out.begin());
-    edges = std::move(out);
+    for (std::size_t i = 0; i < write_i; ++i) {
+        out[i] = Edge{
+            static_cast<std::size_t>(edges[i].first),
+            static_cast<std::size_t>(edges[i].second),
+            edges[i].weight
+        };
+    }
+    edges.reset();
 
     // Sort by descending weight
-    lsd_radix_sort(edges, false, pool, &Edge::weight);
+    lsd_radix_sort(out, false, pool, &Edge::weight);
+    return out;
 }
 
 } // namespace
@@ -322,10 +352,11 @@ std::pair<Graph, KmerMaps> merge_thread_graphs(
     if (graphs.size() == 1) {
         auto& graph = graphs[0];
 
-        auto merged = merge_nodes(graph.nodes, graphs, pool, low_memory);
-        graph.nodes.reset();
+        auto [node_hashes, unique_count] = sort_nodes(graph.nodes, pool);
+        auto edges = finalize_edges(graph.edges, node_hashes, pool);
 
-        finalize_edges(graph.edges, merged.nodes, pool);
+        auto merged = merge_nodes(graph.nodes, unique_count, graphs, low_memory);
+        graph.nodes.reset();
 
         NoInitArray<Kmer> kmers;
         if (!low_memory) {
@@ -343,7 +374,7 @@ std::pair<Graph, KmerMaps> merge_thread_graphs(
             Graph{
                 std::move(kmers),
                 std::move(merged.nodes),
-                std::move(graph.edges),
+                std::move(edges),
                 std::move(graph.record_offsets),
                 std::move(graph.record_ids)
             },
@@ -377,11 +408,12 @@ std::pair<Graph, KmerMaps> merge_thread_graphs(
     }
 
     auto thread_nodes = concat_nodes(graphs, pool);
-    auto merged = merge_nodes(thread_nodes, graphs, pool, low_memory);
-    thread_nodes.reset();
+    auto [node_hashes, unique_count] = sort_nodes(thread_nodes, pool);
+    auto thread_edges = concat_edges(graphs, pool);
+    auto edges = finalize_edges(thread_edges, node_hashes, pool);
 
-    auto edges = concat_edges(graphs, pool);
-    finalize_edges(edges, merged.nodes, pool);
+    auto merged = merge_nodes(thread_nodes, unique_count, graphs, low_memory);
+    thread_nodes.reset();
 
     NoInitArray<Kmer> kmers;
     if (!low_memory) {
@@ -400,6 +432,7 @@ std::pair<Graph, KmerMaps> merge_thread_graphs(
             std::make_move_iterator(graph.record_ids.begin()),
             std::make_move_iterator(graph.record_ids.end())
         );
+        std::vector<std::string>().swap(graph.record_ids);
     }
 
     return {
