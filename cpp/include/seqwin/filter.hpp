@@ -9,7 +9,8 @@
 
 namespace seqwin {
 
-using Subgraphs = std::vector<std::vector<std::uint64_t>>;
+/** @brief Represented by indices into `FilterResult.nodes`. */
+using Subgraphs = std::vector<std::vector<std::size_t>>;
 
 /**
  * @brief Part of Seqwin configurations.
@@ -29,11 +30,11 @@ struct FilterConfig {
 
 /**
  * @brief Includes filtered graph arrays, low-penalty subgraphs and calculated values.
+ * Filtered nodes and edges follow their original order.
  */
 struct FilterResult {
-    NoInitArray<Kmer> kmers;
     NoInitArray<Node> nodes;
-    std::vector<Edge> edges;
+    NoInitArray<Edge> edges;
     Subgraphs subgraphs;
     std::size_t total_tar;
     std::size_t total_neg;

@@ -170,7 +170,6 @@ PYBIND11_MODULE(_core, m) {
             }
 
             return py::make_tuple(
-                array_to_numpy(std::move(result.kmers)),
                 array_to_numpy(std::move(result.nodes)),
                 array_to_numpy(std::move(result.edges)),
                 std::move(result.subgraphs),

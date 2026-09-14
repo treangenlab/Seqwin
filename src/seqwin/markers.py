@@ -328,18 +328,13 @@ def _get_create_ck_args(
     record_offsets = graph.record_offsets
     is_targets = assemblies.is_targets
 
-    # create a dict of hash -> k-mer group
-    kmer_groups = dict()
-    for node in nodes:
-        h, start, stop = node['hash'], node['start'], node['stop']
-        kmer_groups[h] = kmers[start:stop]
-
     # yield function args
     for sg in subgraphs:
-        # each subgraph is a set of nodes, so it's not ordered
-        arg_nodes = tuple(sg) # fixate node order
+        sg_nodes = nodes[sg]
+        arg_nodes = tuple(sg_nodes['hash'])
         arg_kmers = tuple(
-            kmer_groups.pop(h) for h in arg_nodes
+            kmers[start:stop]
+            for start, stop in zip(sg_nodes['start'], sg_nodes['stop'])
         )
 
         yield arg_nodes, arg_kmers, record_offsets, is_targets, kmerlen, windowsize

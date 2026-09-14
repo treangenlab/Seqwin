@@ -43,15 +43,15 @@ class FilteredGraph(KmerGraph):
     r"""The filtered minimizer graph class.
 
     Attributes:
-        kmers (NDArray[np.void]): Only includes k-mers with hashes in `subgraphs`.
-        nodes (NDArray[np.void]): Only includes nodes with hashes in `subgraphs`.
+        kmers (NDArray[np.void]): Inherited from `KmerGraph.kmers`.
+        nodes (NDArray[np.void]): Nodes retained by edge filtering.
         edges (NDArray[np.void]): Low-weight edges are filtered.
         record_offsets (NDArray[np.uint32]): Inherited from `KmerGraph.record_offsets`.
         record_ids (NDArray[np.str\_]): Inherited from `KmerGraph.record_ids`.
-        subgraphs (tuple[frozenset[np.uint64], ...]): Low-penalty subgraphs. Each subgraph is a set of k-mer hash values.
+        subgraphs (list[list[int]]): Low-penalty subgraphs represented by indices of retained nodes.
     """
     __slots__ = ('subgraphs',)
-    subgraphs: tuple[frozenset[np.uint64], ...]
+    subgraphs: list[list[int]]
 
     def __init__(
         self,
@@ -60,7 +60,7 @@ class FilteredGraph(KmerGraph):
         edges: NDArray[np.void],
         record_offsets: NDArray[np.uint32],
         record_ids: NDArray[np.str_],
-        subgraphs: tuple[frozenset[np.uint64], ...]
+        subgraphs: list[list[int]]
     ) -> None:
         """Initialized a filtered minimizer graph from computed graph data.
         """
@@ -122,8 +122,8 @@ def filter_graph(
         else:
             logger.error('Mash is not installed. Falling back to minimizer sketches.')
 
-    (kmers, nodes, edges, subgraphs,
-     total_tar, total_neg, penalty_th, edge_weight_th, min_nodes, max_nodes) =  _filter_native(
+    (nodes, edges, subgraphs, total_tar, total_neg,
+     penalty_th, edge_weight_th, min_nodes, max_nodes) =  _filter_native(
         graph.kmers,
         graph.nodes,
         graph.edges,
@@ -143,12 +143,12 @@ def filter_graph(
     )
 
     filtered = FilteredGraph(
-        kmers=kmers,
+        kmers=graph.kmers,
         nodes=nodes,
         edges=edges,
         record_offsets=graph.record_offsets,
         record_ids=graph.record_ids,
-        subgraphs=tuple(frozenset(map(np.uint64, subgraph)) for subgraph in subgraphs)
+        subgraphs=subgraphs
     )
     state.total_tar = total_tar
     state.total_neg = total_neg

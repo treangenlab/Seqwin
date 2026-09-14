@@ -166,35 +166,26 @@ FilterResult filter(
     );
 
     internal::log_python(" - Filtering graph edges and nodes...");
-    auto pruned = internal::prune_graph(
-        nodes, n_nodes, edges, n_edges, result.edge_weight_th
+    internal::prune_graph(
+        nodes, n_nodes, edges, n_edges, result.edge_weight_th, result
     );
     internal::log_python(
-        " - Removed " + std::to_string(n_edges - pruned.edges.size()) + " edges with weight<" +
-        format_value(result.edge_weight_th, 3) + ", " + std::to_string(pruned.edges.size()) + " edges left"
+        " - Removed " + std::to_string(n_edges - result.edges.size()) + " edges with weight<" +
+        format_value(result.edge_weight_th, 3) + ", " + std::to_string(result.edges.size()) + " edges left"
     );
     internal::log_python(
-        " - Removed " + std::to_string(n_nodes - pruned.nodes.size()) + " isolated nodes, " +
-        std::to_string(pruned.nodes.size()) + " nodes left"
+        " - Removed " + std::to_string(n_nodes - result.nodes.size()) + " isolated nodes, " +
+        std::to_string(result.nodes.size()) + " nodes left"
     );
 
-    auto [subgraphs, used_nodes] = internal::get_subgraphs(
-        pruned.nodes, pruned.edges, result.penalty_th, result.min_nodes, result.max_nodes
+    internal::get_subgraphs(
+        result.nodes, result.edges, result.penalty_th, result.min_nodes, result.max_nodes, result
     );
-    if (subgraphs.empty()) {
+    if (result.subgraphs.empty()) {
         throw std::runtime_error("No low-penalty subgraph was found. Try decrease --stringency, or increase --penalty-th");
     }
-    internal::log_python(" - Found " + std::to_string(subgraphs.size()) + " low-penalty subgraphs");
+    internal::log_python(" - Found " + std::to_string(result.subgraphs.size()) + " low-penalty subgraphs");
 
-    auto compacted = internal::compact_graph(
-        kmers, pruned.nodes, pruned.edges, std::move(used_nodes)
-    );
-    internal::log_python(" - " + std::to_string(compacted.kmers.size()) + " k-mers left");
-
-    result.kmers = std::move(compacted.kmers);
-    result.nodes = std::move(compacted.nodes);
-    result.edges = std::move(compacted.edges);
-    result.subgraphs = std::move(subgraphs);
     return result;
 }
 

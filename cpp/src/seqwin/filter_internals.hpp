@@ -32,7 +32,7 @@ public:
         Iterator end_;
     };
 
-    GraphTopology(const std::vector<Node>& nodes, const std::vector<Edge>& edges)
+    GraphTopology(const NoInitArray<Node>& nodes, const NoInitArray<Edge>& edges)
         : offsets_(nodes.size() + 1, 0)
     {
         for (const auto& edge : edges) {
@@ -68,24 +68,6 @@ private:
 };
 
 /**
- * @brief Nodes and edges follow their original order.
-*/
-struct PrunedGraph {
-    std::vector<Node> nodes;
-    std::vector<Edge> edges;
-};
-
-/**
- * @brief Node ranges are rewritten to index the compacted `kmers`.
- * `edges` contains only edges with two selected endpoints.
- */
-struct CompactedGraph {
-    NoInitArray<Kmer> kmers;
-    NoInitArray<Node> nodes;
-    std::vector<Edge> edges;
-};
-
-/**
  * @brief Calculate `n_tar`, `n_neg` and `penalty` for each node,
  * and update `nodes` in place.
  *
@@ -105,37 +87,28 @@ FilterResult get_penalty(
 
 /**
  * @brief Remove low-weight edges and isolated nodes.
+ * Filtered nodes and edges are stored directly in `result`.
  */
-PrunedGraph prune_graph(
+void prune_graph(
     const Node* nodes,
     std::size_t n_nodes,
     const Edge* edges,
     std::size_t n_edges,
-    double edge_weight_th
+    double edge_weight_th,
+    FilterResult& result
 );
 
 /**
  * @brief Grow disjoint low-penalty subgraphs from eligible seeds.
- *
- * @return Subgraphs represented by node hashes;
- * indices of all accepted nodes in `PrunedGraph.nodes`.
+ * Generated subgraphs are stored directly in `result`.
  */
-std::pair<Subgraphs, std::vector<std::size_t>> get_subgraphs(
-    const std::vector<Node>& nodes,
-    const std::vector<Edge>& edges,
+void get_subgraphs(
+    const NoInitArray<Node>& nodes,
+    const NoInitArray<Edge>& edges,
     double penalty_th,
     std::size_t min_nodes,
-    std::optional<std::size_t> max_nodes
-);
-
-/**
- * @brief Restrict a pruned graph to nodes used by accepted subgraphs.
- */
-CompactedGraph compact_graph(
-    const Kmer* kmers,
-    const std::vector<Node>& nodes,
-    const std::vector<Edge>& edges,
-    std::vector<std::size_t> used_nodes
+    std::optional<std::size_t> max_nodes,
+    FilterResult& result
 );
 
 } // namespace seqwin::internal
