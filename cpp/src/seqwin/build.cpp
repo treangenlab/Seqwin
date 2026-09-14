@@ -89,19 +89,19 @@ using EdgeMap = ankerl::unordered_dense::segmented_map<
 >;
 
 /**
- * @brief Builds the thread-local portion of a minimizer graph.
+ * @brief Builds the worker-local portion of a minimizer graph.
  *
- * In standard mode, materializes thread-local `kmers` (grouped by hash).
+ * In standard mode, materializes worker-local `kmers` (grouped by hash).
  * In low-memory mode, skips k-mer materialization and records only the node metadata
  * needed for second-pass k-mer recomputation.
  */
-ThreadGraph build_worker(
+WorkerGraph build_worker(
     const std::vector<std::string>& assembly_paths,
     std::size_t kmerlen,
     std::size_t windowsize,
     std::size_t start_assembly,
     std::size_t end_assembly,
-    std::size_t thread_id,
+    std::size_t worker_id,
     bool low_memory
 ) {
     // Estimate total minimizer count in all assemblies
@@ -116,7 +116,7 @@ ThreadGraph build_worker(
         raw_kmers.reserve(n_minimizers_est);
     }
 
-    ThreadGraph graph;
+    WorkerGraph graph;
     graph.record_offsets.reserve(end_assembly - start_assembly + 1);
     graph.record_offsets.push_back(0);
     graph.start_assembly = start_assembly;
@@ -189,19 +189,19 @@ ThreadGraph build_worker(
     }
 
     // Materialize edges first to reduce peak memory
-    graph.edges = NoInitArray<Edge>(edge_map.size());
+    graph.edges = NoInitArray<WorkerEdge>(edge_map.size());
     std::size_t edge_i = 0;
     for (const auto& [key, state] : edge_map) {
-        graph.edges[edge_i++] = Edge{key.first, key.second, state.weight};
+        graph.edges[edge_i++] = WorkerEdge{key.first, key.second, state.weight};
     }
     EdgeMap{}.swap(edge_map);
 
     graph.n_nodes = node_map.size();
-    graph.nodes = NoInitArray<ThreadNode>(graph.n_nodes);
+    graph.nodes = NoInitArray<WorkerNode>(graph.n_nodes);
     std::size_t node_i = 0;
 
     if (!low_memory) {
-        // Build ThreadGraph.kmers (grouped by hash)
+        // Build WorkerGraph.kmers (grouped by hash)
         graph.kmers = NoInitArray<Kmer>(graph.n_kmers);
 
         // node_map values are counts while assigning node ranges,
@@ -211,11 +211,11 @@ ThreadGraph build_worker(
             const std::size_t count = node_val;
             const std::size_t start = cursor;
 
-            graph.nodes[node_i++] = ThreadNode{
+            graph.nodes[node_i++] = WorkerNode{
                 hash,
                 start,
                 count,
-                thread_id
+                worker_id
             };
 
             node_val = start;
@@ -238,11 +238,11 @@ ThreadGraph build_worker(
     } else {
         // In low-memory mode node_map values remain counts
         for (const auto& [hash, count] : node_map) {
-            graph.nodes[node_i++] = ThreadNode{
+            graph.nodes[node_i++] = WorkerNode{
                 hash,
                 0,
                 count,
-                thread_id
+                worker_id
             };
         }
     }
@@ -255,17 +255,21 @@ ThreadGraph build_worker(
  * @brief Recomputes final `kmers` for a merged graph in low-memory mode.
  *
  * Replays each worker's assemblies, recomputes minimizers, and writes them directly
- * into their final `Graph.kmers` positions using the per-thread k-mer maps.
+ * into their final `Graph.kmers` positions using the per-worker k-mer maps.
  */
 NoInitArray<Kmer> recompute_kmers(
     const std::vector<std::string>& assembly_paths,
     std::size_t kmerlen,
     std::size_t windowsize,
-    const std::vector<ThreadGraph>& graphs,
+    const std::vector<WorkerGraph>& graphs,
     const std::vector<std::uint32_t>& record_offsets,
     KmerMaps& kmer_maps,
     ThreadPool& pool
 ) {
+    if (kmer_maps.size() != graphs.size()) {
+        throw std::logic_error("Low-memory k-mer map count does not match worker graph count");
+    }
+
     std::size_t total_kmers = 0;
     for (const auto& graph : graphs) {
         total_kmers += graph.n_kmers;
@@ -273,9 +277,9 @@ NoInitArray<Kmer> recompute_kmers(
     NoInitArray<Kmer> kmers(total_kmers);
 
     pool.parallel_for(graphs.size(), [&](std::size_t start, std::size_t end, std::size_t) {
-        for (std::size_t thread_id = start; thread_id < end; ++thread_id) {
-            const auto& graph = graphs[thread_id];
-            auto& hash_to_cursor = kmer_maps[thread_id];
+        for (std::size_t worker_id = start; worker_id < end; ++worker_id) {
+            const auto& graph = graphs[worker_id];
+            auto& hash_to_cursor = kmer_maps[worker_id];
 
             for (std::size_t assembly_i = graph.start_assembly;
                  assembly_i < graph.end_assembly;
@@ -341,22 +345,22 @@ Graph build(
     }
 
     internal::ThreadPool pool(n_workers); // Avoid spawning threads every time
-    std::vector<internal::ThreadGraph> graphs(n_workers);
+    std::vector<internal::WorkerGraph> graphs(n_workers);
 
     const std::size_t base = n_assemblies / n_workers;
     const std::size_t rem = n_assemblies % n_workers;
 
     pool.parallel_for(n_workers, [&](std::size_t start, std::size_t end, std::size_t) {
-        for (std::size_t thread_id = start; thread_id < end; ++thread_id) {
-            std::size_t start_assembly = thread_id * base + std::min(thread_id, rem);
-            std::size_t end_assembly = start_assembly + base + (thread_id < rem ? 1 : 0);
-            graphs[thread_id] = internal::build_worker(
+        for (std::size_t worker_id = start; worker_id < end; ++worker_id) {
+            std::size_t start_assembly = worker_id * base + std::min(worker_id, rem);
+            std::size_t end_assembly = start_assembly + base + (worker_id < rem ? 1 : 0);
+            graphs[worker_id] = internal::build_worker(
                 assembly_paths,
                 kmerlen,
                 windowsize,
                 start_assembly,
                 end_assembly,
-                thread_id,
+                worker_id,
                 low_memory
             );
         }
@@ -364,7 +368,7 @@ Graph build(
     // Release retained allocator pages of destroyed worker maps
     internal::trim_heap();
 
-    auto [graph, kmer_maps] = internal::merge_thread_graphs(
+    auto [graph, kmer_maps] = internal::merge_worker_graphs(
         graphs,
         n_assemblies,
         pool,

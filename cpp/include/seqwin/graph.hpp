@@ -127,13 +127,14 @@ struct Node {
 };
 
 /**
- * @brief Undirected weighted edge between two minimizers.
+ * @brief Undirected weighted edge between two graph nodes.
+ * Endpoints are indices into the graph's node array `Graph.nodes`.
  */
 struct Edge {
-    /** Smaller endpoint hash of the undirected edge. */
-    std::uint64_t first;
-    /** Larger endpoint hash of the undirected edge. */
-    std::uint64_t second;
+    /** Index of the smaller endpoint in the graph's node array. */
+    std::size_t first;
+    /** Index of the larger endpoint in the graph's node array. */
+    std::size_t second;
     /** Number of assemblies where the endpoints are adjacent. */
     std::size_t weight;
 };
@@ -149,7 +150,7 @@ struct Graph {
     NoInitArray<Kmer> kmers;
     /** Sorted by hash. */
     NoInitArray<Node> nodes;
-    /** Sorted by hash. */
+    /** Indexed into `nodes`; sorted by descending weight, then ascending endpoints. */
     NoInitArray<Edge> edges;
     /** Cumulative global FASTA record offsets by assembly. */
     std::vector<std::uint32_t> record_offsets;
