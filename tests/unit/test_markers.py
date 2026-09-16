@@ -467,14 +467,46 @@ def test_native_extract_config_controls_target_ratio_and_run_gap(tmp_path: Path)
 
     # A smaller multiplier splits the occurrences into single-k-mer runs, which
     # makes the candidate invalid; the supplied larger multiplier groups them.
-    assert _extract_native_fixture(
-        graph, assemblies, consec_kmer_mul=1.0,
-    ) == []
+    with pytest.raises(ValueError, match='no valid signatures'):
+        _extract_native_fixture(graph, assemblies, consec_kmer_mul=1.0)
     grouped = _extract_native_fixture(
         graph, assemblies, consec_kmer_mul=1.2,
     )
     assert len(grouped) == 1
     assert (grouped[0].location.n_kmers, grouped[0].location.n_repeats) == (2, 1)
 
-    with pytest.raises(ValueError, match='at least one target'):
-        _extract_native_fixture(graph, assemblies, total_tar=0)
+
+def test_native_sparse_assembly_requests_preserve_order_and_parallel_results(
+    tmp_path: Path,
+) -> None:
+    n_assemblies = 100_000
+    fasta = tmp_path / 'requested.fasta'
+    sequence = 'ACGT' * 20
+    fasta.write_text(f'>record-0\n{sequence}\n')
+    assembly_paths = [str(fasta)] * n_assemblies
+    is_targets = np.zeros(n_assemblies, dtype=np.bool_)
+    is_targets[-1] = True
+    record_offsets = np.arange(n_assemblies + 1, dtype=np.uint32)
+    kmers = np.array([
+        (2, n_assemblies - 1), (6, n_assemblies - 1),
+        (30, n_assemblies - 1), (34, n_assemblies - 1),
+    ], dtype=KMER_DTYPE)
+    nodes = np.array([
+        (101, 0, 1, 0, 0, 0.0), (102, 1, 2, 0, 0, 0.0),
+        (201, 2, 3, 0, 0, 0.0), (202, 3, 4, 0, 0, 0.0),
+    ], dtype=NODE_DTYPE)
+
+    def extract(n_cpu):
+        return _extract_native(
+            kmers, nodes, [[0, 1], [2, 3]], record_offsets, is_targets,
+            assembly_paths, KMERLEN, WINDOWSIZE, 0, 1, CONSEC_KMER_MUL, n_cpu,
+        )
+
+    serial = extract(1)
+    parallel = extract(2)
+
+    assert [signature.sequence for signature in serial] == [sequence[2:11], sequence[30:39]]
+    assert [signature.location.assembly_idx for signature in serial] == [n_assemblies - 1] * 2
+    assert [_native_fields(signature) for signature in parallel] == [
+        _native_fields(signature) for signature in serial
+    ]

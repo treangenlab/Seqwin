@@ -1,6 +1,7 @@
 #include "seqwin/extract.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <stdexcept>
 #include <utility>
 
@@ -18,8 +19,6 @@ struct FullKmer {
 };
 
 struct VectorHash {
-    using is_avalanching = void;
-
     std::uint64_t operator()(const std::vector<std::uint64_t>& values) const noexcept
     {
         std::uint64_t hash = UINT64_C(0xcbf29ce484222325);
@@ -32,10 +31,10 @@ struct VectorHash {
 };
 
 struct CanonicalCount {
-    std::vector<std::uint64_t> order;
     std::size_t count = 0;
     std::size_t forward_count = 0;
     std::size_t reverse_count = 0;
+    std::size_t first_seen = 0;
 };
 
 } // namespace
@@ -71,7 +70,6 @@ std::optional<Signature> extract_worker(
             sg_kmers.push_back({node.hash, kmers[i].record_idx, kmers[i].pos});
         }
     }
-
     std::stable_sort(sg_kmers.begin(), sg_kmers.end(), [](const auto& a, const auto& b) {
         if (a.record_idx != b.record_idx) {
             return a.record_idx < b.record_idx;
@@ -99,7 +97,9 @@ std::optional<Signature> extract_worker(
         }
 
         const std::size_t assembly_end_record = record_offsets[assembly_idx + 1];
-        ConsecutiveKmers best_run{};
+        std::size_t best_begin = begin;
+        std::size_t best_end = begin;
+        std::size_t best_run_size = 0;
         std::size_t n_repeats = 0;
         while (
             begin < sg_kmers.size() &&
@@ -109,73 +109,83 @@ std::optional<Signature> extract_worker(
             while (
                 end < sg_kmers.size() &&
                 sg_kmers[end].record_idx == sg_kmers[begin].record_idx &&
-                static_cast<double>(sg_kmers[end].pos - sg_kmers[end - 1].pos) <= max_gap
+                sg_kmers[end].pos - sg_kmers[end - 1].pos <= max_gap
             ) {
                 ++end;
             }
             ++n_repeats;
 
             const std::size_t run_size = end - begin;
-            if (run_size > best_run.location.n_kmers) {
-                best_run = ConsecutiveKmers{
-                    {
-                        assembly_idx,
-                        sg_kmers[begin].record_idx - record_offsets[assembly_idx],
-                        sg_kmers[begin].pos,
-                        static_cast<std::uint32_t>(sg_kmers[end - 1].pos + kmerlen),
-                        run_size,
-                        0 // n_repeats
-                    },
-                    is_targets[assembly_idx],
-                    {} // order
-                };
-                best_run.order.reserve(run_size);
-                for (std::size_t i = begin; i < end; ++i) {
-                    best_run.order.push_back(sg_kmers[i].hash);
-                }
+            if (run_size > best_run_size) {
+                best_begin = begin;
+                best_end = end;
+                best_run_size = run_size;
             }
             begin = end;
         }
-        best_run.location.n_repeats = n_repeats;
+
+        ConsecutiveKmers best_run{
+            {
+                static_cast<std::uint32_t>(assembly_idx),
+                sg_kmers[best_begin].record_idx - record_offsets[assembly_idx],
+                sg_kmers[best_begin].pos,
+                sg_kmers[best_end - 1].pos + static_cast<std::uint32_t>(kmerlen),
+                best_run_size,
+                n_repeats
+            },
+            is_targets[assembly_idx],
+            {} // order
+        };
+        best_run.order.reserve(best_run_size);
+        for (std::size_t i = best_begin; i < best_end; ++i) {
+            best_run.order.push_back(sg_kmers[i].hash);
+        }
         all_runs.push_back(std::move(best_run));
     }
 
-    std::vector<CanonicalCount> canonical_counts;
-    canonical_counts.reserve(all_runs.size());
     ankerl::unordered_dense::map<
         std::vector<std::uint64_t>,
-        std::size_t,
+        CanonicalCount,
         VectorHash
-    > indices; // Map a canonical order to its index in canonical_counts
-    indices.reserve(all_runs.size());
+    > canonical_counts;
+    canonical_counts.reserve(all_runs.size());
+    std::size_t first_seen = 0;
     for (const auto& run : all_runs) {
         if (!run.is_target) {
             continue;
         }
         std::vector<std::uint64_t> reverse(run.order.rbegin(), run.order.rend());
         const bool is_forward = run.order <= reverse;
-        const auto& key = is_forward ? run.order : reverse;
+        const auto& canonical_order = is_forward ? run.order : reverse;
 
-        auto [counts_it, inserted] = indices.try_emplace(key, canonical_counts.size());
+        auto [order_it, inserted] = canonical_counts.try_emplace(
+            canonical_order, CanonicalCount{0, 0, 0, first_seen}
+        );
         if (inserted) {
-            canonical_counts.push_back({key});
+            ++first_seen;
         }
-        auto& counts = canonical_counts[counts_it->second];
-        ++counts.count;
-        ++(is_forward ? counts.forward_count : counts.reverse_count);
+        auto& cnt = order_it->second;
+        ++cnt.count;
+        ++(is_forward ? cnt.forward_count : cnt.reverse_count);
     }
     if (canonical_counts.empty()) {
         throw std::invalid_argument("subgraph has no k-mers in target assemblies");
     }
 
     auto rep_canonical = canonical_counts.begin();
-    for (auto it = canonical_counts.begin() + 1; it != canonical_counts.end(); ++it) {
-        if (it->order.size() * it->count > rep_canonical->order.size() * rep_canonical->count) {
+    for (auto it = canonical_counts.begin(); it != canonical_counts.end(); ++it) {
+        const auto score = it->first.size() * it->second.count;
+        const auto rep_score = rep_canonical->first.size() * rep_canonical->second.count;
+        if (
+            score > rep_score ||
+            (score == rep_score && it->second.first_seen < rep_canonical->second.first_seen)
+        ) {
             rep_canonical = it;
         }
     }
-    auto rep_order = rep_canonical->order;
-    if (rep_canonical->reverse_count > rep_canonical->forward_count) {
+    auto rep_order = rep_canonical->first;
+    auto& rep_count = rep_canonical->second;
+    if (rep_count.reverse_count > rep_count.forward_count) {
         std::reverse(rep_order.begin(), rep_order.end());
     }
 
@@ -206,8 +216,8 @@ std::optional<Signature> extract_worker(
         rep_run->location,
         {}, // sequence
         length,
-        rep_canonical->count,
-        static_cast<double>(rep_canonical->count) / static_cast<double>(total_tar)
+        rep_count.count,
+        rep_count.count / static_cast<double>(total_tar)
     };
 }
 
@@ -216,24 +226,30 @@ void fetch_signature_sequences(
     const std::vector<std::string>& assembly_paths,
     ThreadPool& pool
 ) {
+    if (signatures.empty()) {
+        throw std::invalid_argument("no valid signatures found in subgraphs");
+    }
+
     struct RequestGroup {
-        std::size_t assembly_idx;
+        std::uint32_t assembly_idx;
         std::vector<std::size_t> signature_indices;
     };
 
     std::vector<RequestGroup> groups;
     groups.reserve(std::min(assembly_paths.size(), signatures.size()));
-    std::vector<std::size_t> group_indices(assembly_paths.size(), signatures.size());
+    ankerl::unordered_dense::map<std::uint32_t, std::size_t> group_indices;
+    group_indices.reserve(std::min(assembly_paths.size(), signatures.size()));
+
     for (std::size_t i = 0; i < signatures.size(); ++i) {
         const auto assembly_idx = signatures[i].location.assembly_idx;
         if (assembly_idx >= assembly_paths.size()) {
             throw std::runtime_error("signature assembly index is outside assembly paths");
         }
-        if (group_indices[assembly_idx] == signatures.size()) {
-            group_indices[assembly_idx] = groups.size();
+        auto [group_it, inserted] = group_indices.try_emplace(assembly_idx, groups.size());
+        if (inserted) {
             groups.push_back({assembly_idx, {}});
         }
-        groups[group_indices[assembly_idx]].signature_indices.push_back(i);
+        groups[group_it->second].signature_indices.push_back(i);
     }
 
     pool.parallel_for(groups.size(), [&](std::size_t begin, std::size_t end, std::size_t) {
@@ -276,6 +292,9 @@ std::vector<Signature> extract(
     }
     if (config.total_tar == 0) {
         throw std::invalid_argument("at least one target assembly is required");
+    }
+    if (!std::isfinite(config.consec_kmer_mul) || config.consec_kmer_mul <= 0.0) {
+        throw std::invalid_argument("consec_kmer_mul must be finite and greater than zero");
     }
     if (subgraphs.empty()) {
         return {};
