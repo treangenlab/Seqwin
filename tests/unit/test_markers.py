@@ -1,12 +1,14 @@
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 import seqwin.markers as markers
 from seqwin.assemblies import Assemblies
 from seqwin.graph import EDGE_DTYPE, KMER_DTYPE, NODE_DTYPE
 from seqwin.graph import _extract_native
 from seqwin.kmers import FilteredGraph
+from seqwin.config import CONSEC_KMER_MUL
 
 
 KMERLEN = 5
@@ -127,11 +129,16 @@ def _native_fields(signature):
     }
 
 
-def _extract_native_fixture(graph, assemblies, *, min_len=0, n_cpu=1):
+def _extract_native_fixture(
+    graph, assemblies, *, min_len=0, n_cpu=1,
+    total_tar=None, consec_kmer_mul=CONSEC_KMER_MUL,
+):
+    if total_tar is None:
+        total_tar = int(assemblies.is_targets.sum())
     return _extract_native(
         graph.kmers, graph.nodes, graph.subgraphs, graph.record_offsets,
         assemblies.is_targets, [str(path) for path in assemblies.paths],
-        KMERLEN, WINDOWSIZE, min_len, n_cpu,
+        KMERLEN, WINDOWSIZE, min_len, total_tar, consec_kmer_mul, n_cpu,
     )
 
 
@@ -421,3 +428,53 @@ def test_native_extraction_matches_characterized_python_behavior(tmp_path: Path)
         _native_fields(signature) for signature in serial
     ]
     assert [signature.subgraph_idx for signature in parallel] == [0, 1]
+
+
+def test_native_run_scanning_boundaries_and_ties(tmp_path: Path) -> None:
+    records = [['A' * 100, 'CGTACGTACGTACGTACGTA']]
+    subgraphs = [
+        # The final k-mer ends sg_kmers and the later separated repeat is shorter.
+        [
+            (1, 0, 0, 2), (2, 0, 0, 6), (3, 0, 0, 10),
+            (1, 0, 0, 50), (2, 0, 0, 54),
+        ],
+        # Equal runs do not cross records and the first sorted run wins.
+        [
+            (10, 0, 0, 80), (11, 0, 0, 84),
+            (10, 0, 1, 3), (11, 0, 1, 7),
+        ],
+    ]
+    assemblies = _write_assemblies(tmp_path, records, [True])
+    graph = _synthetic_graph(records, subgraphs)
+
+    signatures = _extract_native_fixture(graph, assemblies)
+
+    assert [signature.subgraph_idx for signature in signatures] == [0, 1]
+    assert _native_fields(signatures[0]) == {
+        'assembly_idx': 0, 'record_idx': 0, 'start': 2, 'stop': 15,
+        'n_kmers': 3, 'n_repeats': 2, 'seq': 'A' * 13,
+        'len': 13, 'n_rep': 1, 'rep_ratio': 1.0,
+    }
+    assert (signatures[1].location.record_idx, signatures[1].location.start) == (0, 80)
+    assert signatures[1].location.n_repeats == 2
+
+
+def test_native_extract_config_controls_target_ratio_and_run_gap(tmp_path: Path) -> None:
+    records = [['ACGT' * 30]]
+    subgraphs = [[(1, 0, 0, 2), (2, 0, 0, 14)]]
+    assemblies = _write_assemblies(tmp_path, records, [True])
+    graph = _synthetic_graph(records, subgraphs)
+
+    # A smaller multiplier splits the occurrences into single-k-mer runs, which
+    # makes the candidate invalid; the supplied larger multiplier groups them.
+    assert _extract_native_fixture(
+        graph, assemblies, consec_kmer_mul=1.0,
+    ) == []
+    grouped = _extract_native_fixture(
+        graph, assemblies, consec_kmer_mul=1.2,
+    )
+    assert len(grouped) == 1
+    assert (grouped[0].location.n_kmers, grouped[0].location.n_repeats) == (2, 1)
+
+    with pytest.raises(ValueError, match='at least one target'):
+        _extract_native_fixture(graph, assemblies, total_tar=0)

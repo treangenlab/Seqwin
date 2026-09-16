@@ -35,6 +35,8 @@ struct ExtractConfig {
     std::size_t kmerlen;
     std::size_t windowsize;
     std::size_t min_len;
+    std::size_t total_tar;
+    double consec_kmer_mul;
     std::size_t n_cpu;
 };
 

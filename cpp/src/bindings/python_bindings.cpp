@@ -225,13 +225,17 @@ PYBIND11_MODULE(_core, m) {
            std::size_t kmerlen,
            std::size_t windowsize,
            std::size_t min_len,
+           std::size_t total_tar,
+           double consec_kmer_mul,
            std::size_t n_cpu
         ) {
             require_1d_size(kmers, "kmers");
             const auto n_nodes = require_1d_size(nodes, "nodes");
             const auto n_record_offsets = require_1d_size(record_offsets, "record_offsets");
             const auto n_assemblies = require_1d_size(is_targets, "is_targets");
-            const seqwin::ExtractConfig config{kmerlen, windowsize, min_len, n_cpu};
+            const seqwin::ExtractConfig config{
+                kmerlen, windowsize, min_len, total_tar, consec_kmer_mul, n_cpu
+            };
             py::gil_scoped_release release;
             return seqwin::extract(kmers.data(), nodes.data(), n_nodes,
                 subgraphs, record_offsets.data(), n_record_offsets, is_targets.data(),
@@ -246,6 +250,8 @@ PYBIND11_MODULE(_core, m) {
         py::arg("kmerlen"),
         py::arg("windowsize"),
         py::arg("min_len"),
+        py::arg("total_tar"),
+        py::arg("consec_kmer_mul"),
         py::arg("n_cpu") = 1
     );
 

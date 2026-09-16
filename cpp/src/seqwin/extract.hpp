@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "seqwin/filter.hpp"
+#include "utils/thread_pool.hpp"
 
 namespace seqwin::internal {
 
@@ -28,13 +29,14 @@ std::optional<Signature> extract_worker(
     std::size_t kmerlen,
     std::size_t windowsize,
     std::size_t min_len,
-    std::size_t total_tar
+    std::size_t total_tar,
+    double consec_kmer_mul
 );
 
 void fetch_signature_sequences(
     std::vector<Signature>& signatures,
     const std::vector<std::string>& assembly_paths,
-    std::size_t n_cpu
+    ThreadPool& pool
 );
 
 } // namespace seqwin::internal

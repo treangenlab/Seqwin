@@ -4,55 +4,39 @@
 #include <stdexcept>
 #include <utility>
 
+#include <ankerl/unordered_dense.h>
+
 #include "utils/fasta_reader.hpp"
-#include "utils/thread_pool.hpp"
 
 namespace seqwin::internal {
 namespace {
 
-constexpr double CONSEC_KMER_MUL = 1.5;
-
 struct FullKmer {
     std::uint64_t hash;
-    std::uint32_t assembly_idx;
     std::uint32_t record_idx;
     std::uint32_t pos;
 };
 
-std::pair<std::uint32_t, std::uint32_t> locate_record(
-    std::uint32_t record_idx,
-    const std::uint32_t* record_offsets,
-    std::size_t n_record_offsets
-) {
-    const auto* idx = std::upper_bound(
-        record_offsets,
-        record_offsets + n_record_offsets,
-        record_idx
-    );
-    if (idx == record_offsets || idx == record_offsets + n_record_offsets) {
-        throw std::invalid_argument("k-mer record_idx is outside record_offsets");
-    }
-    const std::uint32_t assembly_idx = idx - record_offsets - 1;
-    return {assembly_idx, record_idx - record_offsets[assembly_idx]};
-}
+struct VectorHash {
+    using is_avalanching = void;
 
-std::vector<std::uint64_t> canonical(
-    const std::vector<std::uint64_t>& order
-) {
-    std::vector<std::uint64_t> reverse(order.rbegin(), order.rend());
-    return std::min(order, reverse);
-}
-
-std::size_t count_order(
-    const std::vector<ConsecutiveKmers>& runs,
-    const std::vector<std::uint64_t>& order
-) {
-    return static_cast<std::size_t>(std::count_if(
-        runs.begin(), runs.end(), [&](const ConsecutiveKmers& run) {
-            return run.is_target && run.order == order;
+    std::uint64_t operator()(const std::vector<std::uint64_t>& values) const noexcept
+    {
+        std::uint64_t hash = UINT64_C(0xcbf29ce484222325);
+        for (const auto value : values) {
+            hash ^= ankerl::unordered_dense::hash<std::uint64_t>{}(value);
+            hash *= UINT64_C(0x100000001b3);
         }
-    ));
-}
+        return hash;
+    }
+};
+
+struct CanonicalCount {
+    std::vector<std::uint64_t> order;
+    std::size_t count = 0;
+    std::size_t forward_count = 0;
+    std::size_t reverse_count = 0;
+};
 
 } // namespace
 
@@ -69,161 +53,195 @@ std::optional<Signature> extract_worker(
     std::size_t kmerlen,
     std::size_t windowsize,
     std::size_t min_len,
-    std::size_t total_tar
+    std::size_t total_tar,
+    double consec_kmer_mul
 ) {
     std::vector<FullKmer> sg_kmers; // K-mers of the current subgraph
+    std::size_t n_sg_kmers = 0;
     for (const auto node_idx : subgraph) {
         if (node_idx >= n_nodes) {
             throw std::invalid_argument("subgraph node index is out of bounds");
         }
-
+        n_sg_kmers += nodes[node_idx].stop - nodes[node_idx].start;
+    }
+    sg_kmers.reserve(n_sg_kmers);
+    for (const auto node_idx : subgraph) {
         const auto& node = nodes[node_idx];
         for (std::size_t i = node.start; i < node.stop; ++i) {
-            const auto [assembly_idx, local_record_idx] = locate_record(
-                kmers[i].record_idx, record_offsets, n_record_offsets
-            );
-            if (assembly_idx >= n_assemblies) {
-                throw std::invalid_argument("record_offsets refers to an unknown assembly");
-            }
-            sg_kmers.push_back({
-                node.hash,
-                assembly_idx,
-                local_record_idx,
-                kmers[i].pos
-            });
+            sg_kmers.push_back({node.hash, kmers[i].record_idx, kmers[i].pos});
         }
     }
 
     std::stable_sort(sg_kmers.begin(), sg_kmers.end(), [](const auto& a, const auto& b) {
-        if (a.assembly_idx != b.assembly_idx) return a.assembly_idx < b.assembly_idx;
-        if (a.record_idx != b.record_idx) return a.record_idx < b.record_idx;
-        return a.pos < b.pos;
+        if (a.record_idx != b.record_idx) {
+            return a.record_idx < b.record_idx;
+        } else {
+            return a.pos < b.pos;
+        }
     });
 
     std::vector<ConsecutiveKmers> all_runs;
-    const double max_gap = CONSEC_KMER_MUL * windowsize;
+    all_runs.reserve(std::min(n_assemblies, sg_kmers.size()));
+    const double max_gap = consec_kmer_mul * windowsize;
+    std::size_t assembly_idx = 0;
     for (std::size_t begin = 0; begin < sg_kmers.size();) {
-        const auto assembly_idx = sg_kmers[begin].assembly_idx;
-        std::vector<ConsecutiveKmers> assembly_runs;
+        while (
+            assembly_idx + 1 < n_record_offsets &&
+            sg_kmers[begin].record_idx >= record_offsets[assembly_idx + 1]
+        ) {
+            ++assembly_idx;
+        }
+        if (
+            assembly_idx >= n_assemblies ||
+            sg_kmers[begin].record_idx < record_offsets[assembly_idx]
+        ) {
+            throw std::invalid_argument("k-mer record_idx is outside record_offsets");
+        }
 
-        while (begin < sg_kmers.size() && sg_kmers[begin].assembly_idx == assembly_idx) {
+        const std::size_t assembly_end_record = record_offsets[assembly_idx + 1];
+        ConsecutiveKmers best_run{};
+        std::size_t n_repeats = 0;
+        while (
+            begin < sg_kmers.size() &&
+            sg_kmers[begin].record_idx < assembly_end_record
+        ) {
             std::size_t end = begin + 1;
-            const double gap = sg_kmers[end].pos - sg_kmers[end - 1].pos;
             while (
-                end < sg_kmers.size()
-                && sg_kmers[end].assembly_idx == assembly_idx
-                && sg_kmers[end].record_idx == sg_kmers[begin].record_idx
-                && gap <= max_gap
+                end < sg_kmers.size() &&
+                sg_kmers[end].record_idx == sg_kmers[begin].record_idx &&
+                static_cast<double>(sg_kmers[end].pos - sg_kmers[end - 1].pos) <= max_gap
             ) {
                 ++end;
             }
-            ConsecutiveKmers run{
-                {
-                    assembly_idx,
-                    sg_kmers[begin].record_idx,
-                    sg_kmers[begin].pos,
-                    static_cast<std::uint32_t>(sg_kmers[end - 1].pos + kmerlen),
-                    end - begin,
-                    0
-                },
-                is_targets[assembly_idx],
-                {}
-            };
-            run.order.reserve(end - begin);
-            for (std::size_t i = begin; i < end; ++i) {
-                run.order.push_back(sg_kmers[i].hash);
-            }
-            assembly_runs.push_back(std::move(run));
-            begin = end;
-        }
+            ++n_repeats;
 
-        if (!assembly_runs.empty()) {
-            auto best = assembly_runs.begin();
-            for (auto it = assembly_runs.begin() + 1; it != assembly_runs.end(); ++it) {
-                if (it->location.n_kmers > best->location.n_kmers) {
-                    best = it;
+            const std::size_t run_size = end - begin;
+            if (run_size > best_run.location.n_kmers) {
+                best_run = ConsecutiveKmers{
+                    {
+                        assembly_idx,
+                        sg_kmers[begin].record_idx - record_offsets[assembly_idx],
+                        sg_kmers[begin].pos,
+                        static_cast<std::uint32_t>(sg_kmers[end - 1].pos + kmerlen),
+                        run_size,
+                        0 // n_repeats
+                    },
+                    is_targets[assembly_idx],
+                    {} // order
+                };
+                best_run.order.reserve(run_size);
+                for (std::size_t i = begin; i < end; ++i) {
+                    best_run.order.push_back(sg_kmers[i].hash);
                 }
             }
-            best->location.n_repeats = assembly_runs.size();
-            all_runs.push_back(std::move(*best));
+            begin = end;
         }
+        best_run.location.n_repeats = n_repeats;
+        all_runs.push_back(std::move(best_run));
     }
 
-    std::vector<std::pair<std::vector<std::uint64_t>, std::size_t>> canonical_counts;
+    std::vector<CanonicalCount> canonical_counts;
+    canonical_counts.reserve(all_runs.size());
+    ankerl::unordered_dense::map<
+        std::vector<std::uint64_t>,
+        std::size_t,
+        VectorHash
+    > indices; // Map a canonical order to its index in canonical_counts
+    indices.reserve(all_runs.size());
     for (const auto& run : all_runs) {
         if (!run.is_target) {
             continue;
         }
-        auto key = canonical(run.order);
-        auto found = std::find_if(canonical_counts.begin(), canonical_counts.end(), [&](const auto& item) {
-            return item.first == key;
-        });
-        if (found == canonical_counts.end()) {
-            canonical_counts.push_back({std::move(key), 1});
-        } else {
-            ++found->second;
+        std::vector<std::uint64_t> reverse(run.order.rbegin(), run.order.rend());
+        const bool is_forward = run.order <= reverse;
+        const auto& key = is_forward ? run.order : reverse;
+
+        auto [counts_it, inserted] = indices.try_emplace(key, canonical_counts.size());
+        if (inserted) {
+            canonical_counts.push_back({key});
         }
+        auto& counts = canonical_counts[counts_it->second];
+        ++counts.count;
+        ++(is_forward ? counts.forward_count : counts.reverse_count);
     }
     if (canonical_counts.empty()) {
         throw std::invalid_argument("subgraph has no k-mers in target assemblies");
     }
+
     auto rep_canonical = canonical_counts.begin();
     for (auto it = canonical_counts.begin() + 1; it != canonical_counts.end(); ++it) {
-        if (it->first.size() * it->second > rep_canonical->first.size() * rep_canonical->second) {
+        if (it->order.size() * it->count > rep_canonical->order.size() * rep_canonical->count) {
             rep_canonical = it;
         }
     }
-    auto rep_order = rep_canonical->first;
-    std::vector<std::uint64_t> reverse(rep_order.rbegin(), rep_order.rend());
-    if (count_order(all_runs, reverse) > count_order(all_runs, rep_order)) {
-        rep_order = std::move(reverse);
+    auto rep_order = rep_canonical->order;
+    if (rep_canonical->reverse_count > rep_canonical->forward_count) {
+        std::reverse(rep_order.begin(), rep_order.end());
     }
 
     if (rep_order.size() == 1) {
         return std::nullopt;
     }
-    auto sorted_hashes = rep_order;
-    std::sort(sorted_hashes.begin(), sorted_hashes.end());
-    if (std::adjacent_find(sorted_hashes.begin(), sorted_hashes.end()) != sorted_hashes.end()) {
-        return std::nullopt;
+    ankerl::unordered_dense::set<std::uint64_t> unique_hashes;
+    unique_hashes.reserve(rep_order.size());
+    for (const auto hash : rep_order) {
+        if (!unique_hashes.insert(hash).second) {
+            return std::nullopt;
+        }
     }
 
-    const auto location = std::find_if(all_runs.begin(), all_runs.end(), [&](const auto& run) {
+    const auto rep_run = std::find_if(all_runs.begin(), all_runs.end(), [&](const auto& run) {
         return run.order == rep_order;
     });
-    if (location == all_runs.end()) {
+    if (rep_run == all_runs.end()) {
         throw std::logic_error("representative signature location not found");
     }
-    const std::size_t length = location->location.stop - location->location.start;
+    const std::size_t length = rep_run->location.stop - rep_run->location.start;
     if (length < min_len) {
         return std::nullopt;
     }
 
     return Signature{
         subgraph_idx,
-        location->location,
-        {},
+        rep_run->location,
+        {}, // sequence
         length,
-        rep_canonical->second,
-        static_cast<double>(rep_canonical->second) / static_cast<double>(total_tar)
+        rep_canonical->count,
+        static_cast<double>(rep_canonical->count) / static_cast<double>(total_tar)
     };
 }
 
 void fetch_signature_sequences(
     std::vector<Signature>& signatures,
     const std::vector<std::string>& assembly_paths,
-    std::size_t n_cpu
+    ThreadPool& pool
 ) {
-    std::vector<std::vector<std::size_t>> requests(assembly_paths.size());
+    struct RequestGroup {
+        std::size_t assembly_idx;
+        std::vector<std::size_t> signature_indices;
+    };
+
+    std::vector<RequestGroup> groups;
+    groups.reserve(std::min(assembly_paths.size(), signatures.size()));
+    std::vector<std::size_t> group_indices(assembly_paths.size(), signatures.size());
     for (std::size_t i = 0; i < signatures.size(); ++i) {
-        requests[signatures[i].location.assembly_idx].push_back(i);
+        const auto assembly_idx = signatures[i].location.assembly_idx;
+        if (assembly_idx >= assembly_paths.size()) {
+            throw std::runtime_error("signature assembly index is outside assembly paths");
+        }
+        if (group_indices[assembly_idx] == signatures.size()) {
+            group_indices[assembly_idx] = groups.size();
+            groups.push_back({assembly_idx, {}});
+        }
+        groups[group_indices[assembly_idx]].signature_indices.push_back(i);
     }
-    ThreadPool pool(n_cpu);
-    pool.parallel_for(assembly_paths.size(), [&](std::size_t begin, std::size_t end, std::size_t) {
-        for (std::size_t assembly_idx = begin; assembly_idx < end; ++assembly_idx) {
-            if (requests[assembly_idx].empty()) continue;
-            const auto records = read_fasta(assembly_paths[assembly_idx]);
-            for (const auto signature_idx : requests[assembly_idx]) {
+
+    pool.parallel_for(groups.size(), [&](std::size_t begin, std::size_t end, std::size_t) {
+        for (std::size_t group_idx = begin; group_idx < end; ++group_idx) {
+            const auto& group = groups[group_idx];
+            const auto records = read_fasta(assembly_paths[group.assembly_idx]);
+
+            for (const auto signature_idx : group.signature_indices) {
                 auto& signature = signatures[signature_idx];
                 if (signature.location.record_idx >= records.size()) {
                     throw std::runtime_error("signature record index is outside assembly FASTA");
@@ -256,13 +274,18 @@ std::vector<Signature> extract(
     if (n_record_offsets != n_assemblies + 1 || assembly_paths.size() != n_assemblies) {
         throw std::invalid_argument("assembly metadata dimensions do not match");
     }
-    const std::size_t total_tar = std::count(is_targets, is_targets + n_assemblies, true);
-    if (total_tar == 0) {
+    if (config.total_tar == 0) {
         throw std::invalid_argument("at least one target assembly is required");
+    }
+    if (subgraphs.empty()) {
+        return {};
     }
 
     std::vector<std::optional<Signature>> extracted(subgraphs.size());
-    internal::ThreadPool pool(config.n_cpu);
+    const std::size_t n_workers = std::min(
+        std::max<std::size_t>(1, config.n_cpu), subgraphs.size()
+    );
+    internal::ThreadPool pool(n_workers);
     pool.parallel_for(subgraphs.size(), [&](std::size_t begin, std::size_t end, std::size_t) {
         for (std::size_t i = begin; i < end; ++i) {
             extracted[i] = internal::extract_worker(
@@ -278,7 +301,8 @@ std::vector<Signature> extract(
                 config.kmerlen,
                 config.windowsize,
                 config.min_len,
-                total_tar
+                config.total_tar,
+                config.consec_kmer_mul
             );
         }
     });
@@ -286,10 +310,12 @@ std::vector<Signature> extract(
     std::vector<Signature> signatures;
     signatures.reserve(subgraphs.size());
     for (auto& signature : extracted) {
-        if (signature) signatures.push_back(std::move(*signature));
+        if (signature) {
+            signatures.push_back(std::move(*signature));
+        }
     }
 
-    internal::fetch_signature_sequences(signatures, assembly_paths, config.n_cpu);
+    internal::fetch_signature_sequences(signatures, assembly_paths, pool);
     return signatures;
 }
 
