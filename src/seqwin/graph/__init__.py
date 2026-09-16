@@ -35,7 +35,7 @@ from collections.abc import Iterable
 import numpy as np
 from numpy.typing import NDArray
 
-from ._core import _build_native, _filter_native
+from ._core import _build_native, _extract_native, _filter_native
 
 from .utils import OrderedKmers
 

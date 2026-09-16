@@ -58,6 +58,22 @@ PYBIND11_MODULE(_core, m) {
 
     m.doc() = "Seqwin minimizer graph bindings";
 
+    py::class_<seqwin::SeqLocation>(m, "SeqLocation")
+        .def_readonly("assembly_idx", &seqwin::SeqLocation::assembly_idx)
+        .def_readonly("record_idx", &seqwin::SeqLocation::record_idx)
+        .def_readonly("start", &seqwin::SeqLocation::start)
+        .def_readonly("stop", &seqwin::SeqLocation::stop)
+        .def_readonly("n_kmers", &seqwin::SeqLocation::n_kmers)
+        .def_readonly("n_repeats", &seqwin::SeqLocation::n_repeats);
+
+    py::class_<seqwin::Signature>(m, "Signature")
+        .def_readonly("subgraph_idx", &seqwin::Signature::subgraph_idx)
+        .def_readonly("location", &seqwin::Signature::location)
+        .def_readonly("sequence", &seqwin::Signature::sequence)
+        .def_readonly("length", &seqwin::Signature::length)
+        .def_readonly("n_rep", &seqwin::Signature::n_rep)
+        .def_readonly("rep_ratio", &seqwin::Signature::rep_ratio);
+
     m.def("_build_native",
         [](const std::vector<std::string>& assembly_paths,
            std::size_t kmerlen,
@@ -197,6 +213,40 @@ PYBIND11_MODULE(_core, m) {
         py::arg("min_nodes_floor"),
         py::arg("max_nodes_cap"),
         py::arg("n_cpu")
+    );
+
+    m.def("_extract_native",
+        [](NumpyArray<seqwin::Kmer> kmers,
+           NumpyArray<seqwin::Node> nodes,
+           const seqwin::Subgraphs& subgraphs,
+           NumpyArray<std::uint32_t> record_offsets,
+           NumpyArray<bool> is_targets,
+           const std::vector<std::string>& assembly_paths,
+           std::size_t kmerlen,
+           std::size_t windowsize,
+           std::size_t min_len,
+           std::size_t n_cpu
+        ) {
+            require_1d_size(kmers, "kmers");
+            const auto n_nodes = require_1d_size(nodes, "nodes");
+            const auto n_record_offsets = require_1d_size(record_offsets, "record_offsets");
+            const auto n_assemblies = require_1d_size(is_targets, "is_targets");
+            const seqwin::ExtractConfig config{kmerlen, windowsize, min_len, n_cpu};
+            py::gil_scoped_release release;
+            return seqwin::extract(kmers.data(), nodes.data(), n_nodes,
+                subgraphs, record_offsets.data(), n_record_offsets, is_targets.data(),
+                n_assemblies, assembly_paths, config);
+        },
+        py::arg("kmers").noconvert(),
+        py::arg("nodes").noconvert(),
+        py::arg("subgraphs"),
+        py::arg("record_offsets").noconvert(),
+        py::arg("is_targets").noconvert(),
+        py::arg("assembly_paths"),
+        py::arg("kmerlen"),
+        py::arg("windowsize"),
+        py::arg("min_len"),
+        py::arg("n_cpu") = 1
     );
 
 }

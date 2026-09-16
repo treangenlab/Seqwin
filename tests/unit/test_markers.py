@@ -5,6 +5,7 @@ import numpy as np
 import seqwin.markers as markers
 from seqwin.assemblies import Assemblies
 from seqwin.graph import EDGE_DTYPE, KMER_DTYPE, NODE_DTYPE
+from seqwin.graph import _extract_native
 from seqwin.kmers import FilteredGraph
 
 
@@ -108,6 +109,38 @@ def _ck_fields(ck):
         'warnings': ck.warnings,
         'is_bad': ck.is_bad,
     }
+
+
+def _native_fields(signature):
+    loc = signature.location
+    return {
+        'assembly_idx': loc.assembly_idx,
+        'record_idx': loc.record_idx,
+        'start': loc.start,
+        'stop': loc.stop,
+        'n_kmers': loc.n_kmers,
+        'n_repeats': loc.n_repeats,
+        'seq': signature.sequence,
+        'len': signature.length,
+        'n_rep': signature.n_rep,
+        'rep_ratio': signature.rep_ratio,
+    }
+
+
+def _extract_native_fixture(graph, assemblies, *, min_len=0, n_cpu=1):
+    return _extract_native(
+        graph.kmers, graph.nodes, graph.subgraphs, graph.record_offsets,
+        assemblies.is_targets, [str(path) for path in assemblies.paths],
+        KMERLEN, WINDOWSIZE, min_len, n_cpu,
+    )
+
+
+def _python_parity_fields(ck):
+    fields = _ck_fields(ck)
+    fields.pop('kmers')
+    fields.pop('warnings')
+    fields.pop('is_bad')
+    return fields
 
 
 def test_multiple_fasta_records_do_not_form_one_run(tmp_path: Path) -> None:
@@ -346,3 +379,45 @@ def test_create_ck_args_slices_non_contiguous_raw_kmer_ranges() -> None:
 
     np.testing.assert_array_equal(groups_by_hash[np.uint64(10)], kmers[0:2])
     np.testing.assert_array_equal(groups_by_hash[np.uint64(20)], kmers[3:5])
+
+
+def test_native_extraction_matches_characterized_python_behavior(tmp_path: Path) -> None:
+    records = [
+        ['AAAACCCCGGGGTTTTAAAA' * 3],
+        ['TTTTGGGGCCCCAAAATTTT' * 3],
+        ['ACGT' * 30],
+    ]
+    subgraphs = [
+        # Equal weighted canonical scores select the first encountered order.
+        [
+            (1, 0, 0, 1), (2, 0, 0, 5), (3, 0, 0, 9), (4, 0, 0, 13),
+            (5, 1, 0, 2), (6, 1, 0, 6),
+            (5, 2, 0, 3), (6, 2, 0, 7),
+        ],
+        # Matching locations select the first target assembly.
+        [
+            (10, 0, 0, 24), (11, 0, 0, 28), (12, 0, 0, 32),
+            (10, 1, 0, 22), (11, 1, 0, 26), (12, 1, 0, 30),
+        ],
+        [(20, 0, 0, 40), (21, 0, 0, 44), (20, 0, 0, 48)],  # duplicate
+        [(30, 0, 0, 50)],  # single
+        [(40, 0, 0, 55), (41, 0, 0, 56)],  # shorter than min_len
+    ]
+    assemblies = _write_assemblies(tmp_path, records, [True, True, True])
+    graph = _synthetic_graph(records, subgraphs)
+    python, _ = markers._get_cks(
+        graph, 3, KMERLEN, WINDOWSIZE, 9, assemblies, 1,
+    )
+
+    serial = _extract_native_fixture(graph, assemblies, min_len=9, n_cpu=1)
+    parallel = _extract_native_fixture(graph, assemblies, min_len=9, n_cpu=3)
+
+    assert [signature.subgraph_idx for signature in serial] == [0, 1]
+    assert len(serial) == len(python)
+    assert [_native_fields(signature) for signature in serial] == [
+        _python_parity_fields(ck) for ck in python
+    ]
+    assert [_native_fields(signature) for signature in parallel] == [
+        _native_fields(signature) for signature in serial
+    ]
+    assert [signature.subgraph_idx for signature in parallel] == [0, 1]
