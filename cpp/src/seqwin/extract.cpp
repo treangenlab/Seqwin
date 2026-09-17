@@ -18,6 +18,7 @@ struct FullKmer {
     std::uint32_t pos;
 };
 
+/** Hash a vector of k-mer hashes using the FNV-1a combining scheme. */
 struct VectorHash {
     std::uint64_t operator()(const std::vector<std::uint64_t>& values) const noexcept
     {
@@ -30,6 +31,10 @@ struct VectorHash {
     }
 };
 
+/**
+ * Count the number of target assemblies containing a canonical k-mer order.
+ * Assemblies with smaller indices are selected for tie-breaking.
+ */
 struct CanonicalCount {
     std::size_t count = 0;
     std::size_t forward_count = 0;
@@ -55,6 +60,7 @@ std::optional<Signature> extract_worker(
     std::size_t total_tar,
     double consec_kmer_mul
 ) {
+    // Collect and position-sort all k-mers included in the subgraph
     std::vector<FullKmer> sg_kmers; // K-mers of the current subgraph
     std::size_t n_sg_kmers = 0;
     for (const auto node_idx : subgraph) {
@@ -78,6 +84,7 @@ std::optional<Signature> extract_worker(
         }
     });
 
+    // Select the longest consecutive k-mer run from each assembly
     std::vector<ConsecutiveKmers> all_runs;
     all_runs.reserve(std::min(n_assemblies, sg_kmers.size()));
     const double max_gap = consec_kmer_mul * windowsize;
@@ -126,23 +133,25 @@ std::optional<Signature> extract_worker(
 
         ConsecutiveKmers best_run{
             {
-                static_cast<std::uint32_t>(assembly_idx),
+                assembly_idx,
                 sg_kmers[best_begin].record_idx - record_offsets[assembly_idx],
                 sg_kmers[best_begin].pos,
-                sg_kmers[best_end - 1].pos + static_cast<std::uint32_t>(kmerlen),
+                sg_kmers[best_end - 1].pos + kmerlen,
                 best_run_size,
                 n_repeats
             },
             is_targets[assembly_idx],
-            {} // order
+            {} // kmers
         };
-        best_run.order.reserve(best_run_size);
+        best_run.kmers.reserve(best_run_size);
         for (std::size_t i = best_begin; i < best_end; ++i) {
-            best_run.order.push_back(sg_kmers[i].hash);
+            best_run.kmers.push_back(sg_kmers[i].hash);
         }
         all_runs.push_back(std::move(best_run));
     }
 
+    // K-mer runs in different assemblies may have the same k-mer order (regardless of orientation)
+    // Count the number of target assemblies for each unique canonical k-mer order
     ankerl::unordered_dense::map<
         std::vector<std::uint64_t>,
         CanonicalCount,
@@ -154,17 +163,29 @@ std::optional<Signature> extract_worker(
         if (!run.is_target) {
             continue;
         }
-        std::vector<std::uint64_t> reverse(run.order.rbegin(), run.order.rend());
-        const bool is_forward = run.order <= reverse;
-        const auto& canonical_order = is_forward ? run.order : reverse;
 
-        auto [order_it, inserted] = canonical_counts.try_emplace(
-            canonical_order, CanonicalCount{0, 0, 0, first_seen}
+        const bool is_forward = std::lexicographical_compare(
+            run.kmers.begin(), run.kmers.end(),
+            run.kmers.rbegin(), run.kmers.rend()
         );
+        decltype(canonical_counts)::iterator it;
+        bool inserted;
+        if (is_forward) {
+            std::tie(it, inserted) = canonical_counts.try_emplace(
+                run.kmers,
+                CanonicalCount{0, 0, 0, first_seen}
+            );
+        } else {
+            std::vector<std::uint64_t> reverse(run.kmers.rbegin(), run.kmers.rend());
+            std::tie(it, inserted) = canonical_counts.try_emplace(
+                std::move(reverse),
+                CanonicalCount{0, 0, 0, first_seen}
+            );
+        }
         if (inserted) {
             ++first_seen;
         }
-        auto& cnt = order_it->second;
+        auto& cnt = it->second;
         ++cnt.count;
         ++(is_forward ? cnt.forward_count : cnt.reverse_count);
     }
@@ -172,36 +193,43 @@ std::optional<Signature> extract_worker(
         throw std::invalid_argument("subgraph has no k-mers in target assemblies");
     }
 
-    auto rep_canonical = canonical_counts.begin();
+    // Choose the highest-scoring canonical order
+    // Choose the first-inserted order (smaller assembly index) when scores are the same
+    auto best_order = canonical_counts.begin();
     for (auto it = canonical_counts.begin(); it != canonical_counts.end(); ++it) {
         const auto score = it->first.size() * it->second.count;
-        const auto rep_score = rep_canonical->first.size() * rep_canonical->second.count;
+        const auto best_score = best_order->first.size() * best_order->second.count;
         if (
-            score > rep_score ||
-            (score == rep_score && it->second.first_seen < rep_canonical->second.first_seen)
+            score > best_score ||
+            (score == best_score && it->second.first_seen < best_order->second.first_seen)
         ) {
-            rep_canonical = it;
+            best_order = it;
         }
     }
-    auto rep_order = rep_canonical->first;
-    auto& rep_count = rep_canonical->second;
+    // Choose the most common orientation as the representative
+    auto rep = best_order->first;
+    auto& rep_count = best_order->second;
     if (rep_count.reverse_count > rep_count.forward_count) {
-        std::reverse(rep_order.begin(), rep_order.end());
+        std::reverse(rep.begin(), rep.end());
     }
 
-    if (rep_order.size() == 1) {
+    // Reject degenerate representatives
+    // 1. Have only one k-mer
+    // 2. Have duplicate k-mers
+    if (rep.size() == 1) {
         return std::nullopt;
     }
     ankerl::unordered_dense::set<std::uint64_t> unique_hashes;
-    unique_hashes.reserve(rep_order.size());
-    for (const auto hash : rep_order) {
+    unique_hashes.reserve(rep.size());
+    for (const auto hash : rep) {
         if (!unique_hashes.insert(hash).second) {
             return std::nullopt;
         }
     }
 
+    // Find the first assembly containing the representative
     const auto rep_run = std::find_if(all_runs.begin(), all_runs.end(), [&](const auto& run) {
-        return run.order == rep_order;
+        return run.kmers == rep;
     });
     if (rep_run == all_runs.end()) {
         throw std::logic_error("representative signature location not found");
@@ -231,13 +259,14 @@ void fetch_signature_sequences(
     }
 
     struct RequestGroup {
-        std::uint32_t assembly_idx;
+        std::size_t assembly_idx;
         std::vector<std::size_t> signature_indices;
     };
 
+    // Group requests by assembly so that each FASTA file is read only once
     std::vector<RequestGroup> groups;
     groups.reserve(std::min(assembly_paths.size(), signatures.size()));
-    ankerl::unordered_dense::map<std::uint32_t, std::size_t> group_indices;
+    ankerl::unordered_dense::map<std::size_t, std::size_t> group_indices;
     group_indices.reserve(std::min(assembly_paths.size(), signatures.size()));
 
     for (std::size_t i = 0; i < signatures.size(); ++i) {
@@ -252,6 +281,7 @@ void fetch_signature_sequences(
         groups[group_it->second].signature_indices.push_back(i);
     }
 
+    // Read different assemblies in parallel and slice each requested record
     pool.parallel_for(groups.size(), [&](std::size_t begin, std::size_t end, std::size_t) {
         for (std::size_t group_idx = begin; group_idx < end; ++group_idx) {
             const auto& group = groups[group_idx];

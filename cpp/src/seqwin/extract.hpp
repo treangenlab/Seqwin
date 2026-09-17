@@ -10,12 +10,23 @@
 
 namespace seqwin::internal {
 
+/**
+ * @brief A run of consecutive k-mers found in an assembly.
+ */
 struct ConsecutiveKmers {
-    SeqLocation location;
+    /** Location spanned by the k-mer run. */
+    SubgraphLoc location;
+    /** Whether the containing assembly belongs to the target set. */
     bool is_target;
-    std::vector<std::uint64_t> order;
+    /** K-mer hashes in positional order. */
+    std::vector<std::uint64_t> kmers;
 };
 
+/**
+ * @brief Extract a signature from one low-penalty subgraph.
+ *
+ * Return `std::nullopt` if the signature is invalid.
+ */
 std::optional<Signature> extract_worker(
     std::size_t subgraph_idx,
     const std::vector<std::size_t>& subgraph,
@@ -33,6 +44,11 @@ std::optional<Signature> extract_worker(
     double consec_kmer_mul
 );
 
+/**
+ * @brief Fetch signature nucleotide sequences from their assembly FASTA files.
+ *
+ * Sequences are added to `signatures` in place.
+ */
 void fetch_signature_sequences(
     std::vector<Signature>& signatures,
     const std::vector<std::string>& assembly_paths,

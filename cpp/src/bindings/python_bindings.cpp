@@ -58,13 +58,13 @@ PYBIND11_MODULE(_core, m) {
 
     m.doc() = "Seqwin minimizer graph bindings";
 
-    py::class_<seqwin::SeqLocation>(m, "SeqLocation")
-        .def_readonly("assembly_idx", &seqwin::SeqLocation::assembly_idx)
-        .def_readonly("record_idx", &seqwin::SeqLocation::record_idx)
-        .def_readonly("start", &seqwin::SeqLocation::start)
-        .def_readonly("stop", &seqwin::SeqLocation::stop)
-        .def_readonly("n_kmers", &seqwin::SeqLocation::n_kmers)
-        .def_readonly("n_repeats", &seqwin::SeqLocation::n_repeats);
+    py::class_<seqwin::SubgraphLoc>(m, "SubgraphLoc")
+        .def_readonly("assembly_idx", &seqwin::SubgraphLoc::assembly_idx)
+        .def_readonly("record_idx", &seqwin::SubgraphLoc::record_idx)
+        .def_readonly("start", &seqwin::SubgraphLoc::start)
+        .def_readonly("stop", &seqwin::SubgraphLoc::stop)
+        .def_readonly("n_kmers", &seqwin::SubgraphLoc::n_kmers)
+        .def_readonly("n_repeats", &seqwin::SubgraphLoc::n_repeats);
 
     py::class_<seqwin::Signature>(m, "Signature")
         .def_readonly("subgraph_idx", &seqwin::Signature::subgraph_idx)

@@ -77,7 +77,9 @@ FilterResult filter(
     const FilterConfig& config
 );
 
-/** @brief Extract pre-BLAST signatures from low-penalty subgraphs. */
+/**
+ * @brief Extract signatures from low-penalty subgraphs.
+ */
 std::vector<Signature> extract(
     const Kmer* kmers,
     const Node* nodes,
