@@ -430,6 +430,45 @@ def test_native_extraction_matches_characterized_python_behavior(tmp_path: Path)
     assert [signature.subgraph_idx for signature in parallel] == [0, 1]
 
 
+def test_native_sequence_is_uppercase_for_mixed_case_fasta(tmp_path: Path) -> None:
+    records = [['aaAccCGgTTaa']]
+    subgraphs = [[(1, 0, 0, 1), (2, 0, 0, 5)]]
+    assemblies = _write_assemblies(tmp_path, records, [True])
+    graph = _synthetic_graph(records, subgraphs)
+
+    python, python_sequences = markers._get_cks(
+        graph, 1, KMERLEN, WINDOWSIZE, 0, assemblies, 1,
+    )
+    native = _extract_native_fixture(graph, assemblies)
+
+    assert python_sequences == ['AACCCGGTT']
+    assert native[0].sequence == python[0].rep['seq'] == 'AACCCGGTT'
+
+
+def test_native_representative_location_ignores_earlier_non_target(
+    tmp_path: Path,
+) -> None:
+    records = [['aaaaccccggggtttt'], ['ttttggggccccaaaa']]
+    subgraphs = [[
+        (10, 0, 0, 1), (11, 0, 0, 5), (12, 0, 0, 9),
+        (10, 1, 0, 2), (11, 1, 0, 6), (12, 1, 0, 10),
+    ]]
+    assemblies = _write_assemblies(tmp_path, records, [False, True])
+    graph = _synthetic_graph(records, subgraphs)
+
+    serial = _extract_native_fixture(graph, assemblies, n_cpu=1)
+    parallel = _extract_native_fixture(graph, assemblies, n_cpu=2)
+
+    assert _native_fields(serial[0]) == {
+        'assembly_idx': 1, 'record_idx': 0, 'start': 2, 'stop': 15,
+        'n_kmers': 3, 'n_repeats': 1, 'seq': 'TTGGGGCCCCAAA',
+        'len': 13, 'n_rep': 1, 'rep_ratio': 1.0,
+    }
+    assert [_native_fields(signature) for signature in parallel] == [
+        _native_fields(signature) for signature in serial
+    ]
+
+
 def test_native_run_scanning_boundaries_and_ties(tmp_path: Path) -> None:
     records = [['A' * 100, 'CGTACGTACGTACGTACGTA']]
     subgraphs = [

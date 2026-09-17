@@ -32,7 +32,7 @@ struct SubgraphLoc {
  * @brief A signature is extracted from a low-penalty subgraph, represented by a
  * consecutive minimizer run (a.k.a. the representative) found in target assemblies.
  *
- * The representative is insensitive of orientation (strand).
+ * Forward and reversed k-mer orders are treated as the same canonical ordering.
  *
  * The nucleotide sequence of the signature is fetched from the first target assembly
  * containing the representative.

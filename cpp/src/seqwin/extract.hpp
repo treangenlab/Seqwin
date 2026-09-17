@@ -3,9 +3,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <string>
 #include <vector>
 
 #include "seqwin/filter.hpp"
+#include "seqwin/signature.hpp"
 #include "utils/thread_pool.hpp"
 
 namespace seqwin::internal {

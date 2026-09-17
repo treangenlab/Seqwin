@@ -1,8 +1,10 @@
 #include "seqwin/extract.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <stdexcept>
+#include <tuple>
 #include <utility>
 
 #include <ankerl/unordered_dense.h>
@@ -18,7 +20,7 @@ struct FullKmer {
     std::uint32_t pos;
 };
 
-/** Hash a vector of k-mer hashes using the FNV-1a combining scheme. */
+/** Hash a vector of k-mer hashes using an FNV-1a-style combining scheme. */
 struct VectorHash {
     std::uint64_t operator()(const std::vector<std::uint64_t>& values) const noexcept
     {
@@ -33,7 +35,7 @@ struct VectorHash {
 
 /**
  * Count the number of target assemblies containing a canonical k-mer order.
- * Assemblies with smaller indices are selected for tie-breaking.
+ * The first encountered order wins ties.
  */
 struct CanonicalCount {
     std::size_t count = 0;
@@ -194,7 +196,7 @@ std::optional<Signature> extract_worker(
     }
 
     // Choose the highest-scoring canonical order
-    // Choose the first-inserted order (smaller assembly index) when scores are the same
+    // Choose the first encountered order (smaller assembly index) when scores are the same
     auto best_order = canonical_counts.begin();
     for (auto it = canonical_counts.begin(); it != canonical_counts.end(); ++it) {
         const auto score = it->first.size() * it->second.count;
@@ -208,17 +210,16 @@ std::optional<Signature> extract_worker(
     }
     // Choose the most common orientation as the representative
     auto rep = best_order->first;
-    auto& rep_count = best_order->second;
+    const auto& rep_count = best_order->second;
     if (rep_count.reverse_count > rep_count.forward_count) {
         std::reverse(rep.begin(), rep.end());
     }
 
-    // Reject degenerate representatives
-    // 1. Have only one k-mer
-    // 2. Have duplicate k-mers
+    // Reject representatives with only one k-mer
     if (rep.size() == 1) {
         return std::nullopt;
     }
+    // Reject representatives with duplicate k-mers
     ankerl::unordered_dense::set<std::uint64_t> unique_hashes;
     unique_hashes.reserve(rep.size());
     for (const auto hash : rep) {
@@ -227,9 +228,9 @@ std::optional<Signature> extract_worker(
         }
     }
 
-    // Find the first assembly containing the representative
+    // Find the first target assembly containing the representative
     const auto rep_run = std::find_if(all_runs.begin(), all_runs.end(), [&](const auto& run) {
-        return run.kmers == rep;
+        return run.is_target && run.kmers == rep;
     });
     if (rep_run == all_runs.end()) {
         throw std::logic_error("representative signature location not found");
@@ -281,7 +282,7 @@ void fetch_signature_sequences(
         groups[group_it->second].signature_indices.push_back(i);
     }
 
-    // Read different assemblies in parallel and slice each requested record
+    // Read different assemblies in parallel and slice each requested sequence interval
     pool.parallel_for(groups.size(), [&](std::size_t begin, std::size_t end, std::size_t) {
         for (std::size_t group_idx = begin; group_idx < end; ++group_idx) {
             const auto& group = groups[group_idx];
@@ -296,6 +297,11 @@ void fetch_signature_sequences(
                 const auto start = std::min<std::size_t>(signature.location.start, sequence.size());
                 const auto stop = std::min<std::size_t>(signature.location.stop, sequence.size());
                 signature.sequence = sequence.substr(start, stop > start ? stop - start : 0);
+                std::transform(
+                    signature.sequence.begin(), signature.sequence.end(),
+                    signature.sequence.begin(),
+                    [](unsigned char base) { return static_cast<char>(std::toupper(base)); }
+                );
             }
         }
     });
