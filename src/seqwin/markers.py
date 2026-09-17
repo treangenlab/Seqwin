@@ -47,7 +47,7 @@ from numpy.typing import NDArray
 from .assemblies import Assemblies
 from .kmers import FilteredGraph
 from .ncbi import blast
-from .graph import OrderedKmers
+from .graph import OrderedKmers, _extract_native
 from .utils import print_time_delta, log_and_raise, file_to_write, mp_wrapper
 from .config import Config, RunState, HAS_BLAST, WORKINGDIR, BLASTCONFIG, CONSEC_KMER_MUL
 
@@ -443,6 +443,31 @@ def _get_cks(
     return all_cks, all_reps
 
 
+def _signature_to_ck(signature) -> ConnectedKmers:
+    """Adapt a native Signature to the interface used by marker output and evaluation."""
+    loc = signature.location
+    ck = object.__new__(ConnectedKmers)
+    ck.kmers = None
+    ck.loc = None
+    ck.rep = pd.Series({
+        'assembly_idx': loc.assembly_idx,
+        'record_idx': loc.record_idx,
+        'start': loc.start,
+        'stop': loc.stop,
+        'n_kmers': loc.n_kmers,
+        'n_repeats': loc.n_repeats,
+        'seq': signature.sequence
+    })
+    ck.len = signature.length
+    ck.n_rep = signature.n_rep
+    ck.blast = None
+    ck.metrics = _EMPTY_METRICS
+    ck.rep_ratio = signature.rep_ratio
+    ck.warnings = set()
+    ck.is_bad = False
+    return ck
+
+
 def _get_avg_ident(blast_out: pd.DataFrame, query_len: int, n: int) -> float:
     """Given a list of BLAST hits, calculate the average sequence identity between the query and all subjects.
     The denominator (`n`) is the number of subject sequences that are expected to include the query sequence.
@@ -672,8 +697,26 @@ def get_markers(
     total_neg = state.total_neg
 
     # extract marker from each low-penalty subgraph
-    # all_cks: ConnectedKmers (ck) instances; all_reps: representative sequences
-    all_cks, all_reps = _get_cks(graph, total_tar, kmerlen, windowsize, min_len, assemblies, n_cpu)
+    logger.info('Finding a representative for each low-penalty subgraph...')
+    tik = time()
+    signatures = _extract_native(
+        graph.kmers,
+        graph.nodes,
+        graph.subgraphs,
+        record_offsets,
+        assemblies.is_targets,
+        [str(path) for path in assemblies.paths],
+        kmerlen,
+        windowsize,
+        min_len,
+        total_tar,
+        CONSEC_KMER_MUL,
+        n_cpu
+    )
+    logger.info(f' - Found {len(signatures)} candidate signatures')
+    all_cks = [_signature_to_ck(signature) for signature in signatures]
+    all_reps = [signature.sequence for signature in signatures]
+    print_time_delta(time()-tik)
 
     # evaluate each marker with BLAST
     if run_blast and HAS_BLAST:

@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -549,3 +550,70 @@ def test_native_sparse_assembly_requests_preserve_order_and_parallel_results(
     assert [_native_fields(signature) for signature in parallel] == [
         _native_fields(signature) for signature in serial
     ]
+
+
+def test_get_markers_uses_native_extraction_and_adapts_output(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    assembly_path = tmp_path / 'target.fasta'
+    assembly_path.write_text('>record-0\nAACCGGTTAACC\n')
+    assemblies = Assemblies([assembly_path], [True])
+    graph = _synthetic_graph(
+        [['AACCGGTTAACC']],
+        [[(10, 0, 0, 1), (11, 0, 0, 5)]],
+    )
+    signature = SimpleNamespace(
+        location=SimpleNamespace(
+            assembly_idx=0, record_idx=0, start=1, stop=10,
+            n_kmers=2, n_repeats=1,
+        ),
+        sequence='ACCGGTTAA', length=9, n_rep=1, rep_ratio=1.0,
+    )
+    captured = {}
+
+    def extract_native(*args):
+        captured['args'] = args
+        return [signature]
+
+    def fail_python_extraction(*args, **kwargs):
+        pytest.fail('_get_cks() must not be used by get_markers()')
+
+    monkeypatch.setattr(markers, '_extract_native', extract_native)
+    monkeypatch.setattr(markers, '_get_cks', fail_python_extraction)
+    config = SimpleNamespace(
+        overwrite=False, kmerlen=KMERLEN, windowsize=WINDOWSIZE,
+        min_len=7, run_blast=False, blast_neg_only=False, n_cpu=3,
+    )
+    state = SimpleNamespace(
+        working_dir=tmp_path, total_tar=1, total_neg=0, blastdb='unset',
+    )
+
+    result = markers.get_markers(graph, assemblies, config, state)
+
+    args = captured['args']
+    assert args[0] is graph.kmers
+    assert args[1] is graph.nodes
+    assert args[2] is graph.subgraphs
+    assert args[3] is graph.record_offsets
+    assert args[4] is assemblies.is_targets
+    assert args[5:] == (
+        [str(assembly_path)], KMERLEN, WINDOWSIZE, 7, 1,
+        CONSEC_KMER_MUL, 3,
+    )
+    assert len(result) == 1
+    ck = result[0]
+    assert isinstance(ck, markers.ConnectedKmers)
+    assert ck.kmers is ck.loc is ck.blast is None
+    assert ck.metrics == markers._EMPTY_METRICS
+    assert (ck.warnings, ck.is_bad) == (set(), False)
+    assert ck.rep.to_dict() == {
+        'assembly_idx': 0, 'record_idx': 0, 'start': 1, 'stop': 10,
+        'n_kmers': 2, 'n_repeats': 1, 'seq': 'ACCGGTTAA',
+    }
+    assert (ck.len, ck.n_rep, ck.rep_ratio) == (9, 1, 1.0)
+    assert (tmp_path / 'signatures.fasta').read_text() == (
+        '>0-record-0-1:10\nACCGGTTAA\n'
+    )
+    csv = (tmp_path / 'signatures.csv').read_text()
+    assert '0-record-0-1:10,9' in csv
+    assert csv.rstrip().endswith(',1.0,2')
