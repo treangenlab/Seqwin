@@ -35,9 +35,7 @@ from collections.abc import Iterable
 import numpy as np
 from numpy.typing import NDArray
 
-from ._core import _build_native, _extract_native, _filter_native
-
-from .utils import OrderedKmers
+from ._core import _build_native, _filter_native
 
 KMER_DTYPE = np.dtype([
     ('pos', np.uint32),

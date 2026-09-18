@@ -2,29 +2,26 @@
 Markers
 =======
 
-A core module of Seqwin. Extract candidate markers (signatures) from
-subgraphs of a filtered k-mer graph (`kmers.FilteredGraph.subgraphs`).
+A core module of Seqwin.
+Evaluate and write output signatures to files.
 
 Dependencies:
 -------------
-- numpy
 - pandas
 - .assemblies
 - .kmers
 - .ncbi
-- .graph
-- .config
 - .utils
+- .config
 
 Classes:
 --------
-- MarkerMetrics
-- ConnectedKmers
+- SignatureMetrics
 
 Functions:
 ----------
-- eval_markers
-- get_markers
+- eval_signatures
+- process_signatures
 """
 
 __author__ = 'Michael X. Wang'
@@ -34,45 +31,32 @@ import logging
 from pathlib import Path
 from time import time
 from itertools import repeat
-from collections import Counter
 from dataclasses import dataclass, fields, asdict, astuple
-from collections.abc import Mapping, Generator
+
+import pandas as pd
+
+from .assemblies import Assemblies
+from .kmers import FilterResult, Signature
+from .ncbi import blast
+from .utils import print_time_delta, log_and_raise, file_to_write, mp_wrapper
+from .config import Config, RunState, HAS_BLAST, WORKINGDIR, BLASTCONFIG
 
 logger = logging.getLogger(__name__)
 
-import numpy as np
-import pandas as pd
-from numpy.typing import NDArray
-
-from .assemblies import Assemblies
-from .kmers import FilteredGraph
-from .ncbi import blast
-from .graph import OrderedKmers, _extract_native
-from .utils import print_time_delta, log_and_raise, file_to_write, mp_wrapper
-from .config import Config, RunState, HAS_BLAST, WORKINGDIR, BLASTCONFIG, CONSEC_KMER_MUL
-
-# Set ConnectedKmers.is_bad as True if any of these warnings is present
-_BAD_WARNINGS = frozenset((
-    'single', # has only one k-mer
-    'dup', # has duplicate k-mers
-    'rev' # k-mer ordering is reversible
-))
-
-
 @dataclass(slots=True, frozen=True)
-class MarkerMetrics:
+class SignatureMetrics:
     """
-    Metrics of a marker, calculated from its BLAST alignments against target / non-target assemblies.
+    Metrics of a signature, calculated from its BLAST alignments against target / non-target assemblies.
     Metrics default to None if BLAST is not run.
 
     Attributes:
-        conservation (float | None): Average fraction of identical bases between the marker and target assemblies.
+        conservation (float | None): Average fraction of identical bases between the signature and target assemblies.
         f_tar_hits (float | None): Fraction of target assemblies with a BLAST hit.
-        divergence (float | None): Average fraction of mismatches and gaps between the marker and non-target assemblies.
+        divergence (float | None): Average fraction of mismatches and gaps between the signature and non-target assemblies.
         f_neg_hits (float | None): Fraction of non-target assemblies with a BLAST hit.
-        avg_repeats_tar (float | None): Average number of repeats of this marker in target assemblies.
+        avg_repeats_tar (float | None): Average number of repeats of this signature in target assemblies.
         avg_pident_tar (float | None): Average percentage of identical bases of all repeats in target assemblies.
-        avg_repeats_neg (float | None): Average number of repeats of this marker in non-target assemblies.
+        avg_repeats_neg (float | None): Average number of repeats of this signature in non-target assemblies.
         avg_pident_neg (float | None): Average percentage of identical bases of all repeats in non-target assemblies.
     """
     conservation: float | None = None
@@ -84,388 +68,10 @@ class MarkerMetrics:
     avg_repeats_neg: float | None = None
     avg_pident_neg: float | None = None
 
-_METRIC_NAMES = tuple(f.name for f in fields(MarkerMetrics))
-_EMPTY_METRICS = MarkerMetrics()
-# Baseline metrics if marker has no BLAST hit
-_BASELINE_METRICS = MarkerMetrics(**{f: .0 for f in _METRIC_NAMES})
-
-
-class ConnectedKmers(object):
-    """A candidate marker created from a low-penalty k-mer subgraph.
-
-    Attributes:
-        kmers (pd.DataFrame): K-mers of each node in the subgraph, from all assemblies.
-            It's a subset of `FilteredGraph.kmers`, with index inherited.
-            K-mers with adjacent indices are also adjacent in the assembly sequence.
-        loc (pd.DataFrame): Location of the subgraph in each assembly.
-            Columns: ['assembly_idx', 'record_idx', 'start', 'stop', 'n_kmers',
-            'kmers', 'is_target', 'n_repeats', 'len', 'seq'].
-        rep (pd.Series): Representative sequence of the subgraph (a certain row in `loc`).
-        len (int): Length of the representative sequence.
-        n_rep (int): Number of assemblies having the same k-mer order as the representative.
-        blast (pd.DataFrame | None): The best BLAST hit of the representative sequence in each assembly.
-        metrics (MarkerMetrics): Metrics calculated with BLAST.
-        rep_ratio (float | None): Fraction of target assemblies that have the same k-mer ordering as the representative.
-        warnings (set): Undesirable features of the k-mer ordering.
-        is_bad (bool): Set as True if `warnings` has anything listed in `_BAD_WARNINGS`.
-    """
-    __slots__ = (
-        'kmers', 'loc', 'rep', 'len', 'n_rep', 'blast',
-        'metrics', 'rep_ratio', 'warnings', 'is_bad'
-    )
-    kmers: pd.DataFrame
-    loc: pd.DataFrame
-    rep: pd.Series
-    len: int
-    n_rep: int
-    blast: pd.DataFrame | None
-    metrics: MarkerMetrics
-    rep_ratio: float | None
-    warnings: set
-    is_bad: bool
-
-    def __init__(self, kmers: pd.DataFrame, kmerlen: int, windowsize: int) -> None:
-        """Given the k-mers in a subgraph,
-        1. Determine the boundary of the subgraph in each assembly.
-        2. Determine the representative k-mer order.
-
-        Args:
-            kmers (pd.DataFrame): K-mers of each node in the subgraph, from all assemblies.
-                It's a subset of `FilteredGraph.kmers`, with index inherited.
-                K-mers with adjacent indices are also adjacent in the assembly sequence.
-            kmerlen (int): See `Config` in `config.py`.
-            windowsize (int): See `Config` in `config.py`.
-        """
-        warnings = set() # passed to methods to add warnings in-place
-
-        # convert categorical columns back to string
-        # kmers['strand'] = kmers['strand'].astype(str)
-
-        # determine the boundary of the subgraph in each assembly
-        loc = ConnectedKmers.__get_loc(kmers, kmerlen, windowsize)
-
-        # determine the representative k-mer order and the number of targets having this order
-        rep_order, n_rep = ConnectedKmers.__get_rep_order(loc, warnings)
-        # get the representative assembly for BLAST check
-        # among the assemblies with rep_order, choose the one with the smallest index
-        # in this way, there will be fewer assemblies to be loaded when fetching the actual sequences
-        rep = loc[loc['kmers'] == rep_order].iloc[0]
-
-        # if is_bad is True, this instance is not considered in downstream processing
-        is_bad = len(warnings.intersection(_BAD_WARNINGS)) > 0
-
-        # saving kmers and loc might take a lot of memory
-        self.kmers = None
-        self.loc = None
-
-        self.rep = rep
-        self.len = rep['len']
-        self.n_rep = n_rep
-        self.blast = None
-        self.metrics = _EMPTY_METRICS
-        self.rep_ratio = None
-        self.warnings = warnings
-        self.is_bad = is_bad
-
-    @staticmethod
-    def __get_loc(kmers: pd.DataFrame, kmerlen: int, windowsize: int) -> pd.DataFrame:
-        """Determine the location / boundary of the subgraph in each assembly.
-        1. Find consecutive k-mers for each assembly.
-        2. Determine the boundaries (start & stop) of each group of consecutive k-mers.
-        3. Select the largest consecutive group for each assembly.
-
-        Args:
-            kmers (pd.DataFrame): See `ConnectedKmers.__init__()`.
-            kmerlen (int): See `Config` in `config.py`.
-            windowsize (int): See `Config` in `config.py`.
-
-        Returns:
-            pd.DataFrame: See `ConnectedKmers.loc`.
-        """
-        # sort by genomic position
-        kmers.sort_values(
-            by=['assembly_idx', 'record_idx', 'pos'],
-            inplace=True, ignore_index=True
-        )
-
-        # since a subgraph might be repetitive in an assembly, we cannot simply groupby ['assembly_idx', 'record_idx']
-        # we need to find runs of consecutive k-mers, by their genomic positions (sorted)
-        # consec_gp: consecutive group
-        # the definition of "consecutive" can be adjusted by changing CONSEC_KMER_MUL
-        kmers['consec_gp'] = (kmers['pos'].diff() > CONSEC_KMER_MUL * windowsize).cumsum()
-
-        # find the start and stop of each consecutive group
-        # df.groupby preserves the order of rows within each group
-        # since position / index is sorted, start is the first row, and stop is the last row
-        # strand can be determined by the order of k-mers, using k-mer strand as supplement
-        loc = kmers.groupby(
-            # group by record_idx is also needed, otherwise consec_gp might span across more than one records
-            # as_index=False to keep 'assembly_idx' and 'record_idx' as columns in loc
-            by=['assembly_idx', 'record_idx', 'consec_gp'], as_index=False, sort=False, observed=True
-        ).agg(
-            # if we only need 'pos', "groupby()['pos'].agg(['first', 'last', 'size'])" is faster
-            start=pd.NamedAgg(column='pos', aggfunc='first'),
-            stop=pd.NamedAgg(column='pos', aggfunc='last'),
-            n_kmers=pd.NamedAgg(column='pos', aggfunc='size'),
-            kmers=pd.NamedAgg(column='hash', aggfunc=tuple),
-            # kmer_strand=pd.NamedAgg(column='strand', aggfunc='sum'), # much faster than "lambda x: ''.join(x)"
-            is_target=pd.NamedAgg(column='is_target', aggfunc='first'), # should be the same within each group
-        )
-        loc.drop(columns='consec_gp', inplace=True)
-
-        # select the largest consecutive group for each assembly (max number of consecutive k-mers)
-        # also count the number of consecutive groups for each assembly (number of repeats)
-        loc_max = loc.groupby(
-            by='assembly_idx', sort=False
-        )['n_kmers'].agg(['idxmax', 'size'])
-        loc = loc.loc[loc_max['idxmax'].tolist()] # here .loc is a df method
-        loc['n_repeats'] = loc_max['size'].tolist()
-
-        # calculate sequence length
-        loc['stop'] += kmerlen
-        loc['len'] = loc['stop'] - loc['start']
-
-        # add a placeholder for sequences
-        loc['seq'] = None
-
-        loc.reset_index(drop=True, inplace=True)
-        return loc
-
-    @staticmethod
-    def __get_rep_order(loc: pd.DataFrame, warnings: set) -> tuple[OrderedKmers, int]:
-        """Determine the representative k-mer order and the number of target assemblies having it.
-        1. Find the most common canonical k-mer ordering in target assemblies, weighted by the number of k-mers.
-        2. Sanity check.
-
-        Args:
-            loc (pd.DataFrame): See `ConnectedKmers.loc`.
-            warnings (set): See `ConnectedKmers.warnings`.
-
-        Returns:
-            tuple: A tuple containing
-                1. OrderedKmers: The representative k-mer order.
-                2. int: See `ConnectedKmers.n_rep`.
-        """
-        # count the number of each unique k-mer ordering in target assemblies
-        tar_kmers = loc[loc['is_target'] == True]['kmers']
-        c: Mapping[tuple, int] = Counter(tar_kmers)
-
-        # count the number of each unique canonical k-mer ordering (regardless of orientation)
-        c_canonical: Mapping[tuple, int] = Counter()
-        for kmers, n in c.items():
-            c_canonical[
-                sorted((kmers, kmers[::-1]))[0]
-            ] += n
-
-        # get the most common canonical ordering, weighted by the number of k-mers
-        rep_canonical = max(
-            c_canonical,
-            key=lambda k: len(k)*c_canonical[k]
-        )
-        # get the most common orientation
-        rep_order = OrderedKmers(max(
-            (rep_canonical, rep_canonical[::-1]),
-            key=lambda k: c[k] # if k does not exist in tar_kmers, c will return 0 (e.g., only one orientation exists)
-        ))
-
-        # sanity check
-        if len(rep_order) == 1:
-            warnings.add('single') # has only one k-mer
-        if rep_order.is_dup:
-            warnings.add('dup') # has duplicate k-mers
-
-        return rep_order, c_canonical[rep_canonical]
-
-def _create_ck(
-    nodes: tuple[np.uint64],
-    kmers: tuple,
-    record_offsets: NDArray[np.uint32],
-    is_targets: NDArray[np.bool_],
-    kmerlen: int,
-    windowsize: int
-) -> ConnectedKmers:
-    """Create a ConnectedKmers instance by taking the outputs of `_get_create_ck_args()`.
-    """
-    # add hash to each group
-    kmers_df = list()
-    for h, kmer_group in zip(nodes, kmers):
-        df = pd.DataFrame(kmer_group)
-        df['hash'] = h
-        kmers_df.append(df)
-
-    # recover assembly_idx
-    kmers_df = pd.concat(kmers_df, ignore_index=True)
-    record_idx = kmers_df['record_idx'].to_numpy()
-    assembly_idx = np.searchsorted(
-        record_offsets,
-        record_idx,
-        side='right',
-    ) - 1
-    kmers_df['record_idx'] = record_idx - record_offsets[assembly_idx]
-    kmers_df['assembly_idx'] = assembly_idx
-    kmers_df['is_target'] = is_targets[assembly_idx]
-
-    return ConnectedKmers(kmers_df, kmerlen, windowsize)
-
-
-def _get_create_ck_args(
-    graph: FilteredGraph, assemblies: Assemblies, kmerlen: int, windowsize: int
-) -> Generator[tuple, None, None]:
-    """Generate input arguments for `_create_ck()`.
-
-    Args:
-        graph (FilteredGraph): See `FilteredGraph` in `kmers.py`.
-        assemblies (Assemblies): See `Assemblies` in `assemblies.py`.
-        kmerlen (int): See `Config` in `config.py`.
-        windowsize (int): See `Config` in `config.py`.
-
-    Yields:
-        tuple: Input arguments of `_create_ck()`.
-    """
-    kmers = graph.kmers
-    nodes = graph.nodes
-    subgraphs = graph.subgraphs
-    record_offsets = graph.record_offsets
-    is_targets = assemblies.is_targets
-
-    # yield function args
-    for sg in subgraphs:
-        sg_nodes = nodes[sg]
-        arg_nodes = tuple(sg_nodes['hash'])
-        arg_kmers = tuple(
-            kmers[start:stop]
-            for start, stop in zip(sg_nodes['start'], sg_nodes['stop'])
-        )
-
-        yield arg_nodes, arg_kmers, record_offsets, is_targets, kmerlen, windowsize
-
-
-def _fetch_cks_seq(
-    all_cks: list[ConnectedKmers], assemblies: Assemblies, rep_only: bool, n_cpu: int
-) -> list[str] | None:
-    """Fetch the actual sequences for a list of ConnectedKmers instances.
-
-    Args:
-        all_cks (list[ConnectedKmers]): See `_get_cks()`.
-        assemblies (Assemblies): See `Assemblies` in `assemblies.py`.
-        rep_only (bool): If True, only fetch the representative of each ConnectedKmers instance (fewer assemblies to be loaded);
-            else fetch all sequences.
-        n_cpu (int): See `Config` in `config.py`.
-
-    Returns:
-        list[str] | None: If `rep_only=True`, return a list of representative sequences; else return None.
-    """
-    if rep_only:
-        # concat all ConnectedKmers.rep and transpose
-        df_loc = pd.concat(
-            (ck.rep for ck in all_cks),
-            axis=1, ignore_index=True
-        ).transpose()
-    else:
-        # concat all ConnectedKmers.loc, and add another level of index to label each instance
-        ck_idx = range(len(all_cks))
-        # ck.loc.index is already sorted
-        df_loc = pd.concat(
-            (ck.loc for ck in all_cks),
-            ignore_index=False, keys=ck_idx
-        )
-
-    # fetch sequences (make sure df_loc.index is sorted with ascending=True)
-    all_seq = assemblies.fetch_seq(df_loc, n_cpu)
-
-    if rep_only:
-        # update all ConnectedKmers.rep['seq']
-        for ck, seq in zip(all_cks, all_seq):
-            ck.rep['seq'] = seq
-        return all_seq.to_list()
-    else:
-        # update all ConnectedKmers.loc['seq']
-        for ck, i in zip(all_cks, ck_idx):
-            #if len(ck.loc) > 0:
-            # use to_list() since all_seq is already sorted
-            ck.loc['seq'] = all_seq.loc[i].to_list()
-
-
-def _get_cks(
-    graph: FilteredGraph,
-    total_tar: int,
-    kmerlen: int,
-    windowsize: int,
-    min_len: int,
-    assemblies: Assemblies,
-    n_cpu: int
-) -> tuple[list[ConnectedKmers], list[str]]:
-    """
-    1. Create a ConnectedKmers instance for each low-penalty subgraph of the k-mer graph (`FilteredGraph.subgraphs`).
-    2. Remove instances that are shorter than min_len or have defects (`ConnectedKmers.is_bad`).
-    3. Fetch the representative sequence for each remaining instance.
-
-    Args:
-        graph (FilteredGraph): See `FilteredGraph` in `kmers.py`.
-        total_tar (int): See `RunState` in `config.py`.
-        kmerlen (int): See `Config` in `config.py`.
-        windowsize (int): See `Config` in `config.py`.
-        min_len (int): See `Config` in `config.py`.
-        assemblies (Assemblies): See `Assemblies` in `assemblies.py`.
-        n_cpu (int): See `Config` in `config.py`.
-
-    Returns:
-        tuple: A tuple containing
-            1. list[ConnectedKmers]: Candidate markers as ConnectedKmers instances.
-            2. list[str]: Sequences of each marker.
-    """
-    logger.info('Finding a representative for each low-penalty subgraph...')
-    tik = time()
-
-    # create a ConnectedKmers instance for each subgraph
-    logger.info(' - Processing each subgraph...')
-    all_cks: list[ConnectedKmers] = mp_wrapper(
-        _create_ck,
-        _get_create_ck_args(graph, assemblies, kmerlen, windowsize),
-        n_cpu=n_cpu, n_jobs=len(graph.subgraphs)
-    )
-
-    # get candidate ConnectedKmers instances
-    all_cks = list(
-        ck for ck in all_cks
-        if (ck.len >= min_len) and (not ck.is_bad)
-    )
-    logger.info(f' - Found {len(all_cks)} candidate signatures')
-
-    logger.info(' - Fetching the representative sequence for each candidate...')
-    all_reps = _fetch_cks_seq(all_cks, assemblies, rep_only=True, n_cpu=n_cpu)
-
-    # update rep_ratio of each ck
-    for ck in all_cks:
-        ck.rep_ratio = ck.n_rep / total_tar
-
-    print_time_delta(time()-tik)
-    return all_cks, all_reps
-
-
-def _signature_to_ck(signature) -> ConnectedKmers:
-    """Adapt a native Signature to the interface used by marker output and evaluation."""
-    loc = signature.location
-    ck = object.__new__(ConnectedKmers)
-    ck.kmers = None
-    ck.loc = None
-    ck.rep = pd.Series({
-        'assembly_idx': loc.assembly_idx,
-        'record_idx': loc.record_idx,
-        'start': loc.start,
-        'stop': loc.stop,
-        'n_kmers': loc.n_kmers,
-        'n_repeats': loc.n_repeats,
-        'seq': signature.sequence
-    })
-    ck.len = signature.length
-    ck.n_rep = signature.n_rep
-    ck.blast = None
-    ck.metrics = _EMPTY_METRICS
-    ck.rep_ratio = signature.rep_ratio
-    ck.warnings = set()
-    ck.is_bad = False
-    return ck
+_METRIC_NAMES = tuple(f.name for f in fields(SignatureMetrics))
+_EMPTY_METRICS = SignatureMetrics()
+# Baseline metrics if signature has no BLAST hit
+_BASELINE_METRICS = SignatureMetrics(**{f: .0 for f in _METRIC_NAMES})
 
 
 def _get_avg_ident(blast_out: pd.DataFrame, query_len: int, n: int) -> float:
@@ -505,7 +111,7 @@ def _get_avg_dist(blast_out: pd.DataFrame, query_len: int, n: int) -> float:
 
 def _get_metrics(
     blast_out: pd.DataFrame, marker_len: int, total_tar: int, total_neg: int
-) -> MarkerMetrics:
+) -> SignatureMetrics:
     """Calculate the metrics of a marker based on its BLAST hits in all assemblies.
     - Conservation is calculated with `_get_avg_ident()` on target assemblies.
     - Divergence is calculated with `_get_avg_dist()` on non-target assemblies.
@@ -518,7 +124,7 @@ def _get_metrics(
         total_neg (int): Number of non-target assemblies.
 
     Returns:
-        MarkerMetrics: Marker metrics.
+        SignatureMetrics: Signature metrics.
     """
     if blast_out is None: # no blast hit in any assembly
         return _BASELINE_METRICS
@@ -541,16 +147,16 @@ def _get_metrics(
         metrics['avg_repeats_neg'] = df_neg['n_hits'].mean()
         metrics['avg_pident_neg'] = df_neg['avg_nident'].mean() / marker_len
 
-    return MarkerMetrics(**metrics)
+    return SignatureMetrics(**metrics)
 
 
-def eval_markers(
+def eval_signatures(
     all_seqs: list[str], blastdb: Path, total_tar: int, total_neg: int, n_cpu: int=1
-) -> tuple[list[pd.DataFrame], list[MarkerMetrics]]:
-    """BLAST check each marker (signature) sequence against all / non-target assemblies, and calculate the metrics of each marker.
+) -> tuple[list[pd.DataFrame], list[SignatureMetrics]]:
+    """BLAST check each signature sequence against all / non-target assemblies, and calculate the metrics of each signature.
 
     Args:
-        all_seqs (list[str]): A list of marker sequences.
+        all_seqs (list[str]): A list of signature sequences.
         blastdb (Path): Path to a BLAST database generated by Seqwin (e.g., `seqwin-out/blastdb/`).
         total_tar (int): Number of target assemblies.
         total_neg (int): Number of non-target assemblies.
@@ -558,8 +164,8 @@ def eval_markers(
 
     Returns:
         tuple: A tuple containing
-            1. list[pd.DataFrame]: BLAST hits of each marker.
-            2. list[MarkerMetrics]: Metrics of each marker.
+            1. list[pd.DataFrame]: BLAST hits of each signature.
+            2. list[SignatureMetrics]: Metrics of each signature.
     """
     if blastdb.name == BLASTCONFIG.title_neg_only:
         neg_only = True
@@ -636,58 +242,36 @@ def eval_markers(
     return all_blast, metrics
 
 
-def _eval_cks(
-    all_cks: list[ConnectedKmers], all_reps: list[str], blastdb: Path, total_tar: int, total_neg: int, n_cpu: int
+def _eval_signatures(
+    signatures: list[Signature], blastdb: Path, total_tar: int, total_neg: int, n_cpu: int
 ) -> None:
+    """Evaluate signatures with BLAST and rank them by conservation and divergence.
     """
-    1. BLAST check the representative sequence of each ConnectedKmers instance (ck), against all / non-target assemblies.
-    2. Calculate the conservation and divergence for each ck.
-    3. Update the attributes of each ck.
-    4. Sort all_cks by conservation + divergence.
-
-    Args:
-        all_cks (list[ConnectedKmers]): ConnectedKmers instances.
-        all_reps (list[str]): Representative sequences, in the same order as all_cks.
-        blastdb (Path): See `RunState` in `config.py`.
-        total_tar (int): See `RunState` in `config.py`.
-        total_neg (int): See `RunState` in `config.py`.
-        n_cpu (int): See `Config` in `config.py`.
-    """
-    # run evaluation
-    results = eval_markers(all_reps, blastdb, total_tar, total_neg, n_cpu)
-
-    # update attributes of each ck
-    for ck, blast, metrics in zip(all_cks, *results):
-        ck.blast, ck.metrics = blast, metrics
-
-    # sort in-place
-    all_cks.sort(
-        key=lambda ck: ck.metrics.conservation+ck.metrics.divergence,
+    results = eval_signatures(
+        [s.sequence for s in signatures],
+        blastdb, total_tar, total_neg, n_cpu
+    )
+    for s, blast_result, metrics in zip(signatures, *results):
+        s.blast = blast_result
+        s.metrics = metrics
+    signatures.sort(
+        key=lambda s: s.metrics.conservation + s.metrics.divergence,
         reverse=True
     )
 
 
-def get_markers(
-    graph: FilteredGraph, assemblies: Assemblies, config: Config, state: RunState
-) -> list[ConnectedKmers]:
-    """Extract candidate markers (signatures) from a k-mer graph, and save them to files.
-
-    Args:
-        graph (FilteredGraph): See `FilteredGraph` in `kmers.py`.
-        assemblies (Assemblies): See `Assemblies` in `assemblies.py`.
-        config (Config): See `Config` in `config.py`.
-        state (RunState): See `RunState` in `config.py`.
-
-    Returns:
-        list[ConnectedKmers]: Candidate markers.
+def process_signatures(
+    result: FilterResult,
+    record_offsets,
+    record_ids,
+    assemblies: Assemblies,
+    config: Config,
+    state: RunState
+) -> list[Signature]:
+    """Evaluate extracted signatures and save them to FASTA and CSV.
     """
-    record_offsets = graph.record_offsets
-    record_ids = graph.record_ids
-
+    signatures = result.signatures
     overwrite = config.overwrite
-    kmerlen = config.kmerlen
-    windowsize = config.windowsize
-    min_len = config.min_len
     run_blast = config.run_blast
     blast_neg_only = config.blast_neg_only
     n_cpu = config.n_cpu
@@ -696,29 +280,6 @@ def get_markers(
     total_tar = state.total_tar
     total_neg = state.total_neg
 
-    # extract marker from each low-penalty subgraph
-    logger.info('Finding a representative for each low-penalty subgraph...')
-    tik = time()
-    signatures = _extract_native(
-        graph.kmers,
-        graph.nodes,
-        graph.subgraphs,
-        record_offsets,
-        assemblies.is_targets,
-        [str(path) for path in assemblies.paths],
-        kmerlen,
-        windowsize,
-        min_len,
-        total_tar,
-        CONSEC_KMER_MUL,
-        n_cpu
-    )
-    logger.info(f' - Found {len(signatures)} candidate signatures')
-    all_cks = [_signature_to_ck(signature) for signature in signatures]
-    all_reps = [signature.sequence for signature in signatures]
-    print_time_delta(time()-tik)
-
-    # evaluate each marker with BLAST
     if run_blast and HAS_BLAST:
         logger.info('Evaluating candidate signatures with BLAST...')
         blastdb = assemblies.makeblastdb(
@@ -727,27 +288,29 @@ def get_markers(
             overwrite=overwrite,
             n_cpu=n_cpu
         )
-        _eval_cks(all_cks, all_reps, blastdb, total_tar, total_neg, n_cpu)
+        _eval_signatures(signatures, blastdb, total_tar, total_neg, n_cpu)
     else:
         if run_blast:
             logger.error('BLAST+ is not installed. Signature evaluation is skipped.')
         else:
-            logger.warning(f'Signature evaluation is turned off, skip running BLAST')
+            logger.warning('Signature evaluation is turned off, skip running BLAST')
         blastdb = None
+        for s in signatures:
+            s.metrics = _EMPTY_METRICS
 
     # save to fasta
     markers_fasta = working_dir / WORKINGDIR.markers_fasta
     file_to_write(markers_fasta, overwrite)
     fasta = list()
     csv = list()
-    for ck in all_cks:
-        rep = ck.rep
-        assembly_idx = rep.assembly_idx
-        record_id = record_ids[record_offsets[assembly_idx] + rep.record_idx]
-        header = f'{assembly_idx}-{record_id}-{rep.start}:{rep.stop}'
-        fasta.append(f'>{header}\n{rep.seq}\n')
+    for s in signatures:
+        loc = s.location
+        assembly_idx = loc.assembly_idx
+        record_id = record_ids[record_offsets[assembly_idx] + loc.record_idx]
+        header = f'{assembly_idx}-{record_id}-{loc.start}:{loc.stop}'
+        fasta.append(f'>{header}\n{s.sequence}\n')
         csv.append(
-            (header, ck.len, *astuple(ck.metrics), ck.rep_ratio, rep.n_kmers)
+            (header, s.length, *astuple(s.metrics), s.rep_ratio, loc.n_kmers)
         )
     markers_fasta.write_text(''.join(fasta), encoding='utf-8', newline='\n')
     logger.info(f'Candidate signatures saved as {markers_fasta}')
@@ -762,4 +325,4 @@ def get_markers(
     logger.info(f'Metrics of candidate signatures saved as {markers_csv}')
 
     state.blastdb = blastdb
-    return all_cks
+    return signatures

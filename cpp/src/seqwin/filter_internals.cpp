@@ -25,7 +25,7 @@ FilterResult get_penalty(
     std::size_t n_record_offsets,
     const bool* is_targets,
     std::size_t n_assemblies,
-    std::size_t n_cpu
+    ThreadPool& pool
 ) {
     /** Metadata shared by all FASTA records in one assembly. */
     struct RecordInfo {
@@ -69,12 +69,6 @@ FilterResult get_penalty(
         throw std::invalid_argument("is_targets must contain at least one non-target assembly");
     }
 
-    std::size_t n_workers = std::max<std::size_t>(1, n_cpu);
-    if (n_nodes > 0) {
-        n_workers = std::min(n_workers, n_nodes);
-    }
-    ThreadPool pool(n_workers);
-
     const std::uint32_t n_records = record_offsets[n_assemblies];
     NoInitArray<RecordInfo> record_info(n_records);
     pool.parallel_for(n_assemblies, [&](std::size_t start, std::size_t end, std::size_t) {
@@ -96,7 +90,7 @@ FilterResult get_penalty(
         }
     });
 
-    std::vector<NodeSums> node_sums(n_workers);
+    std::vector<NodeSums> node_sums(pool.size());
     pool.parallel_for(n_nodes, [&](std::size_t start, std::size_t end, std::size_t worker_i) {
         auto& sums = node_sums[worker_i];
 

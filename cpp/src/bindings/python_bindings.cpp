@@ -113,17 +113,20 @@ PYBIND11_MODULE(_core, m) {
            NumpyArray<seqwin::Node> nodes,
            NumpyArray<seqwin::Edge> edges,
            NumpyArray<std::uint32_t> record_offsets,
+           const std::vector<std::string>& assembly_paths,
            NumpyArray<bool> is_targets,
            std::optional<NumpyArray<double>> jaccard,
+           std::size_t kmerlen,
+           std::size_t windowsize,
            std::optional<double> penalty_th,
            double stringency,
-           double penalty_th_cap,
-           double edge_w_th_mul,
-           std::size_t windowsize,
            std::size_t min_len,
            std::optional<std::size_t> max_len,
+           double penalty_th_cap,
+           double edge_w_th_mul,
            std::size_t min_nodes_floor,
            std::optional<std::size_t> max_nodes_cap,
+           double consec_kmer_mul,
            std::size_t n_cpu
         ) {
             const auto* kmers_ptr = kmers.data();
@@ -153,15 +156,17 @@ PYBIND11_MODULE(_core, m) {
                 jaccard_cols = static_cast<std::size_t>(jaccard->shape(1));
             }
             seqwin::FilterConfig config{
+                kmerlen,
+                windowsize,
                 penalty_th,
                 stringency,
-                penalty_th_cap,
-                edge_w_th_mul,
-                windowsize,
                 min_len,
                 max_len,
+                penalty_th_cap,
+                edge_w_th_mul,
                 min_nodes_floor,
                 max_nodes_cap,
+                consec_kmer_mul,
                 n_cpu
             };
 
@@ -176,6 +181,7 @@ PYBIND11_MODULE(_core, m) {
                     n_edges,
                     record_offsets_ptr,
                     n_record_offsets,
+                    assembly_paths,
                     is_targets_ptr,
                     n_assemblies,
                     jaccard_ptr,
@@ -189,6 +195,7 @@ PYBIND11_MODULE(_core, m) {
                 array_to_numpy(std::move(result.nodes)),
                 array_to_numpy(std::move(result.edges)),
                 std::move(result.subgraphs),
+                std::move(result.signatures),
                 result.total_tar,
                 result.total_neg,
                 result.penalty_th,
@@ -201,58 +208,21 @@ PYBIND11_MODULE(_core, m) {
         py::arg("nodes").noconvert(),
         py::arg("edges").noconvert(),
         py::arg("record_offsets").noconvert(),
+        py::arg("assembly_paths"),
         py::arg("is_targets").noconvert(),
         py::arg("jaccard").noconvert(),
-        py::arg("penalty_th"),
-        py::arg("stringency"),
-        py::arg("penalty_th_cap"),
-        py::arg("edge_w_th_mul"),
-        py::arg("windowsize"),
-        py::arg("min_len"),
-        py::arg("max_len"),
-        py::arg("min_nodes_floor"),
-        py::arg("max_nodes_cap"),
-        py::arg("n_cpu")
-    );
-
-    m.def("_extract_native",
-        [](NumpyArray<seqwin::Kmer> kmers,
-           NumpyArray<seqwin::Node> nodes,
-           const seqwin::Subgraphs& subgraphs,
-           NumpyArray<std::uint32_t> record_offsets,
-           NumpyArray<bool> is_targets,
-           const std::vector<std::string>& assembly_paths,
-           std::size_t kmerlen,
-           std::size_t windowsize,
-           std::size_t min_len,
-           std::size_t total_tar,
-           double consec_kmer_mul,
-           std::size_t n_cpu
-        ) {
-            require_1d_size(kmers, "kmers");
-            const auto n_nodes = require_1d_size(nodes, "nodes");
-            const auto n_record_offsets = require_1d_size(record_offsets, "record_offsets");
-            const auto n_assemblies = require_1d_size(is_targets, "is_targets");
-            const seqwin::ExtractConfig config{
-                kmerlen, windowsize, min_len, total_tar, consec_kmer_mul, n_cpu
-            };
-            py::gil_scoped_release release;
-            return seqwin::extract(kmers.data(), nodes.data(), n_nodes,
-                subgraphs, record_offsets.data(), n_record_offsets, is_targets.data(),
-                n_assemblies, assembly_paths, config);
-        },
-        py::arg("kmers").noconvert(),
-        py::arg("nodes").noconvert(),
-        py::arg("subgraphs"),
-        py::arg("record_offsets").noconvert(),
-        py::arg("is_targets").noconvert(),
-        py::arg("assembly_paths"),
         py::arg("kmerlen"),
         py::arg("windowsize"),
+        py::arg("penalty_th"),
+        py::arg("stringency"),
         py::arg("min_len"),
-        py::arg("total_tar"),
+        py::arg("max_len"),
+        py::arg("penalty_th_cap"),
+        py::arg("edge_w_th_mul"),
+        py::arg("min_nodes_floor"),
+        py::arg("max_nodes_cap"),
         py::arg("consec_kmer_mul"),
-        py::arg("n_cpu") = 1
+        py::arg("n_cpu")
     );
 
 }

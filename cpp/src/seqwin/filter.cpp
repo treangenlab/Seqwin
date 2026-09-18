@@ -150,6 +150,7 @@ FilterResult filter(
     std::size_t n_edges,
     const std::uint32_t* record_offsets,
     std::size_t n_record_offsets,
+    const std::vector<std::string>& assembly_paths,
     const bool* is_targets,
     std::size_t n_assemblies,
     const double* jaccard,
@@ -157,17 +158,37 @@ FilterResult filter(
     std::size_t jaccard_cols,
     const FilterConfig& config
 ) {
+    internal::ThreadPool pool(std::max<std::size_t>(1, config.n_cpu));
+
     internal::log_python(" - Calculating node penalty scores...");
     auto result = internal::get_penalty(
-        kmers, nodes, n_nodes, record_offsets, n_record_offsets, is_targets, n_assemblies, config.n_cpu
+        kmers,
+        nodes,
+        n_nodes,
+        record_offsets,
+        n_record_offsets,
+        is_targets,
+        n_assemblies,
+        pool
     );
     calculate_thresholds(
-        is_targets, n_assemblies, jaccard, jaccard_rows, jaccard_cols, config, result
+        is_targets,
+        n_assemblies,
+        jaccard,
+        jaccard_rows,
+        jaccard_cols,
+        config,
+        result
     );
 
     internal::log_python(" - Filtering graph edges and nodes...");
     internal::prune_graph(
-        nodes, n_nodes, edges, n_edges, result.edge_weight_th, result
+        nodes,
+        n_nodes,
+        edges,
+        n_edges,
+        result.edge_weight_th,
+        result
     );
     internal::log_python(
         " - Removed " + std::to_string(n_edges - result.edges.size()) + " edges with weight<" +
@@ -179,12 +200,36 @@ FilterResult filter(
     );
 
     internal::get_subgraphs(
-        result.nodes, result.edges, result.penalty_th, result.min_nodes, result.max_nodes, result
+        result.nodes,
+        result.edges,
+        result.penalty_th,
+        result.min_nodes,
+        result.max_nodes,
+        result
     );
     if (result.subgraphs.empty()) {
         throw std::runtime_error("No low-penalty subgraph was found. Try decrease --stringency, or increase --penalty-th");
     }
     internal::log_python(" - Found " + std::to_string(result.subgraphs.size()) + " low-penalty subgraphs");
+
+    internal::log_python(" - Finding a representative for each low-penalty subgraph...");
+    internal::extract_signatures(
+        result.subgraphs,
+        result.nodes,
+        kmers,
+        record_offsets,
+        n_record_offsets,
+        assembly_paths,
+        is_targets,
+        n_assemblies,
+        config.kmerlen,
+        config.windowsize,
+        config.min_len,
+        config.consec_kmer_mul,
+        result.total_tar,
+        pool,
+        result
+    );
 
     return result;
 }

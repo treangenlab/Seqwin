@@ -1,15 +1,17 @@
-#include "seqwin/extract.hpp"
+#include "seqwin/filter_internals.hpp"
 
 #include <algorithm>
 #include <cctype>
 #include <cmath>
 #include <stdexcept>
+#include <string>
 #include <tuple>
 #include <utility>
 
 #include <ankerl/unordered_dense.h>
 
 #include "utils/fasta_reader.hpp"
+#include "utils/logging.hpp"
 
 namespace seqwin::internal {
 namespace {
@@ -18,6 +20,18 @@ struct FullKmer {
     std::uint64_t hash;
     std::uint32_t record_idx;
     std::uint32_t pos;
+};
+
+/**
+ * @brief A run of consecutive k-mers found in an assembly.
+ */
+struct ConsecutiveKmers {
+    /** Location spanned by the k-mer run. */
+    SubgraphLoc location;
+    /** Whether the containing assembly belongs to the target set. */
+    bool is_target;
+    /** K-mer hashes in positional order. */
+    std::vector<std::uint64_t> kmers;
 };
 
 /** Hash a vector of k-mer hashes using an FNV-1a-style combining scheme. */
@@ -44,14 +58,16 @@ struct CanonicalCount {
     std::size_t first_seen = 0;
 };
 
-} // namespace
-
+/**
+ * @brief Extract a signature from one low-penalty subgraph.
+ *
+ * Return `std::nullopt` if the signature is invalid.
+ */
 std::optional<Signature> extract_worker(
     std::size_t subgraph_idx,
     const std::vector<std::size_t>& subgraph,
+    const NoInitArray<Node>& nodes,
     const Kmer* kmers,
-    const Node* nodes,
-    std::size_t n_nodes,
     const std::uint32_t* record_offsets,
     std::size_t n_record_offsets,
     const bool* is_targets,
@@ -59,14 +75,14 @@ std::optional<Signature> extract_worker(
     std::size_t kmerlen,
     std::size_t windowsize,
     std::size_t min_len,
-    std::size_t total_tar,
-    double consec_kmer_mul
+    double consec_kmer_mul,
+    std::size_t total_tar
 ) {
     // Collect and position-sort all k-mers included in the subgraph
     std::vector<FullKmer> sg_kmers; // K-mers of the current subgraph
     std::size_t n_sg_kmers = 0;
     for (const auto node_idx : subgraph) {
-        if (node_idx >= n_nodes) {
+        if (node_idx >= nodes.size()) {
             throw std::invalid_argument("subgraph node index is out of bounds");
         }
         n_sg_kmers += nodes[node_idx].stop - nodes[node_idx].start;
@@ -250,6 +266,11 @@ std::optional<Signature> extract_worker(
     };
 }
 
+/**
+ * @brief Fetch signature nucleotide sequences from their assembly FASTA files.
+ *
+ * Sequences are added to `signatures` in place.
+ */
 void fetch_signature_sequences(
     std::vector<Signature>& signatures,
     const std::vector<std::string>& assembly_paths,
@@ -283,6 +304,9 @@ void fetch_signature_sequences(
     }
 
     // Read different assemblies in parallel and slice each requested sequence interval
+    log_python(
+        " - Fetching signature sequences (" + std::to_string(groups.size()) + " assemblies to be loaded)..."
+    );
     pool.parallel_for(groups.size(), [&](std::size_t begin, std::size_t end, std::size_t) {
         for (std::size_t group_idx = begin; group_idx < end; ++group_idx) {
             const auto& group = groups[group_idx];
@@ -307,71 +331,68 @@ void fetch_signature_sequences(
     });
 }
 
-} // namespace seqwin::internal
+} // namespace
 
-namespace seqwin {
-
-std::vector<Signature> extract(
-    const Kmer* kmers,
-    const Node* nodes,
-    std::size_t n_nodes,
+void extract_signatures(
     const Subgraphs& subgraphs,
+    const NoInitArray<Node>& nodes,
+    const Kmer* kmers,
     const std::uint32_t* record_offsets,
     std::size_t n_record_offsets,
+    const std::vector<std::string>& assembly_paths,
     const bool* is_targets,
     std::size_t n_assemblies,
-    const std::vector<std::string>& assembly_paths,
-    const ExtractConfig& config
+    std::size_t kmerlen,
+    std::size_t windowsize,
+    std::size_t min_len,
+    double consec_kmer_mul,
+    std::size_t total_tar,
+    ThreadPool& pool,
+    FilterResult& result
 ) {
     if (n_record_offsets != n_assemblies + 1 || assembly_paths.size() != n_assemblies) {
         throw std::invalid_argument("assembly metadata dimensions do not match");
     }
-    if (config.total_tar == 0) {
+    if (total_tar == 0) {
         throw std::invalid_argument("at least one target assembly is required");
     }
-    if (!std::isfinite(config.consec_kmer_mul) || config.consec_kmer_mul <= 0.0) {
+    if (!std::isfinite(consec_kmer_mul) || consec_kmer_mul <= 0.0) {
         throw std::invalid_argument("consec_kmer_mul must be finite and greater than zero");
     }
     if (subgraphs.empty()) {
-        return {};
+        return;
     }
 
     std::vector<std::optional<Signature>> extracted(subgraphs.size());
-    const std::size_t n_workers = std::min(
-        std::max<std::size_t>(1, config.n_cpu), subgraphs.size()
-    );
-    internal::ThreadPool pool(n_workers);
     pool.parallel_for(subgraphs.size(), [&](std::size_t begin, std::size_t end, std::size_t) {
         for (std::size_t i = begin; i < end; ++i) {
-            extracted[i] = internal::extract_worker(
+            extracted[i] = extract_worker(
                 i,
                 subgraphs[i],
-                kmers,
                 nodes,
-                n_nodes,
+                kmers,
                 record_offsets,
                 n_record_offsets,
                 is_targets,
                 n_assemblies,
-                config.kmerlen,
-                config.windowsize,
-                config.min_len,
-                config.total_tar,
-                config.consec_kmer_mul
+                kmerlen,
+                windowsize,
+                min_len,
+                consec_kmer_mul,
+                total_tar
             );
         }
     });
 
-    std::vector<Signature> signatures;
-    signatures.reserve(subgraphs.size());
+    result.signatures.reserve(subgraphs.size());
     for (auto& signature : extracted) {
         if (signature) {
-            signatures.push_back(std::move(*signature));
+            result.signatures.push_back(std::move(*signature));
         }
     }
+    log_python(" - Found " + std::to_string(result.signatures.size()) + " candidate signatures");
 
-    internal::fetch_signature_sequences(signatures, assembly_paths, pool);
-    return signatures;
+    fetch_signature_sequences(result.signatures, assembly_paths, pool);
 }
 
-} // namespace seqwin
+} // namespace seqwin::internal

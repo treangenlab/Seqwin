@@ -3,10 +3,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <stdexcept>
+#include <string>
 #include <utility>
 #include <vector>
 
 #include "seqwin/filter.hpp"
+#include "utils/thread_pool.hpp"
 
 namespace seqwin::internal {
 
@@ -82,7 +84,7 @@ FilterResult get_penalty(
     std::size_t n_record_offsets,
     const bool* is_targets,
     std::size_t n_assemblies,
-    std::size_t n_cpu
+    ThreadPool& pool
 );
 
 /**
@@ -108,6 +110,28 @@ void get_subgraphs(
     double penalty_th,
     std::size_t min_nodes,
     std::optional<std::size_t> max_nodes,
+    FilterResult& result
+);
+
+/**
+ * @brief Extract signatures from low-penalty subgraphs.
+ * Output signatures are stored directly in `result`.
+ */
+void extract_signatures(
+    const Subgraphs& subgraphs,
+    const NoInitArray<Node>& nodes,
+    const Kmer* kmers,
+    const std::uint32_t* record_offsets,
+    std::size_t n_record_offsets,
+    const std::vector<std::string>& assembly_paths,
+    const bool* is_targets,
+    std::size_t n_assemblies,
+    std::size_t kmerlen,
+    std::size_t windowsize,
+    std::size_t min_len,
+    double consec_kmer_mul,
+    std::size_t total_tar,
+    ThreadPool& pool,
     FilterResult& result
 );
 

@@ -14,7 +14,8 @@ Dependencies:
 
 Classes:
 --------
-- FilteredGraph
+- Signature
+- FilterResult
 
 Functions:
 ----------
@@ -36,40 +37,44 @@ from numpy.typing import NDArray
 from .graph import KmerGraph, _filter_native
 from .assemblies import Assemblies
 from .utils import print_time_delta
-from .config import Config, RunState, HAS_MASH, WORKINGDIR
+from .config import Config, RunState, HAS_MASH, WORKINGDIR, CONSEC_KMER_MUL
 
 
-class FilteredGraph(KmerGraph):
-    r"""The filtered minimizer graph class.
-
-    Attributes:
-        kmers (NDArray[np.void]): Inherited from `KmerGraph.kmers`.
-        nodes (NDArray[np.void]): Nodes retained by edge filtering.
-        edges (NDArray[np.void]): Low-weight edges are filtered.
-        record_offsets (NDArray[np.uint32]): Inherited from `KmerGraph.record_offsets`.
-        record_ids (NDArray[np.str\_]): Inherited from `KmerGraph.record_ids`.
-        subgraphs (list[list[int]]): Low-penalty subgraphs represented by indices of retained nodes.
-    """
-    __slots__ = ('subgraphs',)
-    subgraphs: list[list[int]]
+class Signature:
+    """A signature extracted from one low-penalty subgraph."""
+    __slots__ = (
+        'subgraph_idx', 'location', 'sequence', 'length', 'n_rep', 'rep_ratio',
+        'blast', 'metrics'
+    )
 
     def __init__(
-        self,
-        kmers: NDArray[np.void],
-        nodes: NDArray[np.void],
-        edges: NDArray[np.void],
-        record_offsets: NDArray[np.uint32],
-        record_ids: NDArray[np.str_],
-        subgraphs: list[list[int]]
+        self, subgraph_idx: int, location, sequence: str, length: int,
+        n_rep: int, rep_ratio: float
     ) -> None:
-        """Initialized a filtered minimizer graph from computed graph data.
-        """
-        self.kmers = kmers
+        self.subgraph_idx = subgraph_idx
+        self.location = location
+        self.sequence = sequence
+        self.length = length
+        self.n_rep = n_rep
+        self.rep_ratio = rep_ratio
+        self.blast = None
+        self.metrics = None
+
+
+class FilterResult:
+    """Filtered graph data and signatures produced by the native pipeline."""
+    __slots__ = ('nodes', 'edges', 'subgraphs', 'signatures', 'jaccard')
+
+    def __init__(
+        self, nodes: NDArray[np.void], edges: NDArray[np.void],
+        subgraphs: list[list[int]], signatures: list[Signature],
+        jaccard: NDArray[np.float64] | None
+    ) -> None:
         self.nodes = nodes
         self.edges = edges
-        self.record_offsets = record_offsets
-        self.record_ids = record_ids
         self.subgraphs = subgraphs
+        self.signatures = signatures
+        self.jaccard = jaccard
 
 
 def build_graph(assemblies: Assemblies, config: Config) -> KmerGraph:
@@ -104,7 +109,7 @@ def build_graph(assemblies: Assemblies, config: Config) -> KmerGraph:
 
 def filter_graph(
     graph: KmerGraph, assemblies: Assemblies, config: Config, state: RunState
-) -> tuple[FilteredGraph, NDArray[np.float64] | None]:
+) -> FilterResult:
     """Filter a minimizer graph and find low-penalty subgraphs.
     """
     logger.info('Filtering minimizer graph...')
@@ -122,34 +127,37 @@ def filter_graph(
         else:
             logger.error('Mash is not installed. Falling back to minimizer sketches.')
 
-    (nodes, edges, subgraphs, total_tar, total_neg,
+    (nodes, edges, subgraphs, native_signatures, total_tar, total_neg,
      penalty_th, edge_weight_th, min_nodes, max_nodes) =  _filter_native(
         graph.kmers,
         graph.nodes,
         graph.edges,
         graph.record_offsets,
+        [str(path) for path in assemblies.paths],
         assemblies.is_targets,
         jaccard,
+        config.kmerlen,
+        config.windowsize,
         config.penalty_th,
         config.stringency,
-        config.penalty_th_cap,
-        config.edge_w_th_mul,
-        config.windowsize,
         config.min_len,
         config.max_len,
+        config.penalty_th_cap,
+        config.edge_w_th_mul,
         config.min_nodes_floor,
         config.max_nodes_cap,
+        CONSEC_KMER_MUL,
         config.n_cpu
     )
 
-    filtered = FilteredGraph(
-        kmers=graph.kmers,
-        nodes=nodes,
-        edges=edges,
-        record_offsets=graph.record_offsets,
-        record_ids=graph.record_ids,
-        subgraphs=subgraphs
-    )
+    signatures = [
+        Signature(
+            signature.subgraph_idx, signature.location, signature.sequence,
+            signature.length, signature.n_rep, signature.rep_ratio
+        )
+        for signature in native_signatures
+    ]
+    filtered = FilterResult(nodes, edges, subgraphs, signatures, jaccard)
     state.total_tar = total_tar
     state.total_neg = total_neg
     state.penalty_th = penalty_th
@@ -158,4 +166,4 @@ def filter_graph(
     state.max_nodes = max_nodes
 
     print_time_delta(time() - tik)
-    return filtered, jaccard
+    return filtered
