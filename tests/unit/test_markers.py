@@ -7,9 +7,8 @@ import pandas as pd
 
 import seqwin.markers as markers
 import seqwin.kmers as kmers
-from seqwin.config import Config, RunState
-from seqwin.kmers import FilterResults, _process_signatures
-from seqwin.markers import Signature, SignatureMetrics
+from seqwin.kmers import FilterResults, Signature
+from seqwin.markers import SignatureMetrics, process_signatures
 
 
 class Location:
@@ -56,7 +55,7 @@ def test_private_process_signatures_writes_record_id_and_outputs(tmp_path: Path)
         record_offsets=np.array([0, 2], dtype=np.uint32),
         record_ids=np.array(['first', 'second'])
     )
-    processed = _process_signatures(
+    processed = process_signatures(
         [signature], filtered, assemblies, graph, config, state
     )
 
@@ -76,10 +75,10 @@ def test_evaluation_attaches_results_and_ranks(monkeypatch):
     low = markers.SignatureMetrics(conservation=.1, divergence=.2)
     high = markers.SignatureMetrics(conservation=.8, divergence=.1)
     blasts = [object(), object()]
-    monkeypatch.setattr(kmers, 'eval_signatures', lambda *args: (blasts, [low, high]))
+    monkeypatch.setattr(markers, 'eval_signatures', lambda *args: (blasts, [low, high]))
 
     signatures = [first, second]
-    kmers._eval_signatures(signatures, Path('all'), 1, 1, 1)
+    markers._eval_signatures(signatures, Path('all'), 1, 1, 1)
 
     assert signatures == [second, first]
     assert first.blast is blasts[0] and first.metrics is low

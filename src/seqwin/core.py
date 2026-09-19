@@ -32,8 +32,8 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 from .assemblies import Assemblies, get_assemblies
-from .kmers import FilterResults, build_graph, filter_graph
-from .markers import Signature
+from .kmers import FilterResults, Signature, build_graph, filter_graph
+from .markers import process_signatures
 from .utils import overwrite_warning, overwrite_error, mkdir, file_to_write
 from .config import Config, RunState, config_logger, WORKINGDIR
 
@@ -130,6 +130,7 @@ class Seqwin(object):
             logger.info(f'Raw minimizer graph is saved as {graph_path}')
 
         filtered, signatures = filter_graph(graph, assemblies, config, state)
+        signatures = process_signatures(signatures, filtered, assemblies, graph, config, state)
 
         self.filtered = filtered
         self.signatures = signatures

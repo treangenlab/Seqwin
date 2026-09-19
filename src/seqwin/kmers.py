@@ -15,6 +15,7 @@ Dependencies:
 Classes:
 --------
 - FilterResults
+- Signature
 
 Functions:
 ----------
@@ -26,9 +27,8 @@ __author__ = 'Michael X. Wang'
 __license__ = 'GPL 3.0'
 
 import logging
-from pathlib import Path
 from time import time
-from dataclasses import dataclass, astuple, fields
+from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
@@ -38,11 +38,9 @@ from numpy.typing import NDArray
 
 from .graph import KmerGraph, _filter_native
 from .assemblies import Assemblies
-from .markers import SignatureMetrics, Signature, eval_signatures
-from .utils import print_time_delta, file_to_write
-from .config import Config, RunState, HAS_MASH, HAS_BLAST, WORKINGDIR
-
-_METRIC_NAMES = tuple(f.name for f in fields(SignatureMetrics))
+from .markers import SignatureMetrics
+from .utils import print_time_delta
+from .config import Config, RunState, HAS_MASH, WORKINGDIR
 
 
 @dataclass(slots=True, frozen=True)
@@ -80,91 +78,17 @@ class FilterResults:
     max_nodes: int | None
 
 
-def _eval_signatures(
-    signatures: list[Signature], blastdb: Path, total_tar: int, total_neg: int, n_cpu: int
-) -> None:
-    """Evaluate signatures with BLAST and rank them by conservation and divergence.
-    """
-    results = eval_signatures(
-        [s.sequence for s in signatures],
-        blastdb, total_tar, total_neg, n_cpu
-    )
-    for s, blast_result, metrics in zip(signatures, *results):
-        s.blast = blast_result
-        s.metrics = metrics
-    signatures.sort(
-        key=lambda s: s.metrics.conservation + s.metrics.divergence,
-        reverse=True
-    )
-
-
-def _process_signatures(
-    signatures: list[Signature],
-    filtered: FilterResults,
-    assemblies: Assemblies,
-    graph: KmerGraph,
-    config: Config,
-    state: RunState
-) -> tuple[Signature, ...]:
-    """Evaluate extracted signatures and save them to FASTA and CSV.
-    """
-    total_tar = filtered.total_tar
-    total_neg = filtered.total_neg
-
-    record_offsets = graph.record_offsets
-    record_ids = graph.record_ids
-
-    overwrite = config.overwrite
-    run_blast = config.run_blast
-    blast_neg_only = config.blast_neg_only
-    n_cpu = config.n_cpu
-
-    working_dir = state.working_dir
-
-    if run_blast and HAS_BLAST:
-        logger.info('Evaluating candidate signatures with BLAST...')
-        blastdb = assemblies.makeblastdb(
-            prefix=working_dir / WORKINGDIR.blast_dir,
-            neg_only=blast_neg_only,
-            overwrite=overwrite,
-            n_cpu=n_cpu
-        )
-        _eval_signatures(signatures, blastdb, total_tar, total_neg, n_cpu)
-    else:
-        if run_blast:
-            logger.error('BLAST+ is not installed. Signature evaluation is skipped.')
-        else:
-            logger.warning('Signature evaluation is turned off, skip running BLAST')
-        blastdb = None
-
-    # save to fasta
-    markers_fasta = working_dir / WORKINGDIR.markers_fasta
-    file_to_write(markers_fasta, overwrite)
-    fasta = list()
-    csv = list()
-    for s in signatures:
-        loc = s.location
-        assembly_idx = loc.assembly_idx
-        record_id = record_ids[record_offsets[assembly_idx] + loc.record_idx]
-        header = f'{assembly_idx}-{record_id}-{loc.start}:{loc.stop}'
-        fasta.append(f'>{header}\n{s.sequence}\n')
-        csv.append(
-            (header, s.length, *astuple(s.metrics), s.rep_ratio, loc.n_kmers)
-        )
-    markers_fasta.write_text(''.join(fasta), encoding='utf-8', newline='\n')
-    logger.info(f'Candidate signatures saved as {markers_fasta}')
-
-    # save to csv
-    markers_csv = working_dir / WORKINGDIR.markers_csv
-    file_to_write(markers_csv, overwrite)
-    pd.DataFrame(
-        csv,
-        columns=('fasta_header', 'length', *_METRIC_NAMES, 'rep_ratio', 'n_nodes')
-    ).to_csv(markers_csv, index=False, encoding='utf-8', lineterminator='\n')
-    logger.info(f'Metrics of candidate signatures saved as {markers_csv}')
-
-    state.blastdb = blastdb
-    return tuple(signatures)
+@dataclass(slots=True)
+class Signature:
+    """A signature extracted from one low-penalty subgraph."""
+    subgraph_idx: int
+    location: object
+    sequence: str
+    length: int
+    n_rep: int
+    rep_ratio: float
+    blast: pd.DataFrame | None = None
+    metrics: SignatureMetrics = SignatureMetrics()
 
 
 def build_graph(assemblies: Assemblies, config: Config) -> KmerGraph:
@@ -199,7 +123,7 @@ def build_graph(assemblies: Assemblies, config: Config) -> KmerGraph:
 
 def filter_graph(
     graph: KmerGraph, assemblies: Assemblies, config: Config, state: RunState
-) -> tuple[FilterResults, tuple[Signature, ...]]:
+) -> tuple[FilterResults, list[Signature]]:
     """Filter a minimizer graph and find low-penalty subgraphs.
     """
     logger.info('Filtering minimizer graph...')
@@ -279,6 +203,4 @@ def filter_graph(
     )
 
     print_time_delta(time() - tik)
-
-    signatures = _process_signatures(signatures, filtered, assemblies, graph, config, state)
     return filtered, signatures
