@@ -1,11 +1,15 @@
 from pathlib import Path
 from types import SimpleNamespace
+from dataclasses import is_dataclass
 
 import numpy as np
 import pandas as pd
 
 import seqwin.markers as markers
-from seqwin.kmers import FilterResult, Signature
+import seqwin.kmers as kmers
+from seqwin.config import Config, RunState
+from seqwin.kmers import FilterResults, _process_signatures
+from seqwin.markers import Signature, SignatureMetrics
 
 
 class Location:
@@ -19,32 +23,44 @@ class Location:
 
 def test_filter_result_and_signature_data_model():
     signature = Signature(2, Location(), 'ACGTAC', 6, 3, .75)
-    result = FilterResult(np.array([]), np.array([]), [[0]], [signature], None)
-    assert FilterResult.__slots__ == ('nodes', 'edges', 'subgraphs', 'signatures', 'jaccard')
+    result = FilterResults(
+        np.array([]), np.array([]), [[0]], None, 1, 1, .1, .2, .3, .4, 1, None
+    )
+    assert FilterResults.__slots__ == (
+        'nodes', 'edges', 'subgraphs', 'jaccard', 'total_tar', 'total_neg',
+        'e_absence_tar', 'e_presence_neg', 'penalty_th', 'edge_weight_th',
+        'min_nodes', 'max_nodes'
+    )
     assert Signature.__slots__ == (
         'subgraph_idx', 'location', 'sequence', 'length', 'n_rep', 'rep_ratio',
         'blast', 'metrics'
     )
-    assert result.signatures == [signature]
     assert result.jaccard is None
-    assert signature.blast is None and signature.metrics is None
+    assert signature.blast is None and isinstance(signature.metrics, SignatureMetrics)
+    assert is_dataclass(FilterResults)
+    assert is_dataclass(Signature)
 
 
-def test_process_signatures_writes_record_id_and_outputs(tmp_path: Path):
+def test_private_process_signatures_writes_record_id_and_outputs(tmp_path: Path):
     signature = Signature(0, Location(), 'ACGTAC', 6, 1, 1.0)
-    result = FilterResult(np.array([]), np.array([]), [[0]], [signature], None)
+    filtered = FilterResults(
+        np.array([]), np.array([]), [[0]], None, 1, 1, .1, .2, .3, .4, 1, None
+    )
     config = SimpleNamespace(
         overwrite=False, run_blast=False, blast_neg_only=False, n_cpu=1
     )
-    state = SimpleNamespace(working_dir=tmp_path, total_tar=1, total_neg=1)
+    state = SimpleNamespace(working_dir=tmp_path, blastdb=None)
     assemblies = SimpleNamespace()
 
-    processed = markers.process_signatures(
-        result, np.array([0, 2], dtype=np.uint32),
-        np.array(['first', 'second']), assemblies, config, state
+    graph = SimpleNamespace(
+        record_offsets=np.array([0, 2], dtype=np.uint32),
+        record_ids=np.array(['first', 'second'])
+    )
+    processed = _process_signatures(
+        [signature], filtered, assemblies, graph, config, state
     )
 
-    assert processed == [signature]
+    assert processed == tuple([signature])
     assert signature.metrics == markers.SignatureMetrics()
     assert (tmp_path / 'signatures.fasta').read_text() == '>0-second-2:8\nACGTAC\n'
     output = pd.read_csv(tmp_path / 'signatures.csv')
@@ -60,10 +76,10 @@ def test_evaluation_attaches_results_and_ranks(monkeypatch):
     low = markers.SignatureMetrics(conservation=.1, divergence=.2)
     high = markers.SignatureMetrics(conservation=.8, divergence=.1)
     blasts = [object(), object()]
-    monkeypatch.setattr(markers, 'eval_signatures', lambda *args: (blasts, [low, high]))
+    monkeypatch.setattr(kmers, 'eval_signatures', lambda *args: (blasts, [low, high]))
 
     signatures = [first, second]
-    markers._eval_signatures(signatures, Path('all'), 1, 1, 1)
+    kmers._eval_signatures(signatures, Path('all'), 1, 1, 1)
 
     assert signatures == [second, first]
     assert first.blast is blasts[0] and first.metrics is low

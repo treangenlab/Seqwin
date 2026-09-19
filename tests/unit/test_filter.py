@@ -67,13 +67,15 @@ def _filter_distinct_weights(edge_weight_th):
 
 def test_native_filter_preserves_ranges_and_remaps_edges():
     result, scored = _filter()
-    (nodes, edges, subgraphs, signatures, total_tar, total_neg, penalty_th, edge_th,
-     min_nodes, max_nodes) = result
+    (nodes, edges, subgraphs, signatures, total_tar, total_neg, e_absence_tar,
+     e_presence_neg, penalty_th, edge_th, min_nodes, max_nodes) = result
 
     np.testing.assert_array_equal(scored['n_tar'], [2, 2, 2, 1])
     np.testing.assert_array_equal(scored['n_neg'], [0, 0, 2, 0])
     np.testing.assert_allclose(scored['penalty'], [0, 0, 1, .5])
     assert total_tar == 2 and total_neg == 2
+    assert e_absence_tar == pytest.approx(1 / 14)
+    assert e_presence_neg == pytest.approx(2 / 7)
     assert penalty_th == .3
     assert edge_th == pytest.approx(.42)
     assert min_nodes == 1 and max_nodes is None
@@ -103,7 +105,7 @@ def test_automatic_threshold_from_minimizers_and_parallel_equivalence():
     first, _ = _filter(penalty_th=None, n_cpu=1)
     parallel, _ = _filter(penalty_th=None, n_cpu=4)
     expected = .5 * np.sqrt((1 / 14) * (2 / 7))
-    assert first[6] == pytest.approx(expected)
+    assert first[8] == pytest.approx(expected)
     for left, right in zip(first[:3], parallel[:3]):
         if isinstance(left, np.ndarray):
             np.testing.assert_array_equal(left, right)
@@ -122,9 +124,9 @@ def test_automatic_threshold_from_minimizers_and_parallel_equivalence():
 def test_automatic_threshold_from_jaccard_and_cap():
     jaccard = np.full((4, 4), .5, dtype=np.float64)
     result, _ = _filter(penalty_th=None, jaccard=jaccard, penalty_th_cap=1)
-    assert result[6] == pytest.approx(.5 * np.sqrt((1 / 3) * (2 / 3)))
+    assert result[8] == pytest.approx(.5 * np.sqrt((1 / 3) * (2 / 3)))
     capped, _ = _filter(penalty_th=None, jaccard=jaccard, penalty_th_cap=.1)
-    assert capped[6] == .1
+    assert capped[8] == .1
 
 
 def test_low_weight_edges_isolated_nodes_and_no_subgraph_error():

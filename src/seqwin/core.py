@@ -32,8 +32,8 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 from .assemblies import Assemblies, get_assemblies
-from .kmers import FilterResult, Signature, build_graph, filter_graph
-from .markers import process_signatures
+from .kmers import FilterResults, build_graph, filter_graph
+from .markers import Signature
 from .utils import overwrite_warning, overwrite_error, mkdir, file_to_write
 from .config import Config, RunState, config_logger, WORKINGDIR
 
@@ -45,15 +45,15 @@ class Seqwin(object):
         config (Config): See `Config` in `config.py`.
         state (RunState): See `RunState` in `config.py`.
         assemblies (Assemblies): See `Assemblies` in `assemblies.py`.
-        filtered (FilterResult | None): See `FilterResult` in `kmers.py`. Generated with `self.run()`.
-        signatures (list[Signature] | None): Extracted signatures. Generated with `self.run()`.
+        filtered (FilterResults | None): See `FilterResults` in `kmers.py`. Generated with `self.run()`.
+        signatures (tuple[Signature] | None): Extracted signatures. Generated with `self.run()`.
     """
     __slots__ = ('config', 'state', 'assemblies', 'filtered', 'signatures')
     config: Config
     state: RunState
     assemblies: Assemblies
-    filtered: FilterResult | None
-    signatures: list[Signature] | None
+    filtered: FilterResults | None
+    signatures: tuple[Signature, ...] | None
 
     def __init__(self, config: Config) -> None:
         """Initiate a Seqwin run instance.
@@ -129,11 +129,7 @@ class Seqwin(object):
             graph.save(graph_path)
             logger.info(f'Raw minimizer graph is saved as {graph_path}')
 
-        filtered = filter_graph(graph, assemblies, config, state)
-        signatures = process_signatures(
-            filtered, graph.record_offsets, graph.record_ids,
-            assemblies, config, state
-        )
+        filtered, signatures = filter_graph(graph, assemblies, config, state)
 
         self.filtered = filtered
         self.signatures = signatures

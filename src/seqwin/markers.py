@@ -8,8 +8,6 @@ Evaluate and write output signatures to files.
 Dependencies:
 -------------
 - pandas
-- .assemblies
-- .kmers
 - .ncbi
 - .utils
 - .config
@@ -17,11 +15,11 @@ Dependencies:
 Classes:
 --------
 - SignatureMetrics
+- Signature
 
 Functions:
 ----------
 - eval_signatures
-- process_signatures
 """
 
 __author__ = 'Michael X. Wang'
@@ -31,15 +29,13 @@ import logging
 from pathlib import Path
 from time import time
 from itertools import repeat
-from dataclasses import dataclass, fields, asdict, astuple
+from dataclasses import dataclass, fields, asdict
 
 import pandas as pd
 
-from .assemblies import Assemblies
-from .kmers import FilterResult, Signature
 from .ncbi import blast
-from .utils import print_time_delta, log_and_raise, file_to_write, mp_wrapper
-from .config import Config, RunState, HAS_BLAST, WORKINGDIR, BLASTCONFIG
+from .utils import print_time_delta, log_and_raise, mp_wrapper
+from .config import BLASTCONFIG
 
 logger = logging.getLogger(__name__)
 
@@ -69,9 +65,21 @@ class SignatureMetrics:
     avg_pident_neg: float | None = None
 
 _METRIC_NAMES = tuple(f.name for f in fields(SignatureMetrics))
-_EMPTY_METRICS = SignatureMetrics()
 # Baseline metrics if signature has no BLAST hit
 _BASELINE_METRICS = SignatureMetrics(**{f: .0 for f in _METRIC_NAMES})
+
+
+@dataclass(slots=True)
+class Signature:
+    """A signature extracted from one low-penalty subgraph."""
+    subgraph_idx: int
+    location: object
+    sequence: str
+    length: int
+    n_rep: int
+    rep_ratio: float
+    blast: pd.DataFrame | None = None
+    metrics: SignatureMetrics = SignatureMetrics()
 
 
 def _get_avg_ident(blast_out: pd.DataFrame, query_len: int, n: int) -> float:
@@ -240,89 +248,3 @@ def eval_signatures(
 
     print_time_delta(time()-tik)
     return all_blast, metrics
-
-
-def _eval_signatures(
-    signatures: list[Signature], blastdb: Path, total_tar: int, total_neg: int, n_cpu: int
-) -> None:
-    """Evaluate signatures with BLAST and rank them by conservation and divergence.
-    """
-    results = eval_signatures(
-        [s.sequence for s in signatures],
-        blastdb, total_tar, total_neg, n_cpu
-    )
-    for s, blast_result, metrics in zip(signatures, *results):
-        s.blast = blast_result
-        s.metrics = metrics
-    signatures.sort(
-        key=lambda s: s.metrics.conservation + s.metrics.divergence,
-        reverse=True
-    )
-
-
-def process_signatures(
-    result: FilterResult,
-    record_offsets,
-    record_ids,
-    assemblies: Assemblies,
-    config: Config,
-    state: RunState
-) -> list[Signature]:
-    """Evaluate extracted signatures and save them to FASTA and CSV.
-    """
-    signatures = result.signatures
-    overwrite = config.overwrite
-    run_blast = config.run_blast
-    blast_neg_only = config.blast_neg_only
-    n_cpu = config.n_cpu
-
-    working_dir = state.working_dir
-    total_tar = state.total_tar
-    total_neg = state.total_neg
-
-    if run_blast and HAS_BLAST:
-        logger.info('Evaluating candidate signatures with BLAST...')
-        blastdb = assemblies.makeblastdb(
-            prefix=working_dir / WORKINGDIR.blast_dir,
-            neg_only=blast_neg_only,
-            overwrite=overwrite,
-            n_cpu=n_cpu
-        )
-        _eval_signatures(signatures, blastdb, total_tar, total_neg, n_cpu)
-    else:
-        if run_blast:
-            logger.error('BLAST+ is not installed. Signature evaluation is skipped.')
-        else:
-            logger.warning('Signature evaluation is turned off, skip running BLAST')
-        blastdb = None
-        for s in signatures:
-            s.metrics = _EMPTY_METRICS
-
-    # save to fasta
-    markers_fasta = working_dir / WORKINGDIR.markers_fasta
-    file_to_write(markers_fasta, overwrite)
-    fasta = list()
-    csv = list()
-    for s in signatures:
-        loc = s.location
-        assembly_idx = loc.assembly_idx
-        record_id = record_ids[record_offsets[assembly_idx] + loc.record_idx]
-        header = f'{assembly_idx}-{record_id}-{loc.start}:{loc.stop}'
-        fasta.append(f'>{header}\n{s.sequence}\n')
-        csv.append(
-            (header, s.length, *astuple(s.metrics), s.rep_ratio, loc.n_kmers)
-        )
-    markers_fasta.write_text(''.join(fasta), encoding='utf-8', newline='\n')
-    logger.info(f'Candidate signatures saved as {markers_fasta}')
-
-    # save to csv
-    markers_csv = working_dir / WORKINGDIR.markers_csv
-    file_to_write(markers_csv, overwrite)
-    pd.DataFrame(
-        csv,
-        columns=('fasta_header', 'length', *_METRIC_NAMES, 'rep_ratio', 'n_nodes')
-    ).to_csv(markers_csv, index=False, encoding='utf-8', lineterminator='\n')
-    logger.info(f'Metrics of candidate signatures saved as {markers_csv}')
-
-    state.blastdb = blastdb
-    return signatures

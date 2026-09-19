@@ -74,9 +74,9 @@ private:
  * and update `nodes` in place.
  *
  * Also calculate `total_tar`, `total_neg`, `e_absence_tar` and `e_presence_neg`,
- * and add them to `FilterResult`.
+ * and add them to `FilterResults`.
  */
-FilterResult get_penalty(
+FilterResults get_penalty(
     const Kmer* kmers,
     Node* nodes,
     std::size_t n_nodes,
@@ -89,7 +89,7 @@ FilterResult get_penalty(
 
 /**
  * @brief Remove low-weight edges and isolated nodes.
- * Filtered nodes and edges are stored directly in `result`.
+ * Filtered nodes and edges are stored directly in `results`.
  */
 void prune_graph(
     const Node* nodes,
@@ -97,12 +97,12 @@ void prune_graph(
     const Edge* edges,
     std::size_t n_edges,
     double edge_weight_th,
-    FilterResult& result
+    FilterResults& results
 );
 
 /**
  * @brief Grow disjoint low-penalty subgraphs from eligible seeds.
- * Generated subgraphs are stored directly in `result`.
+ * Generated subgraphs are stored directly in `results`.
  */
 void get_subgraphs(
     const NoInitArray<Node>& nodes,
@@ -110,15 +110,15 @@ void get_subgraphs(
     double penalty_th,
     std::size_t min_nodes,
     std::optional<std::size_t> max_nodes,
-    FilterResult& result
+    FilterResults& results
 );
 
 /**
  * @brief Extract signatures from low-penalty subgraphs.
- * Output signatures are stored directly in `result`.
+ * Output signatures are stored directly in `results`.
  */
 void extract_signatures(
-    const Subgraphs& subgraphs,
+    const std::vector<Subgraph>& subgraphs,
     const NoInitArray<Node>& nodes,
     const Kmer* kmers,
     const std::uint32_t* record_offsets,
@@ -132,7 +132,7 @@ void extract_signatures(
     double consec_kmer_mul,
     std::size_t total_tar,
     ThreadPool& pool,
-    FilterResult& result
+    FilterResults& results
 );
 
 } // namespace seqwin::internal

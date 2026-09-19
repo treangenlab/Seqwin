@@ -11,8 +11,8 @@
 
 namespace seqwin {
 
-/** @brief Represented by indices into `FilterResult.nodes`. */
-using Subgraphs = std::vector<std::vector<std::size_t>>;
+/** @brief Represented by indices into `FilterResults.nodes`. */
+using Subgraph = std::vector<std::size_t>;
 
 /**
  * @brief Part of Seqwin configurations.
@@ -38,10 +38,10 @@ struct FilterConfig {
  *
  * Filtered nodes and edges follow their original order.
  */
-struct FilterResult {
+struct FilterResults {
     NoInitArray<Node> nodes;
     NoInitArray<Edge> edges;
-    Subgraphs subgraphs;
+    std::vector<Subgraph> subgraphs;
     std::vector<Signature> signatures;
     std::size_t total_tar;
     std::size_t total_neg;
@@ -56,7 +56,7 @@ struct FilterResult {
 /**
  * @brief Filter the minimizer graph and extract low-penalty subgraphs.
  */
-FilterResult filter(
+FilterResults filter(
     const Kmer* kmers,
     Node* nodes,
     std::size_t n_nodes,

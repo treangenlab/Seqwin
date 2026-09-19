@@ -17,7 +17,7 @@
 
 namespace seqwin::internal {
 
-FilterResult get_penalty(
+FilterResults get_penalty(
     const Kmer* kmers,
     Node* nodes,
     std::size_t n_nodes,
@@ -152,12 +152,12 @@ FilterResult get_penalty(
         throw std::invalid_argument("No target minimizers are available for threshold estimation");
     }
 
-    FilterResult result;
-    result.total_tar = total_tar;
-    result.total_neg = total_neg;
-    result.e_absence_tar = 1.0 - totals.presence_tar / totals.n_tar;
-    result.e_presence_neg = totals.presence_neg / totals.n_tar;
-    return result;
+    FilterResults results;
+    results.total_tar = total_tar;
+    results.total_neg = total_neg;
+    results.e_absence_tar = 1.0 - totals.presence_tar / totals.n_tar;
+    results.e_presence_neg = totals.presence_neg / totals.n_tar;
+    return results;
 }
 
 void prune_graph(
@@ -166,7 +166,7 @@ void prune_graph(
     const Edge* edges,
     std::size_t n_edges,
     double edge_weight_th,
-    FilterResult& result
+    FilterResults& results
 ) {
     const std::size_t th = edge_weight_th;
     std::size_t retained_count = 0;
@@ -194,17 +194,17 @@ void prune_graph(
     std::sort(connected.begin(), connected.end());
     connected.erase(std::unique(connected.begin(), connected.end()), connected.end());
 
-    result.nodes = NoInitArray<Node>(connected.size());
+    results.nodes = NoInitArray<Node>(connected.size());
     ankerl::unordered_dense::map<std::size_t, std::size_t> node_indices;
     node_indices.reserve(connected.size());
     for (std::size_t i = 0; i < connected.size(); ++i) {
-        result.nodes[i] = nodes[connected[i]];
+        results.nodes[i] = nodes[connected[i]];
         node_indices.emplace(connected[i], i);
     }
 
-    result.edges = NoInitArray<Edge>(retained_count);
+    results.edges = NoInitArray<Edge>(retained_count);
     for (std::size_t i = 0; i < retained_count; ++i) {
-        result.edges[i] = Edge{
+        results.edges[i] = Edge{
             node_indices.at(edges[i].first),
             node_indices.at(edges[i].second),
             edges[i].weight
@@ -218,7 +218,7 @@ void get_subgraphs(
     double penalty_th,
     std::size_t min_nodes,
     std::optional<std::size_t> max_nodes,
-    FilterResult& result
+    FilterResults& results
 ) {
     // Graph nodes are represented by indices, instead of hashes
     const GraphTopology graph(nodes, edges);
@@ -260,7 +260,7 @@ void get_subgraphs(
             continue;
         }
 
-        std::vector<std::size_t> subgraph{seed};
+        Subgraph subgraph{seed};
         seen[seed] = 1;
         double sum_penalty = nodes[seed].penalty;
         std::priority_queue<
@@ -306,7 +306,7 @@ void get_subgraphs(
             for (const auto node : subgraph) {
                 used[node] = 1;
             }
-            result.subgraphs.push_back(std::move(subgraph));
+            results.subgraphs.push_back(std::move(subgraph));
         }
     }
 }

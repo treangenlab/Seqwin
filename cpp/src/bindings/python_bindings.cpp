@@ -170,10 +170,10 @@ PYBIND11_MODULE(_core, m) {
                 n_cpu
             };
 
-            seqwin::FilterResult result;
+            seqwin::FilterResults results;
             {
                 py::gil_scoped_release release;
-                result = seqwin::filter(
+                results = seqwin::filter(
                     kmers_ptr,
                     nodes_ptr,
                     n_nodes,
@@ -192,16 +192,18 @@ PYBIND11_MODULE(_core, m) {
             }
 
             return py::make_tuple(
-                array_to_numpy(std::move(result.nodes)),
-                array_to_numpy(std::move(result.edges)),
-                std::move(result.subgraphs),
-                std::move(result.signatures),
-                result.total_tar,
-                result.total_neg,
-                result.penalty_th,
-                result.edge_weight_th,
-                result.min_nodes,
-                result.max_nodes
+                array_to_numpy(std::move(results.nodes)),
+                array_to_numpy(std::move(results.edges)),
+                std::move(results.subgraphs),
+                std::move(results.signatures),
+                results.total_tar,
+                results.total_neg,
+                results.e_absence_tar,
+                results.e_presence_neg,
+                results.penalty_th,
+                results.edge_weight_th,
+                results.min_nodes,
+                results.max_nodes
             );
         },
         py::arg("kmers").noconvert(),
