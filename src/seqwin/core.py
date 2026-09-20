@@ -31,12 +31,9 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-import numpy as np
-from numpy.typing import NDArray
-
 from .assemblies import Assemblies, get_assemblies
-from .kmers import FilteredGraph, build_graph, filter_graph
-from .markers import ConnectedKmers, get_markers
+from .kmers import FilterResults, Signature, build_graph, filter_graph
+from .markers import process_signatures
 from .utils import overwrite_warning, overwrite_error, mkdir, file_to_write
 from .config import Config, RunState, config_logger, WORKINGDIR
 
@@ -48,17 +45,15 @@ class Seqwin(object):
         config (Config): See `Config` in `config.py`.
         state (RunState): See `RunState` in `config.py`.
         assemblies (Assemblies): See `Assemblies` in `assemblies.py`.
-        graph (FilteredGraph | None): See `FilteredGraph` in `kmers.py`. Generated with `self.run()`.
-        jaccard (NDArray[np.float64] | None): Pairwise assembly Jaccard matrix. Generated with `self.run()`.
-        markers (list[ConnectedKmers] | None): See `ConnectedKmers` in `markers.py`. Generated with `self.run()`.
+        filtered (FilterResults | None): See `FilterResults` in `kmers.py`. Generated with `self.run()`.
+        signatures (tuple[Signature] | None): Extracted signatures. Generated with `self.run()`.
     """
-    __slots__ = ('config', 'state', 'assemblies', 'graph', 'jaccard', 'markers')
+    __slots__ = ('config', 'state', 'assemblies', 'filtered', 'signatures')
     config: Config
     state: RunState
     assemblies: Assemblies
-    graph: FilteredGraph | None
-    jaccard: NDArray[np.float64] | None
-    markers: list[ConnectedKmers] | None
+    filtered: FilterResults | None
+    signatures: tuple[Signature, ...] | None
 
     def __init__(self, config: Config) -> None:
         """Initiate a Seqwin run instance.
@@ -113,9 +108,8 @@ class Seqwin(object):
         self.config = config
         self.state = state
         self.assemblies = assemblies
-        self.graph = None
-        self.jaccard = None
-        self.markers = None
+        self.filtered = None
+        self.signatures = None
 
     def run(self) -> None:
         """Build and filter the k-mer graph, then extract candidate markers.
@@ -135,18 +129,17 @@ class Seqwin(object):
             graph.save(graph_path)
             logger.info(f'Raw minimizer graph is saved as {graph_path}')
 
-        graph, jaccard = filter_graph(graph, assemblies, config, state)
-        markers = get_markers(graph, assemblies, config, state)
+        filtered, signatures = filter_graph(graph, assemblies, config, state)
+        signatures = process_signatures(signatures, filtered, assemblies, graph, config, state)
 
-        self.graph = graph
-        self.jaccard = jaccard
-        self.markers = markers
+        self.filtered = filtered
+        self.signatures = signatures
 
         # save run instance
-        results_path = working_dir / WORKINGDIR.results
-        file_to_write(results_path, overwrite)
-        results_path.write_bytes(pickle.dumps(self))
-        logger.info(f'Run instance (includes all run data) saved as {results_path}')
+        # results_path = working_dir / WORKINGDIR.results
+        # file_to_write(results_path, overwrite)
+        # results_path.write_bytes(pickle.dumps(self))
+        # logger.info(f'Run instance (includes all run data) saved as {results_path}')
 
 
 def run(config: Config) -> Seqwin:

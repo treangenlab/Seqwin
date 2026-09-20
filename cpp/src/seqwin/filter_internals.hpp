@@ -3,10 +3,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <stdexcept>
+#include <string>
 #include <utility>
 #include <vector>
 
 #include "seqwin/filter.hpp"
+#include "utils/thread_pool.hpp"
 
 namespace seqwin::internal {
 
@@ -32,7 +34,7 @@ public:
         Iterator end_;
     };
 
-    GraphTopology(const std::vector<Node>& nodes, const std::vector<Edge>& edges)
+    GraphTopology(const NoInitArray<Node>& nodes, const NoInitArray<Edge>& edges)
         : offsets_(nodes.size() + 1, 0)
     {
         for (const auto& edge : edges) {
@@ -68,31 +70,13 @@ private:
 };
 
 /**
- * @brief Nodes and edges follow their original order.
-*/
-struct PrunedGraph {
-    std::vector<Node> nodes;
-    std::vector<Edge> edges;
-};
-
-/**
- * @brief Node ranges are rewritten to index the compacted `kmers`.
- * `edges` contains only edges with two selected endpoints.
- */
-struct CompactedGraph {
-    NoInitArray<Kmer> kmers;
-    NoInitArray<Node> nodes;
-    std::vector<Edge> edges;
-};
-
-/**
  * @brief Calculate `n_tar`, `n_neg` and `penalty` for each node,
  * and update `nodes` in place.
  *
  * Also calculate `total_tar`, `total_neg`, `e_absence_tar` and `e_presence_neg`,
- * and add them to `FilterResult`.
+ * and add them to `FilterResults`.
  */
-FilterResult get_penalty(
+FilterResults get_penalty(
     const Kmer* kmers,
     Node* nodes,
     std::size_t n_nodes,
@@ -100,42 +84,55 @@ FilterResult get_penalty(
     std::size_t n_record_offsets,
     const bool* is_targets,
     std::size_t n_assemblies,
-    std::size_t n_cpu
+    ThreadPool& pool
 );
 
 /**
  * @brief Remove low-weight edges and isolated nodes.
+ * Filtered nodes and edges are stored directly in `results`.
  */
-PrunedGraph prune_graph(
+void prune_graph(
     const Node* nodes,
     std::size_t n_nodes,
     const Edge* edges,
     std::size_t n_edges,
-    double edge_weight_th
+    double edge_weight_th,
+    FilterResults& results
 );
 
 /**
  * @brief Grow disjoint low-penalty subgraphs from eligible seeds.
- *
- * @return Subgraphs represented by node hashes;
- * indices of all accepted nodes in `PrunedGraph.nodes`.
+ * Generated subgraphs are stored directly in `results`.
  */
-std::pair<Subgraphs, std::vector<std::size_t>> get_subgraphs(
-    const std::vector<Node>& nodes,
-    const std::vector<Edge>& edges,
+void get_subgraphs(
+    const NoInitArray<Node>& nodes,
+    const NoInitArray<Edge>& edges,
     double penalty_th,
     std::size_t min_nodes,
-    std::optional<std::size_t> max_nodes
+    std::optional<std::size_t> max_nodes,
+    FilterResults& results
 );
 
 /**
- * @brief Restrict a pruned graph to nodes used by accepted subgraphs.
+ * @brief Extract signatures from low-penalty subgraphs.
+ * Output signatures are stored directly in `results`.
  */
-CompactedGraph compact_graph(
+void extract_signatures(
+    const std::vector<Subgraph>& subgraphs,
+    const NoInitArray<Node>& nodes,
     const Kmer* kmers,
-    const std::vector<Node>& nodes,
-    const std::vector<Edge>& edges,
-    std::vector<std::size_t> used_nodes
+    const std::uint32_t* record_offsets,
+    std::size_t n_record_offsets,
+    const std::vector<std::string>& assembly_paths,
+    const bool* is_targets,
+    std::size_t n_assemblies,
+    std::size_t kmerlen,
+    std::size_t windowsize,
+    std::size_t min_len,
+    double consec_kmer_mul,
+    std::size_t total_tar,
+    ThreadPool& pool,
+    FilterResults& results
 );
 
 } // namespace seqwin::internal

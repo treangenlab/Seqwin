@@ -58,6 +58,22 @@ PYBIND11_MODULE(_core, m) {
 
     m.doc() = "Seqwin minimizer graph bindings";
 
+    py::class_<seqwin::SubgraphLoc>(m, "SubgraphLoc")
+        .def_readonly("assembly_idx", &seqwin::SubgraphLoc::assembly_idx)
+        .def_readonly("record_idx", &seqwin::SubgraphLoc::record_idx)
+        .def_readonly("start", &seqwin::SubgraphLoc::start)
+        .def_readonly("stop", &seqwin::SubgraphLoc::stop)
+        .def_readonly("n_kmers", &seqwin::SubgraphLoc::n_kmers)
+        .def_readonly("n_repeats", &seqwin::SubgraphLoc::n_repeats);
+
+    py::class_<seqwin::Signature>(m, "Signature")
+        .def_readonly("subgraph_idx", &seqwin::Signature::subgraph_idx)
+        .def_readonly("location", &seqwin::Signature::location)
+        .def_readonly("sequence", &seqwin::Signature::sequence)
+        .def_readonly("length", &seqwin::Signature::length)
+        .def_readonly("n_rep", &seqwin::Signature::n_rep)
+        .def_readonly("rep_ratio", &seqwin::Signature::rep_ratio);
+
     m.def("_build_native",
         [](const std::vector<std::string>& assembly_paths,
            std::size_t kmerlen,
@@ -97,17 +113,20 @@ PYBIND11_MODULE(_core, m) {
            NumpyArray<seqwin::Node> nodes,
            NumpyArray<seqwin::Edge> edges,
            NumpyArray<std::uint32_t> record_offsets,
+           const std::vector<std::string>& assembly_paths,
            NumpyArray<bool> is_targets,
            std::optional<NumpyArray<double>> jaccard,
+           std::size_t kmerlen,
+           std::size_t windowsize,
            std::optional<double> penalty_th,
            double stringency,
-           double penalty_th_cap,
-           double edge_w_th_mul,
-           std::size_t windowsize,
            std::size_t min_len,
            std::optional<std::size_t> max_len,
+           double penalty_th_cap,
+           double edge_w_th_mul,
            std::size_t min_nodes_floor,
            std::optional<std::size_t> max_nodes_cap,
+           double consec_kmer_mul,
            std::size_t n_cpu
         ) {
             const auto* kmers_ptr = kmers.data();
@@ -137,22 +156,24 @@ PYBIND11_MODULE(_core, m) {
                 jaccard_cols = static_cast<std::size_t>(jaccard->shape(1));
             }
             seqwin::FilterConfig config{
+                kmerlen,
+                windowsize,
                 penalty_th,
                 stringency,
-                penalty_th_cap,
-                edge_w_th_mul,
-                windowsize,
                 min_len,
                 max_len,
+                penalty_th_cap,
+                edge_w_th_mul,
                 min_nodes_floor,
                 max_nodes_cap,
+                consec_kmer_mul,
                 n_cpu
             };
 
-            seqwin::FilterResult result;
+            seqwin::FilterResults results;
             {
                 py::gil_scoped_release release;
-                result = seqwin::filter(
+                results = seqwin::filter(
                     kmers_ptr,
                     nodes_ptr,
                     n_nodes,
@@ -160,6 +181,7 @@ PYBIND11_MODULE(_core, m) {
                     n_edges,
                     record_offsets_ptr,
                     n_record_offsets,
+                    assembly_paths,
                     is_targets_ptr,
                     n_assemblies,
                     jaccard_ptr,
@@ -170,33 +192,38 @@ PYBIND11_MODULE(_core, m) {
             }
 
             return py::make_tuple(
-                array_to_numpy(std::move(result.kmers)),
-                array_to_numpy(std::move(result.nodes)),
-                array_to_numpy(std::move(result.edges)),
-                std::move(result.subgraphs),
-                result.total_tar,
-                result.total_neg,
-                result.penalty_th,
-                result.edge_weight_th,
-                result.min_nodes,
-                result.max_nodes
+                array_to_numpy(std::move(results.nodes)),
+                array_to_numpy(std::move(results.edges)),
+                std::move(results.subgraphs),
+                std::move(results.signatures),
+                results.total_tar,
+                results.total_neg,
+                results.e_absence_tar,
+                results.e_presence_neg,
+                results.penalty_th,
+                results.edge_weight_th,
+                results.min_nodes,
+                results.max_nodes
             );
         },
         py::arg("kmers").noconvert(),
         py::arg("nodes").noconvert(),
         py::arg("edges").noconvert(),
         py::arg("record_offsets").noconvert(),
+        py::arg("assembly_paths"),
         py::arg("is_targets").noconvert(),
         py::arg("jaccard").noconvert(),
+        py::arg("kmerlen"),
+        py::arg("windowsize"),
         py::arg("penalty_th"),
         py::arg("stringency"),
-        py::arg("penalty_th_cap"),
-        py::arg("edge_w_th_mul"),
-        py::arg("windowsize"),
         py::arg("min_len"),
         py::arg("max_len"),
+        py::arg("penalty_th_cap"),
+        py::arg("edge_w_th_mul"),
         py::arg("min_nodes_floor"),
         py::arg("max_nodes_cap"),
+        py::arg("consec_kmer_mul"),
         py::arg("n_cpu")
     );
 

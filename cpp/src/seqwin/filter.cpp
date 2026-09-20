@@ -68,7 +68,7 @@ double expected_presence(
     return sum / static_cast<double>(count);
 }
 
-/** @brief Calculate thresholds and add them to `result`. */
+/** @brief Calculate thresholds and add them to `results`. */
 void calculate_thresholds(
     const bool* is_targets,
     std::size_t n_assemblies,
@@ -76,7 +76,7 @@ void calculate_thresholds(
     std::size_t jaccard_rows,
     std::size_t jaccard_cols,
     const FilterConfig& config,
-    FilterResult& result
+    FilterResults& results
 ) {
     double penalty_th;
     if (config.penalty_th) {
@@ -94,8 +94,8 @@ void calculate_thresholds(
             e_presence_neg = expected_presence(jaccard, n_assemblies, is_targets, false);
         } else {
             // Use values calculated by `get_penalty()`
-            e_absence_tar = result.e_absence_tar;
-            e_presence_neg = result.e_presence_neg;
+            e_absence_tar = results.e_absence_tar;
+            e_presence_neg = results.e_presence_neg;
         }
         internal::log_python(" - Expected k-mer absence in targets: " + format_value(e_absence_tar, 5));
         internal::log_python(" - Expected k-mer presence in non-targets: " + format_value(e_presence_neg, 5));
@@ -115,7 +115,7 @@ void calculate_thresholds(
     // Consider N as the number of assemblies that include a certain k-mer. Since we want k-mers with
     // penalty lower than penalty_th, based on the definition of penalty, N ≥ (1 - penalty_th) * total_tar.
     // So edge weight threshold is calculated based on the lower bound of N, times a multiplier < 1.
-    const double edge_weight_th = config.edge_w_th_mul * (1.0 - penalty_th) * result.total_tar;
+    const double edge_weight_th = config.edge_w_th_mul * (1.0 - penalty_th) * results.total_tar;
 
     // Calculate size range of subgraphs
     const std::size_t gap_len = (config.windowsize + 1) / 2;
@@ -134,15 +134,15 @@ void calculate_thresholds(
         );
     }
 
-    result.penalty_th = penalty_th;
-    result.edge_weight_th = edge_weight_th;
-    result.min_nodes = min_nodes;
-    result.max_nodes = max_nodes;
+    results.penalty_th = penalty_th;
+    results.edge_weight_th = edge_weight_th;
+    results.min_nodes = min_nodes;
+    results.max_nodes = max_nodes;
 }
 
 } // namespace
 
-FilterResult filter(
+FilterResults filter(
     const Kmer* kmers,
     Node* nodes,
     std::size_t n_nodes,
@@ -150,6 +150,7 @@ FilterResult filter(
     std::size_t n_edges,
     const std::uint32_t* record_offsets,
     std::size_t n_record_offsets,
+    const std::vector<std::string>& assembly_paths,
     const bool* is_targets,
     std::size_t n_assemblies,
     const double* jaccard,
@@ -157,45 +158,80 @@ FilterResult filter(
     std::size_t jaccard_cols,
     const FilterConfig& config
 ) {
+    internal::ThreadPool pool(std::max<std::size_t>(1, config.n_cpu));
+
     internal::log_python(" - Calculating node penalty scores...");
-    auto result = internal::get_penalty(
-        kmers, nodes, n_nodes, record_offsets, n_record_offsets, is_targets, n_assemblies, config.n_cpu
+    auto results = internal::get_penalty(
+        kmers,
+        nodes,
+        n_nodes,
+        record_offsets,
+        n_record_offsets,
+        is_targets,
+        n_assemblies,
+        pool
     );
     calculate_thresholds(
-        is_targets, n_assemblies, jaccard, jaccard_rows, jaccard_cols, config, result
+        is_targets,
+        n_assemblies,
+        jaccard,
+        jaccard_rows,
+        jaccard_cols,
+        config,
+        results
     );
 
     internal::log_python(" - Filtering graph edges and nodes...");
-    auto pruned = internal::prune_graph(
-        nodes, n_nodes, edges, n_edges, result.edge_weight_th
+    internal::prune_graph(
+        nodes,
+        n_nodes,
+        edges,
+        n_edges,
+        results.edge_weight_th,
+        results
     );
     internal::log_python(
-        " - Removed " + std::to_string(n_edges - pruned.edges.size()) + " edges with weight<" +
-        format_value(result.edge_weight_th, 3) + ", " + std::to_string(pruned.edges.size()) + " edges left"
+        " - Removed " + std::to_string(n_edges - results.edges.size()) + " edges with weight<" +
+        format_value(results.edge_weight_th, 3) + ", " + std::to_string(results.edges.size()) + " edges left"
     );
     internal::log_python(
-        " - Removed " + std::to_string(n_nodes - pruned.nodes.size()) + " isolated nodes, " +
-        std::to_string(pruned.nodes.size()) + " nodes left"
+        " - Removed " + std::to_string(n_nodes - results.nodes.size()) + " isolated nodes, " +
+        std::to_string(results.nodes.size()) + " nodes left"
     );
 
-    auto [subgraphs, used_nodes] = internal::get_subgraphs(
-        pruned.nodes, pruned.edges, result.penalty_th, result.min_nodes, result.max_nodes
+    internal::get_subgraphs(
+        results.nodes,
+        results.edges,
+        results.penalty_th,
+        results.min_nodes,
+        results.max_nodes,
+        results
     );
-    if (subgraphs.empty()) {
+    if (results.subgraphs.empty()) {
         throw std::runtime_error("No low-penalty subgraph was found. Try decrease --stringency, or increase --penalty-th");
     }
-    internal::log_python(" - Found " + std::to_string(subgraphs.size()) + " low-penalty subgraphs");
+    internal::log_python(" - Found " + std::to_string(results.subgraphs.size()) + " low-penalty subgraphs");
 
-    auto compacted = internal::compact_graph(
-        kmers, pruned.nodes, pruned.edges, std::move(used_nodes)
+    internal::log_python(" - Finding a representative for each low-penalty subgraph...");
+    internal::extract_signatures(
+        results.subgraphs,
+        results.nodes,
+        kmers,
+        record_offsets,
+        n_record_offsets,
+        assembly_paths,
+        is_targets,
+        n_assemblies,
+        config.kmerlen,
+        config.windowsize,
+        config.min_len,
+        config.consec_kmer_mul,
+        results.total_tar,
+        pool,
+        results
     );
-    internal::log_python(" - " + std::to_string(compacted.kmers.size()) + " k-mers left");
 
-    result.kmers = std::move(compacted.kmers);
-    result.nodes = std::move(compacted.nodes);
-    result.edges = std::move(compacted.edges);
-    result.subgraphs = std::move(subgraphs);
-    return result;
+    return results;
 }
 
 } // namespace seqwin

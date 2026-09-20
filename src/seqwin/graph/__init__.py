@@ -37,8 +37,6 @@ from numpy.typing import NDArray
 
 from ._core import _build_native, _filter_native
 
-from .utils import OrderedKmers
-
 KMER_DTYPE = np.dtype([
     ('pos', np.uint32),
     ('record_idx', np.uint32),

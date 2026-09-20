@@ -21,6 +21,7 @@ def test_download_only_does_not_execute_full_run(monkeypatch: pytest.MonkeyPatch
     assert invoked['run_called'] is False
     assert (tmp_path / 'download-only' / 'config.json').exists()
     assert len(seq.assemblies) == 0
+    assert seq.signatures is None
 
 
 def test_output_directory_overwrite_behavior(tmp_path: Path) -> None:

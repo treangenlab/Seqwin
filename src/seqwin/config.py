@@ -28,11 +28,6 @@ Attributes:
 - HAS_DATASETS (bool)
 - WORKINGDIR (WorkingDir)
 - BLASTCONFIG (BlastConfig)
-- EDGE_W (str)
-- NODE_P (str)
-- CONSEC_KMER_MUL (float)
-- LEN_TH_MUL (float)
-- NO_BLAST_DIV (float)
 """
 
 __author__ = 'Michael X. Wang'
@@ -100,6 +95,7 @@ class Config(BaseModel):
         edge_w_th_mul (float): Multiplier for determining the threshold for low-weight edges. [0.3]
         min_nodes_floor (int): Lowest possible value for `min_nodes` (see `RunState`), regardless of `min_len`. [3]
         max_nodes_cap (int | None): If `max_len` is None, `max_nodes` (see `RunState`) cannot be higher than this value. None for no limit. [100]
+        consec_kmer_mul (float): Multiplier of window size for the maximum position difference between consecutive k-mers. [1.5]
 
         sketchsize (int): Sketch size for Mash (MinHash) sketch. [1000]
 
@@ -145,6 +141,7 @@ class Config(BaseModel):
     edge_w_th_mul: float = 0.3
     min_nodes_floor: int = 3
     max_nodes_cap: int | None = 100
+    consec_kmer_mul: float = 1.5
 
     # Mash parameters (not included in CLI)
     sketchsize: int = 1000
@@ -225,21 +222,9 @@ class RunState:
 
     Attributes:
         working_dir (Path): Working directory, defined by prefix and title.
-        total_tar (int | None): Number of target assemblies.
-        total_neg (int | None): Number of non-target assemblies.
-        penalty_th (float | None): Node penalty threshold (user input or auto-computed).
-        edge_weight_th (float | None): Graph edge weight threshold.
-        min_nodes (int | None): Min number of nodes for a low-penalty subgraph.
-        max_nodes (int | None): Max number of nodes for a low-penalty subgraph.
         blastdb (Path | None): Path to the BLAST database inside the working directory.
     """
     working_dir: Path
-    total_tar: int | None = None
-    total_neg: int | None = None
-    penalty_th: float | None = None
-    edge_weight_th: float | None = None
-    min_nodes: int | None = None
-    max_nodes: int | None = None
     blastdb: Path | None = None
 
 
@@ -339,8 +324,3 @@ def config_logger(file: Path, level: int) -> None:
 # freeze dataclasses
 WORKINGDIR = WorkingDir()
 BLASTCONFIG = BlastConfig()
-
-EDGE_W: str = 'w' # Key for edge weight, used in networkx graphs. ['w']
-NODE_P: str = 'p' # Key for node penalty, used in networkx graphs. ['p']
-CONSEC_KMER_MUL: float = 1.5 # Multiplier of windowsize for max position difference between consecutive k-mers. [1.5]
-NO_BLAST_DIV: float = 0.5 # Deprecated. Assumed divergence when there is no BLAST hit. [0.5]

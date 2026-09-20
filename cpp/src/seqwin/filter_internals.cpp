@@ -17,7 +17,7 @@
 
 namespace seqwin::internal {
 
-FilterResult get_penalty(
+FilterResults get_penalty(
     const Kmer* kmers,
     Node* nodes,
     std::size_t n_nodes,
@@ -25,7 +25,7 @@ FilterResult get_penalty(
     std::size_t n_record_offsets,
     const bool* is_targets,
     std::size_t n_assemblies,
-    std::size_t n_cpu
+    ThreadPool& pool
 ) {
     /** Metadata shared by all FASTA records in one assembly. */
     struct RecordInfo {
@@ -69,12 +69,6 @@ FilterResult get_penalty(
         throw std::invalid_argument("is_targets must contain at least one non-target assembly");
     }
 
-    std::size_t n_workers = std::max<std::size_t>(1, n_cpu);
-    if (n_nodes > 0) {
-        n_workers = std::min(n_workers, n_nodes);
-    }
-    ThreadPool pool(n_workers);
-
     const std::uint32_t n_records = record_offsets[n_assemblies];
     NoInitArray<RecordInfo> record_info(n_records);
     pool.parallel_for(n_assemblies, [&](std::size_t start, std::size_t end, std::size_t) {
@@ -96,7 +90,7 @@ FilterResult get_penalty(
         }
     });
 
-    std::vector<NodeSums> node_sums(n_workers);
+    std::vector<NodeSums> node_sums(pool.size());
     pool.parallel_for(n_nodes, [&](std::size_t start, std::size_t end, std::size_t worker_i) {
         auto& sums = node_sums[worker_i];
 
@@ -158,23 +152,22 @@ FilterResult get_penalty(
         throw std::invalid_argument("No target minimizers are available for threshold estimation");
     }
 
-    FilterResult result;
-    result.total_tar = total_tar;
-    result.total_neg = total_neg;
-    result.e_absence_tar = 1.0 - totals.presence_tar / totals.n_tar;
-    result.e_presence_neg = totals.presence_neg / totals.n_tar;
-    return result;
+    FilterResults results;
+    results.total_tar = total_tar;
+    results.total_neg = total_neg;
+    results.e_absence_tar = 1.0 - totals.presence_tar / totals.n_tar;
+    results.e_presence_neg = totals.presence_neg / totals.n_tar;
+    return results;
 }
 
-PrunedGraph prune_graph(
+void prune_graph(
     const Node* nodes,
     std::size_t n_nodes,
     const Edge* edges,
     std::size_t n_edges,
-    double edge_weight_th
+    double edge_weight_th,
+    FilterResults& results
 ) {
-    PrunedGraph graph;
-
     const std::size_t th = edge_weight_th;
     std::size_t retained_count = 0;
     if (n_edges != 0) {
@@ -201,31 +194,31 @@ PrunedGraph prune_graph(
     std::sort(connected.begin(), connected.end());
     connected.erase(std::unique(connected.begin(), connected.end()), connected.end());
 
-    graph.nodes.reserve(connected.size());
+    results.nodes = NoInitArray<Node>(connected.size());
     ankerl::unordered_dense::map<std::size_t, std::size_t> node_indices;
     node_indices.reserve(connected.size());
-    for (const auto node_i : connected) {
-        node_indices.emplace(node_i, graph.nodes.size());
-        graph.nodes.push_back(nodes[node_i]);
+    for (std::size_t i = 0; i < connected.size(); ++i) {
+        results.nodes[i] = nodes[connected[i]];
+        node_indices.emplace(connected[i], i);
     }
 
-    graph.edges.reserve(retained_count);
+    results.edges = NoInitArray<Edge>(retained_count);
     for (std::size_t i = 0; i < retained_count; ++i) {
-        graph.edges.push_back(Edge{
+        results.edges[i] = Edge{
             node_indices.at(edges[i].first),
             node_indices.at(edges[i].second),
             edges[i].weight
-        });
+        };
     }
-    return graph;
 }
 
-std::pair<Subgraphs, std::vector<std::size_t>> get_subgraphs(
-    const std::vector<Node>& nodes,
-    const std::vector<Edge>& edges,
+void get_subgraphs(
+    const NoInitArray<Node>& nodes,
+    const NoInitArray<Edge>& edges,
     double penalty_th,
     std::size_t min_nodes,
-    std::optional<std::size_t> max_nodes
+    std::optional<std::size_t> max_nodes,
+    FilterResults& results
 ) {
     // Graph nodes are represented by indices, instead of hashes
     const GraphTopology graph(nodes, edges);
@@ -258,8 +251,6 @@ std::pair<Subgraphs, std::vector<std::size_t>> get_subgraphs(
     // Marks nodes in the frontier or accepted into the current subgraph
     // Cleared for each seed
     std::vector<std::uint8_t> seen(nodes.size(), 0);
-    Subgraphs subgraphs;
-    std::vector<std::size_t> used_nodes;
 
     const std::size_t max_nodes_value = max_nodes.value_or(
         std::numeric_limits<std::size_t>::max()
@@ -269,7 +260,7 @@ std::pair<Subgraphs, std::vector<std::size_t>> get_subgraphs(
             continue;
         }
 
-        std::vector<std::size_t> subgraph{seed};
+        Subgraph subgraph{seed};
         seen[seed] = 1;
         double sum_penalty = nodes[seed].penalty;
         std::priority_queue<
@@ -312,62 +303,12 @@ std::pair<Subgraphs, std::vector<std::size_t>> get_subgraphs(
         }
 
         if (subgraph.size() >= min_nodes) {
-            auto& hashes = subgraphs.emplace_back();
-            hashes.reserve(subgraph.size());
             for (const auto node : subgraph) {
-                hashes.push_back(nodes[node].hash);
-                used_nodes.push_back(node);
                 used[node] = 1;
             }
+            results.subgraphs.push_back(std::move(subgraph));
         }
     }
-    return {std::move(subgraphs), std::move(used_nodes)};
-}
-
-CompactedGraph compact_graph(
-    const Kmer* kmers,
-    const std::vector<Node>& nodes,
-    const std::vector<Edge>& edges,
-    std::vector<std::size_t> used_nodes // Node indices
-) {
-    // Restore node order (sorted by hash)
-    std::sort(used_nodes.begin(), used_nodes.end());
-
-    CompactedGraph graph;
-    graph.nodes = NoInitArray<Node>(used_nodes.size());
-    const auto invalid = std::numeric_limits<std::size_t>::max();
-    std::vector<std::size_t> node_indices(nodes.size(), invalid);
-    std::size_t n_kmers = 0;
-    for (std::size_t i = 0; i < used_nodes.size(); ++i) {
-        graph.nodes[i] = nodes[used_nodes[i]];
-        node_indices[used_nodes[i]] = i;
-        n_kmers += graph.nodes[i].stop - graph.nodes[i].start;
-    }
-    graph.kmers = NoInitArray<Kmer>(n_kmers);
-
-    std::size_t new_start = 0;
-    for (auto& node : graph.nodes) {
-        const auto old_start = node.start;
-        const auto old_stop = node.stop;
-        const auto size = old_stop - old_start;
-        node.start = new_start;
-        node.stop = new_start + size;
-        std::copy(kmers + old_start, kmers + old_stop, graph.kmers.begin() + new_start);
-        new_start += size;
-    }
-
-    graph.edges.reserve(edges.size());
-    for (const auto& edge : edges) {
-        if (edge.first >= nodes.size() || edge.second >= nodes.size()) {
-            throw std::invalid_argument("Edge endpoint does not correspond to a node");
-        }
-        const auto first = node_indices[edge.first];
-        const auto second = node_indices[edge.second];
-        if (first != invalid && second != invalid) {
-            graph.edges.push_back(Edge{first, second, edge.weight});
-        }
-    }
-    return graph;
 }
 
 } // namespace seqwin::internal
