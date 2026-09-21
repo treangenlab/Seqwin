@@ -4,12 +4,6 @@ Configurations
 
 Seqwin run configurations. Including user/dev configs and internal configs.
 
-Dependencies:
--------------
-- pydantic
-- .ncbi
-- ._version
-
 Classes:
 --------
 - Config

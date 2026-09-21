@@ -4,15 +4,6 @@ Core
 
 Seqwin entry point.
 
-Dependencies:
--------------
-- numpy
-- .assemblies
-- .graph
-- .markers
-- .utils
-- .config
-
 Classes:
 --------
 - Seqwin

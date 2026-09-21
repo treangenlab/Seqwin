@@ -2,17 +2,7 @@
 Markers
 =======
 
-A core module of Seqwin.
 Evaluate and write output signatures to files.
-
-Dependencies:
--------------
-- pandas
-- .graph
-- .assemblies
-- .ncbi
-- .utils
-- .config
 
 Classes:
 --------

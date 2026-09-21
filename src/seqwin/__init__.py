@@ -35,7 +35,6 @@ Modules:
 --------
 - core
 - assemblies
-- kmers
 - markers
 - ncbi
 - mash
