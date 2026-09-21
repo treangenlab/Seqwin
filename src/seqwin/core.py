@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 from .assemblies import Assemblies, get_assemblies
 from .graph import KmerGraph, FilteredGraph, Signature, _filter_native
-from .markers import SignatureMetrics, process_signatures
+from .evaluation import SignatureMetrics, process_signatures
 from .utils import print_time_delta, overwrite_warning, overwrite_error, mkdir, file_to_write
 from .config import Config, RunState, config_logger, HAS_MASH, WORKINGDIR
 

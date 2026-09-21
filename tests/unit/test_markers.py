@@ -4,8 +4,8 @@ from types import SimpleNamespace
 import numpy as np
 import pandas as pd
 
-import seqwin.markers as markers
-from seqwin.markers import SignatureMetrics, process_signatures
+import seqwin.evaluation as evaluation
+from seqwin.evaluation import SignatureMetrics, process_signatures
 
 
 class Location:
@@ -28,7 +28,7 @@ def test_signature_metrics_stores_blast_separately():
     blast = pd.DataFrame({'nident': [4]})
     metric = SignatureMetrics(conservation=1.0, blast=blast)
     assert metric.blast is blast
-    assert 'blast' not in markers._METRIC_NAMES
+    assert 'blast' not in evaluation._METRIC_NAMES
 
 
 def test_private_process_signatures_writes_record_id_and_outputs(tmp_path: Path):
@@ -50,11 +50,11 @@ def test_private_process_signatures_writes_record_id_and_outputs(tmp_path: Path)
 
     signatures, metrics = processed
     assert signatures == (signature,)
-    assert metrics == (markers.SignatureMetrics(),)
+    assert metrics == (evaluation.SignatureMetrics(),)
     assert (tmp_path / 'signatures.fasta').read_text() == '>0-second-2:8\nACGTAC\n'
     output = pd.read_csv(tmp_path / 'signatures.csv')
     assert tuple(output.columns) == (
-        'fasta_header', 'length', *markers._METRIC_NAMES, 'rep_ratio', 'n_nodes'
+        'fasta_header', 'length', *evaluation._METRIC_NAMES, 'rep_ratio', 'n_nodes'
     )
     assert output.loc[0, 'fasta_header'] == '0-second-2:8'
     assert output.loc[0, 'length'] == 6
@@ -65,12 +65,12 @@ def test_private_process_signatures_writes_record_id_and_outputs(tmp_path: Path)
 def test_evaluation_attaches_results_and_ranks(monkeypatch):
     first = _signature(0, 'AAAA')
     second = _signature(1, 'CCCC')
-    low = markers.SignatureMetrics(conservation=.1, divergence=.2)
-    high = markers.SignatureMetrics(conservation=.8, divergence=.1)
-    monkeypatch.setattr(markers, 'eval_signatures', lambda *args: [low, high])
+    low = evaluation.SignatureMetrics(conservation=.1, divergence=.2)
+    high = evaluation.SignatureMetrics(conservation=.8, divergence=.1)
+    monkeypatch.setattr(evaluation, 'eval_signatures', lambda *args: [low, high])
 
     signatures = [first, second]
-    ranked_signatures, ranked_metrics = markers._eval_signatures(
+    ranked_signatures, ranked_metrics = evaluation._eval_signatures(
         signatures, Path('all'), 1, 1, 1
     )
 
