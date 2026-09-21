@@ -333,7 +333,7 @@ void fetch_signature_sequences(
 
 } // namespace
 
-void extract_signatures(
+std::vector<Signature> extract_signatures(
     const std::vector<Subgraph>& subgraphs,
     const NoInitArray<Node>& nodes,
     const Kmer* kmers,
@@ -347,8 +347,7 @@ void extract_signatures(
     std::size_t min_len,
     double consec_kmer_mul,
     std::size_t total_tar,
-    ThreadPool& pool,
-    FilterResults& results
+    ThreadPool& pool
 ) {
     if (n_record_offsets != n_assemblies + 1 || assembly_paths.size() != n_assemblies) {
         throw std::invalid_argument("assembly metadata dimensions do not match");
@@ -360,7 +359,7 @@ void extract_signatures(
         throw std::invalid_argument("consec_kmer_mul must be finite and greater than zero");
     }
     if (subgraphs.empty()) {
-        return;
+        return {};
     }
 
     std::vector<std::optional<Signature>> extracted(subgraphs.size());
@@ -384,15 +383,17 @@ void extract_signatures(
         }
     });
 
-    results.signatures.reserve(subgraphs.size());
+    std::vector<Signature> signatures;
+    signatures.reserve(subgraphs.size());
     for (auto& signature : extracted) {
         if (signature) {
-            results.signatures.push_back(std::move(*signature));
+            signatures.push_back(std::move(*signature));
         }
     }
-    log_python(" - Found " + std::to_string(results.signatures.size()) + " candidate signatures");
+    log_python(" - Found " + std::to_string(signatures.size()) + " candidate signatures");
 
-    fetch_signature_sequences(results.signatures, assembly_paths, pool);
+    fetch_signature_sequences(signatures, assembly_paths, pool);
+    return signatures;
 }
 
 } // namespace seqwin::internal

@@ -4,12 +4,6 @@ Configurations
 
 Seqwin run configurations. Including user/dev configs and internal configs.
 
-Dependencies:
--------------
-- pydantic
-- .ncbi
-- ._version
-
 Classes:
 --------
 - Config
@@ -34,6 +28,9 @@ __author__ = 'Michael X. Wang'
 __license__ = 'GPL 3.0'
 
 import sys, logging, shutil
+
+import numpy as np
+from numpy.typing import NDArray
 
 _LOG_FMT = '%(asctime)s | %(levelname)-8s | %(message)s'
 _LOG_DATEFMT = '%Y-%m-%d %H:%M:%S'
@@ -222,9 +219,11 @@ class RunState:
 
     Attributes:
         working_dir (Path): Working directory, defined by prefix and title.
+        jaccard (NDArray[np.float64] | None): Pairwise assembly Jaccard matrix.
         blastdb (Path | None): Path to the BLAST database inside the working directory.
     """
     working_dir: Path
+    jaccard: NDArray[np.float64] | None = None
     blastdb: Path | None = None
 
 

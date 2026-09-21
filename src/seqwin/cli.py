@@ -1,14 +1,5 @@
 """
-Seqwin CLI
-==========
-
-Dependencies:
--------------
-- typer
-- .core
-- .ncbi
-- .config
-- ._version
+Seqwin command-line interface
 """
 
 __author__ = 'Michael X. Wang'

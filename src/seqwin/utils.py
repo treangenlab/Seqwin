@@ -1,11 +1,6 @@
 """
 Utilities
 =========
-
-Dependencies:
--------------
-- numpy
-- biopython (optional)
 """
 
 __author__ = 'Michael X. Wang'
@@ -15,23 +10,10 @@ import sys, gzip, shutil, logging, datetime, subprocess, shlex, multiprocessing
 from pathlib import Path
 from time import time
 from enum import Enum
-from io import StringIO
 from typing import Literal
-from dataclasses import dataclass
-from concurrent.futures import ThreadPoolExecutor
-from multiprocessing.shared_memory import SharedMemory
-from collections import Counter
 from collections.abc import Callable, Iterable, Generator, Sequence, Hashable
 
 logger = logging.getLogger(__name__)
-
-import numpy as np
-from numpy.typing import NDArray
-try:
-    from Bio import SeqIO
-    _HAS_BIO = True
-except ImportError:
-    _HAS_BIO = False
 
 GZIP_EXT = '.gz'
 BASE_COMP = str.maketrans('ATCGatcg', 'TAGCtagc') # Translation table for complement DNA bases
@@ -46,20 +28,6 @@ class StartMethod(str, Enum):
 _START_METHOD = (
     StartMethod.spawn if sys.platform == 'win32' else StartMethod.fork
 )
-
-
-@dataclass(slots=True, frozen=True)
-class SharedArr:
-    """Class for a NumPy array attached to a SharedMemory instance.
-
-    Attributes:
-        name (str): Name of the SharedMemory instance.
-        shape (tuple): Shape of the NumPy array.
-        dtype (DTypeLike): dtype of the NumPy array.
-    """
-    name: str
-    shape: tuple[int, ...]
-    dtype: np.dtype
 
 
 def print_time_delta(seconds: float) -> None:
@@ -314,146 +282,10 @@ def get_dups(iterable: Iterable[Hashable]) -> set:
     return set(duplicates)
 
 
-def concat_to_shm(arrays: Sequence[NDArray]) -> SharedArr:
-    """Concat NumPy arrays along the first dimension into a shared memory block.
-    - Each individual array is deleted during this process to save memory.
-    - Arrays are copied as raw bytes to bypass overhead of NumPy assignment.
-
-    Args:
-        arrays (Sequence[NDArray]): Arrays to be concatenated.
-
-    Returns:
-        SharedArr: The concatenated array attached to a SharedMemory instance.
-    """
-    if not arrays:
-        log_and_raise(ValueError, 'No array is provided')
-    dtype = arrays[0].dtype
-    trailing_shape = arrays[0].shape[1:]
-
-    # validation
-    for arr in arrays:
-        if arr.dtype != dtype:
-            log_and_raise(TypeError, 'Arrays must have the same dtype')
-        elif arr.shape[1:] != trailing_shape:
-            log_and_raise(ValueError, 'Arrays must match on dimensions 1...N')
-        elif not arr.flags['C_CONTIGUOUS']:
-            log_and_raise(ValueError, 'Arrays must be C-contiguous')
-
-    # create shared memory
-    n0 = sum(arr.shape[0] for arr in arrays)
-    out_shape = (n0, *trailing_shape)
-    out_shm = SharedMemory(
-        create=True,
-        size=int(np.prod(out_shape, dtype=np.int64) * dtype.itemsize)
-    )
-    try:
-        # copy each array into its slot in out_shm as raw bytes
-        offset = 0
-        for arr in arrays:
-            arr_buf = memoryview(arr).cast('B')
-            offset_next = offset + arr_buf.nbytes
-            out_shm.buf[offset : offset_next] = arr_buf
-            offset = offset_next
-            try:
-                arr.resize((0,), refcheck=False) # release memory
-            except:
-                pass
-    except Exception:
-        # destroy the shm block if anything fails to prevent memory leakage
-        out_shm.close()
-        out_shm.unlink()
-        raise
-    finally:
-        out_shm.close()
-    return SharedArr(out_shm.name, out_shape, dtype)
-
-
-def concat_from_shm(arrays: Sequence[SharedArr], n_cpu: int=1) -> NDArray:
-    """Concat SharedArr instances along the first dimension into a NumPy array.
-    - Each SharedArr is unlinked during this process to save memory.
-    - Arrays are copied as raw bytes, in parallel.
-
-    Args:
-        arrays (Sequence[SharedArr]): Arrays to be concatenated.
-        n_cpu (int, optional): Number of threads to run in parallel. [1]
-
-    Returns:
-        NDArray: The concatenated NumPy array.
-    """
-    if not arrays:
-        log_and_raise(ValueError, 'No array is provided')
-    dtype = arrays[0].dtype
-    itemsize = dtype.itemsize
-    trailing_shape = arrays[0].shape[1:]
-
-    # validation
-    for arr in arrays:
-        if arr.dtype != dtype:
-            log_and_raise(TypeError, 'Arrays must have the same dtype')
-        elif arr.shape[1:] != trailing_shape:
-            log_and_raise(ValueError, 'Arrays must match on dimensions 1...N')
-
-    # pre-allocate the output array
-    n0 = sum(arr.shape[0] for arr in arrays)
-    out_shape = (n0, *trailing_shape)
-    out = np.empty(out_shape, dtype=dtype)
-    # to bypasses GIL, copying must be handled by numpy
-    # this flat uint8 view of the output array is a mimic of its memory block
-    out_buf = out.view(np.uint8).ravel()
-
-    # copy each array into its slot in out_buf as raw bytes, in parallel
-    # we have to use thread-based parallelism to write to the same private memory block
-    def copy_array(arr_name: str, offset: int, arr_size: int):
-        """The worker function for each thread.
-        """
-        arr_shm = SharedMemory(arr_name)
-        try:
-            # GIL is released for numpy commands
-            arr_buf = np.frombuffer(arr_shm.buf, dtype=np.uint8, count=arr_size)
-            out_buf[offset : offset + arr_size] = arr_buf
-            del arr_buf # delete the view, otherwise arr_shm cannot be closed
-        finally:
-            arr_shm.close()
-            arr_shm.unlink()
-
-    # calculate offsets and array sizes
-    copy_arr_args = list()
-    offset = 0
-    for arr in arrays:
-        arr_size = int(np.prod(arr.shape, dtype=np.int64) * itemsize)
-        copy_arr_args.append((arr.name, offset, arr_size))
-        offset += arr_size
-
-    # copy in arrays parallel
-    with ThreadPoolExecutor(max_workers=n_cpu) as executor:
-        futures = list(
-            executor.submit(copy_array, *args) for args in copy_arr_args
-        )
-        for f in futures:
-            f.result()
-
-    return out
-
-
 def revcomp(seq: str) -> str:
     """Return the reverse complement of a DNA sequence.
     """
     return seq.translate(BASE_COMP)[::-1]
-
-
-def most_common(iterable: Iterable[Hashable]):
-    """Return the most common element in an Iterable.
-    All elements should be Hashable.
-    """
-    return Counter(iterable).most_common(1)[0][0]
-
-
-def most_common_weighted(iterable: Iterable):
-    """Return the most common element in an Iterable, weighted by element length.
-    Each element should be Hashable and Sized (e.g., tuple or str).
-    """
-    c = Counter(iterable)
-    return max(c, key=lambda k: len(k)*c[k])
 
 
 def load_paths_txt(paths_txt: Path) -> list[Path]:
@@ -528,46 +360,3 @@ def load_fasta(path: Path) -> tuple[str, ...]:
     if len(all_id) != len(set(all_id)):
         logger.warning(f' - Duplicate record ID(s) {get_dups(all_id)}, in: {path}')
     return tuple(all_record)
-
-
-if _HAS_BIO:
-    def load_genbank(path: Path) -> tuple[dict[str, str], int]:
-        """Parse an assembly file in GenBank format, and get the sequences and IDs of all records.
-        Gzip files are supported (file name should end with .gz).
-
-        Args:
-            path (Path): Path to the GenBank file. If the file is gzipped, the extension should be .gz.
-
-        Returns:
-            tuple: A tuple containing
-                1. dict[str, str]: A dictionary with record ID as key and record sequence as value.
-                2. int: Sum of the length of all sequence records.
-        """
-        if path.suffix == GZIP_EXT:
-            with gzip.open(path, 'rb') as f:
-                handle = StringIO(f.read().decode())
-        else:
-            handle = path
-
-        all_record: dict[str, str] = dict() # record id -> record sequence (upper case)
-        all_id = list()
-        total_len = 0
-        # for NCBI complete assemblies, first record is the chromosome
-        for record in SeqIO.parse(handle, 'genbank'):
-            record_id = str(record.id)
-            seq = str(record.seq).upper()
-            all_record[record_id] = seq
-            all_id.append(record_id)
-            total_len += len(seq)
-
-        # check duplicate record ID
-        if len(all_id) != len(set(all_id)):
-            logger.warning(f' - Duplicate record ID(s) {get_dups(all_id)}, in: {path}')
-        return all_record, total_len
-else:
-    def load_genbank(path) -> None:
-        log_and_raise(
-            ImportError,
-            'Biopython is needed for parsing GenBank files',
-            from_none=True
-        )

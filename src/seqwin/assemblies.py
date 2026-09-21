@@ -4,16 +4,6 @@ Assemblies
 
 Create an instance for all input genome assemblies.
 
-Dependencies:
--------------
-- numpy
-- pandas
-- blast
-- .ncbi
-- .mash
-- .utils
-- .config
-
 Classes:
 --------
 - Assemblies
@@ -41,8 +31,7 @@ from numpy.typing import NDArray
 
 from .ncbi import download_taxon
 from .mash import sketch, get_jaccard
-from .utils import print_time_delta, log_and_raise, mkdir, file_to_write, \
-    mp_wrapper, get_dups, load_paths_txt, load_fasta, GZIP_EXT
+from .utils import print_time_delta, log_and_raise, mkdir, file_to_write, get_dups, load_paths_txt, GZIP_EXT
 from .config import Config, RunState, WORKINGDIR, BLASTCONFIG
 
 _FASTA_EXT = (
@@ -104,45 +93,6 @@ class Assemblies:
         return np.fromiter(
             get_jaccard(mash_sketch, n_cpu=n_cpu), dtype=np.float64
         ).reshape(len(self), len(self))
-
-    def fetch_seq(self, loc: pd.DataFrame, n_cpu: int) -> pd.Series:
-        """Fetch the actual sequences for a DataFrame of assembly locations.
-        - Fetching the sequence of each location one by one is slow, since it needs layers of indices to
-        access the actual sequence (assembly, record, start and stop).
-        - To solve this, rows from the same assembly are grouped together,
-        and different groups are fetched in parallel.
-
-        Args:
-            loc (pd.DataFrame): Assembly locations. Row indices are kept in the returned Series, but the
-                ordering might be different. To make sure the returned Series has the same order as `loc`,
-                row indices should be sorted with `ascending=True`.
-                Required columns: ['assembly_idx', 'record_idx', 'start', 'stop'].
-            n_cpu (int): Number of processes to run in parallel.
-
-        Returns:
-            pd.Series: A sequence is fetched for each row in `loc`. indices are sorted with `ascending=True`.
-        """
-        if loc.empty:
-            return pd.Series(index=loc.index, dtype=object)
-
-        groups = loc.groupby(
-            by='assembly_idx', sort=False
-        )[['record_idx', 'start', 'stop']]
-        n_groups = groups.ngroups
-        logger.info(f' - {n_groups} assemblies to be loaded')
-
-        # fetch the actual sequences by start and stop in the source sequences
-        fetch_seq_args = (
-            (group, self.paths[assembly_idx])
-            for assembly_idx, group in groups
-        )
-        all_seq = pd.concat(
-            mp_wrapper(_fetch_seq, fetch_seq_args, min(n_cpu, n_groups), n_jobs=n_groups),
-            axis=0
-        )
-        # sort the returned sequences by the original ordering (before groupby)
-        all_seq.sort_index(ascending=True, inplace=True)
-        return all_seq
 
     def makeblastdb(self, prefix: Path, neg_only: bool, overwrite: bool, n_cpu: int) -> Path:
         """Create a BLAST database for all (or non-target) assemblies. Use native Python streaming and multiprocessing.
@@ -276,24 +226,6 @@ def _prepare_fasta(path: Path, assembly_idx: int, is_target: bool) -> bytes:
     if content.startswith(b'>'):
         content = mod_str + content[1:]
     return content
-
-
-def _fetch_seq(loc: pd.DataFrame, src_fasta: Path) -> pd.Series:
-    """Fetch sequences from a source FASTA file, based on their record id, start and stop coordinates.
-
-    Args:
-        loc (pd.DataFrame): A group of sequences in the same assembly, with three columns: 'record_idx', 'start' and 'stop'.
-        src_fasta (Path): Path to the assembly FASTA file.
-
-    Returns:
-        pd.Series: Fetched sequences with the same index of `loc`.
-    """
-    src_seq = load_fasta(src_fasta)
-    # NOTE: assume all forward strand
-    return pd.Series(
-        (src_seq[record_idx][start:stop] for record_idx, start, stop in loc.itertuples(index=False, name=None)),
-        index=loc.index
-    )
 
 
 def _get_paths_dl(taxa_list: list[str], prefix: Path, config: Config) -> list[Path]:

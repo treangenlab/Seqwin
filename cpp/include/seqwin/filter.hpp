@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "seqwin/graph.hpp"
@@ -11,7 +12,7 @@
 
 namespace seqwin {
 
-/** @brief Represented by indices into `FilterResults.nodes`. */
+/** @brief Represented by indices into `FilteredGraph.nodes`. */
 using Subgraph = std::vector<std::size_t>;
 
 /**
@@ -33,16 +34,14 @@ struct FilterConfig {
 };
 
 /**
- * @brief Includes filtered graph arrays, low-penalty subgraphs, extracted signatures
- * and calculated values.
+ * @brief Includes filtered graph arrays, low-penalty subgraphs, and calculated values.
  *
  * Filtered nodes and edges follow their original order.
  */
-struct FilterResults {
+struct FilteredGraph {
     NoInitArray<Node> nodes;
     NoInitArray<Edge> edges;
     std::vector<Subgraph> subgraphs;
-    std::vector<Signature> signatures;
     std::size_t total_tar;
     std::size_t total_neg;
     double e_absence_tar;
@@ -54,9 +53,9 @@ struct FilterResults {
 };
 
 /**
- * @brief Filter the minimizer graph and extract low-penalty subgraphs.
+ * @brief Filter the minimizer graph and extract signatures from low-penalty subgraphs.
  */
-FilterResults filter(
+std::pair<FilteredGraph, std::vector<Signature>> filter(
     const Kmer* kmers,
     Node* nodes,
     std::size_t n_nodes,
