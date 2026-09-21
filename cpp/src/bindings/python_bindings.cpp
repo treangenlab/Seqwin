@@ -58,6 +58,35 @@ PYBIND11_MODULE(_core, m) {
 
     m.doc() = "Seqwin minimizer graph bindings";
 
+    py::class_<seqwin::FilteredGraph>(m, "FilteredGraph")
+        .def_property_readonly("nodes", [](py::object self) {
+            auto& filtered = self.cast<seqwin::FilteredGraph&>();
+            return py::array_t<seqwin::Node>(
+                {static_cast<py::ssize_t>(filtered.nodes.size())},
+                {static_cast<py::ssize_t>(sizeof(seqwin::Node))},
+                filtered.nodes.data(),
+                self
+            );
+        })
+        .def_property_readonly("edges", [](py::object self) {
+            auto& filtered = self.cast<seqwin::FilteredGraph&>();
+            return py::array_t<seqwin::Edge>(
+                {static_cast<py::ssize_t>(filtered.edges.size())},
+                {static_cast<py::ssize_t>(sizeof(seqwin::Edge))},
+                filtered.edges.data(),
+                self
+            );
+        })
+        .def_readonly("subgraphs", &seqwin::FilteredGraph::subgraphs)
+        .def_readonly("total_tar", &seqwin::FilteredGraph::total_tar)
+        .def_readonly("total_neg", &seqwin::FilteredGraph::total_neg)
+        .def_readonly("e_absence_tar", &seqwin::FilteredGraph::e_absence_tar)
+        .def_readonly("e_presence_neg", &seqwin::FilteredGraph::e_presence_neg)
+        .def_readonly("penalty_th", &seqwin::FilteredGraph::penalty_th)
+        .def_readonly("edge_weight_th", &seqwin::FilteredGraph::edge_weight_th)
+        .def_readonly("min_nodes", &seqwin::FilteredGraph::min_nodes)
+        .def_readonly("max_nodes", &seqwin::FilteredGraph::max_nodes);
+
     py::class_<seqwin::SubgraphLoc>(m, "SubgraphLoc")
         .def_readonly("assembly_idx", &seqwin::SubgraphLoc::assembly_idx)
         .def_readonly("record_idx", &seqwin::SubgraphLoc::record_idx)
@@ -170,10 +199,10 @@ PYBIND11_MODULE(_core, m) {
                 n_cpu
             };
 
-            seqwin::FilterResults results;
+            std::pair<seqwin::FilteredGraph, std::vector<seqwin::Signature>> out;
             {
                 py::gil_scoped_release release;
-                results = seqwin::filter(
+                out = seqwin::filter(
                     kmers_ptr,
                     nodes_ptr,
                     n_nodes,
@@ -191,20 +220,7 @@ PYBIND11_MODULE(_core, m) {
                 );
             }
 
-            return py::make_tuple(
-                array_to_numpy(std::move(results.nodes)),
-                array_to_numpy(std::move(results.edges)),
-                std::move(results.subgraphs),
-                std::move(results.signatures),
-                results.total_tar,
-                results.total_neg,
-                results.e_absence_tar,
-                results.e_presence_neg,
-                results.penalty_th,
-                results.edge_weight_th,
-                results.min_nodes,
-                results.max_nodes
-            );
+            return py::make_tuple(std::move(out.first), std::move(out.second));
         },
         py::arg("kmers").noconvert(),
         py::arg("nodes").noconvert(),

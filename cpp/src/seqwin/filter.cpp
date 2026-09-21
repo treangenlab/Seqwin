@@ -68,7 +68,7 @@ double expected_presence(
     return sum / static_cast<double>(count);
 }
 
-/** @brief Calculate thresholds and add them to `results`. */
+/** @brief Calculate thresholds and add them to `filtered`. */
 void calculate_thresholds(
     const bool* is_targets,
     std::size_t n_assemblies,
@@ -76,7 +76,7 @@ void calculate_thresholds(
     std::size_t jaccard_rows,
     std::size_t jaccard_cols,
     const FilterConfig& config,
-    FilterResults& results
+    FilteredGraph& filtered
 ) {
     double penalty_th;
     if (config.penalty_th) {
@@ -94,8 +94,8 @@ void calculate_thresholds(
             e_presence_neg = expected_presence(jaccard, n_assemblies, is_targets, false);
         } else {
             // Use values calculated by `get_penalty()`
-            e_absence_tar = results.e_absence_tar;
-            e_presence_neg = results.e_presence_neg;
+            e_absence_tar = filtered.e_absence_tar;
+            e_presence_neg = filtered.e_presence_neg;
         }
         internal::log_python(" - Expected k-mer absence in targets: " + format_value(e_absence_tar, 5));
         internal::log_python(" - Expected k-mer presence in non-targets: " + format_value(e_presence_neg, 5));
@@ -115,7 +115,7 @@ void calculate_thresholds(
     // Consider N as the number of assemblies that include a certain k-mer. Since we want k-mers with
     // penalty lower than penalty_th, based on the definition of penalty, N ≥ (1 - penalty_th) * total_tar.
     // So edge weight threshold is calculated based on the lower bound of N, times a multiplier < 1.
-    const double edge_weight_th = config.edge_w_th_mul * (1.0 - penalty_th) * results.total_tar;
+    const double edge_weight_th = config.edge_w_th_mul * (1.0 - penalty_th) * filtered.total_tar;
 
     // Calculate size range of subgraphs
     const std::size_t gap_len = (config.windowsize + 1) / 2;
@@ -134,15 +134,15 @@ void calculate_thresholds(
         );
     }
 
-    results.penalty_th = penalty_th;
-    results.edge_weight_th = edge_weight_th;
-    results.min_nodes = min_nodes;
-    results.max_nodes = max_nodes;
+    filtered.penalty_th = penalty_th;
+    filtered.edge_weight_th = edge_weight_th;
+    filtered.min_nodes = min_nodes;
+    filtered.max_nodes = max_nodes;
 }
 
 } // namespace
 
-FilterResults filter(
+std::pair<FilteredGraph, std::vector<Signature>> filter(
     const Kmer* kmers,
     Node* nodes,
     std::size_t n_nodes,
@@ -161,7 +161,7 @@ FilterResults filter(
     internal::ThreadPool pool(std::max<std::size_t>(1, config.n_cpu));
 
     internal::log_python(" - Calculating node penalty scores...");
-    auto results = internal::get_penalty(
+    auto filtered = internal::get_penalty(
         kmers,
         nodes,
         n_nodes,
@@ -178,7 +178,7 @@ FilterResults filter(
         jaccard_rows,
         jaccard_cols,
         config,
-        results
+        filtered
     );
 
     internal::log_python(" - Filtering graph edges and nodes...");
@@ -187,35 +187,35 @@ FilterResults filter(
         n_nodes,
         edges,
         n_edges,
-        results.edge_weight_th,
-        results
+        filtered.edge_weight_th,
+        filtered
     );
     internal::log_python(
-        " - Removed " + std::to_string(n_edges - results.edges.size()) + " edges with weight<" +
-        format_value(results.edge_weight_th, 3) + ", " + std::to_string(results.edges.size()) + " edges left"
+        " - Removed " + std::to_string(n_edges - filtered.edges.size()) + " edges with weight<" +
+        format_value(filtered.edge_weight_th, 3) + ", " + std::to_string(filtered.edges.size()) + " edges left"
     );
     internal::log_python(
-        " - Removed " + std::to_string(n_nodes - results.nodes.size()) + " isolated nodes, " +
-        std::to_string(results.nodes.size()) + " nodes left"
+        " - Removed " + std::to_string(n_nodes - filtered.nodes.size()) + " isolated nodes, " +
+        std::to_string(filtered.nodes.size()) + " nodes left"
     );
 
     internal::get_subgraphs(
-        results.nodes,
-        results.edges,
-        results.penalty_th,
-        results.min_nodes,
-        results.max_nodes,
-        results
+        filtered.nodes,
+        filtered.edges,
+        filtered.penalty_th,
+        filtered.min_nodes,
+        filtered.max_nodes,
+        filtered
     );
-    if (results.subgraphs.empty()) {
+    if (filtered.subgraphs.empty()) {
         throw std::runtime_error("No low-penalty subgraph was found. Try decrease --stringency, or increase --penalty-th");
     }
-    internal::log_python(" - Found " + std::to_string(results.subgraphs.size()) + " low-penalty subgraphs");
+    internal::log_python(" - Found " + std::to_string(filtered.subgraphs.size()) + " low-penalty subgraphs");
 
     internal::log_python(" - Finding a representative for each low-penalty subgraph...");
-    internal::extract_signatures(
-        results.subgraphs,
-        results.nodes,
+    auto signatures = internal::extract_signatures(
+        filtered.subgraphs,
+        filtered.nodes,
         kmers,
         record_offsets,
         n_record_offsets,
@@ -226,12 +226,11 @@ FilterResults filter(
         config.windowsize,
         config.min_len,
         config.consec_kmer_mul,
-        results.total_tar,
-        pool,
-        results
+        filtered.total_tar,
+        pool
     );
 
-    return results;
+    return {std::move(filtered), std::move(signatures)};
 }
 
 } // namespace seqwin

@@ -30,12 +30,12 @@ __license__ = 'GPL 3.0'
 __author__ = 'Michael X. Wang'
 
 from pathlib import Path
-from collections.abc import Iterable
+from collections.abc import Sequence
 
 import numpy as np
 from numpy.typing import NDArray
 
-from ._core import _build_native, _filter_native
+from ._core import FilteredGraph, SubgraphLoc, Signature, _build_native, _filter_native
 
 KMER_DTYPE = np.dtype([
     ('pos', np.uint32),
@@ -123,7 +123,7 @@ class KmerGraph:
 
     def __init__(
         self,
-        assembly_paths: Iterable[Path],
+        assembly_paths: Sequence[str],
         kmerlen: int,
         windowsize: int,
         low_memory: bool = False,
@@ -139,7 +139,7 @@ class KmerGraph:
             low_memory (bool, optional): Recompute minimizers in a second pass to reduce peak memory. [False]
         """
         self.kmers, self.nodes, self.edges, self.record_offsets, record_ids = _build_native(
-            list(str(p) for p in assembly_paths),
+            list(map(str, assembly_paths)),
             int(kmerlen),
             int(windowsize),
             int(n_cpu),

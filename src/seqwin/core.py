@@ -32,8 +32,9 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 from .assemblies import Assemblies, get_assemblies
-from .kmers import FilterResults, Signature, build_graph, filter_graph
-from .markers import process_signatures
+from .graph import FilteredGraph, Signature
+from .kmers import build_graph, filter_graph
+from .markers import SignatureMetrics, process_signatures
 from .utils import overwrite_warning, overwrite_error, mkdir, file_to_write
 from .config import Config, RunState, config_logger, WORKINGDIR
 
@@ -45,15 +46,17 @@ class Seqwin(object):
         config (Config): See `Config` in `config.py`.
         state (RunState): See `RunState` in `config.py`.
         assemblies (Assemblies): See `Assemblies` in `assemblies.py`.
-        filtered (FilterResults | None): See `FilterResults` in `kmers.py`. Generated with `self.run()`.
+        filtered (FilteredGraph | None): Filtered minimizer graph. Generated with `self.run()`.
         signatures (tuple[Signature] | None): Extracted signatures. Generated with `self.run()`.
+        metrics (tuple[SignatureMetrics] | None): Evaluation metrics parallel to `signatures`.
     """
-    __slots__ = ('config', 'state', 'assemblies', 'filtered', 'signatures')
+    __slots__ = ('config', 'state', 'assemblies', 'filtered', 'signatures', 'metrics')
     config: Config
     state: RunState
     assemblies: Assemblies
-    filtered: FilterResults | None
+    filtered: FilteredGraph | None
     signatures: tuple[Signature, ...] | None
+    metrics: tuple[SignatureMetrics, ...] | None
 
     def __init__(self, config: Config) -> None:
         """Initiate a Seqwin run instance.
@@ -110,6 +113,7 @@ class Seqwin(object):
         self.assemblies = assemblies
         self.filtered = None
         self.signatures = None
+        self.metrics = None
 
     def run(self) -> None:
         """Build and filter the k-mer graph, then extract candidate markers.
@@ -130,10 +134,13 @@ class Seqwin(object):
             logger.info(f'Raw minimizer graph is saved as {graph_path}')
 
         filtered, signatures = filter_graph(graph, assemblies, config, state)
-        signatures = process_signatures(signatures, filtered, assemblies, graph, config, state)
+        signatures, metrics = process_signatures(
+            signatures, filtered, assemblies, graph, config, state
+        )
 
         self.filtered = filtered
         self.signatures = signatures
+        self.metrics = metrics
 
         # save run instance
         # results_path = working_dir / WORKINGDIR.results
