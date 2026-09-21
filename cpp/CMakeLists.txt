@@ -39,7 +39,7 @@ if (NOT PYBIND11_STATUS EQUAL 0)
     message(FATAL_ERROR "pybind11 Python package is required (pip/conda install pybind11)")
 endif()
 
-Python_add_library(_core MODULE WITH_SOABI
+Python_add_library(_native MODULE WITH_SOABI
     src/bindings/python_bindings.cpp
     src/seqwin/build.cpp
     src/seqwin/build_internals.cpp
@@ -52,21 +52,21 @@ Python_add_library(_core MODULE WITH_SOABI
     vendor/btllib/status.cpp
 )
 
-target_include_directories(_core PRIVATE include src vendor "${PYBIND11_INCLUDE}")
-target_link_libraries(_core PRIVATE Python::Module ZLIB::ZLIBSTATIC)
+target_include_directories(_native PRIVATE include src vendor "${PYBIND11_INCLUDE}")
+target_link_libraries(_native PRIVATE Python::Module ZLIB::ZLIBSTATIC)
 
 # GCC 8's libstdc++ keeps std::filesystem symbols in a separate library.
 # Without this, the extension can compile but fail to import with unresolved
 # std::filesystem symbols such as std::filesystem::file_size.
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 9)
-    target_link_libraries(_core PRIVATE stdc++fs)
+    target_link_libraries(_native PRIVATE stdc++fs)
 endif()
 
-target_compile_definitions(_core PRIVATE PYBIND11_DETAILED_ERROR_MESSAGES)
+target_compile_definitions(_native PRIVATE PYBIND11_DETAILED_ERROR_MESSAGES)
 
-set_target_properties(_core PROPERTIES PREFIX "")
+set_target_properties(_native PROPERTIES PREFIX "")
 
-install(TARGETS _core
+install(TARGETS _native
     LIBRARY DESTINATION seqwin/graph
     RUNTIME DESTINATION seqwin/graph
     ARCHIVE DESTINATION seqwin/graph

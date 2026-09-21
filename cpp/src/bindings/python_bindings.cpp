@@ -51,7 +51,7 @@ std::size_t require_1d_size(const Array& array, const char* name) {
 
 }  // namespace
 
-PYBIND11_MODULE(_core, m) {
+PYBIND11_MODULE(_native, m) {
     PYBIND11_NUMPY_DTYPE(seqwin::Kmer, pos, record_idx);
     PYBIND11_NUMPY_DTYPE(seqwin::Node, hash, start, stop, n_tar, n_neg, penalty);
     PYBIND11_NUMPY_DTYPE(seqwin::Edge, first, second, weight);

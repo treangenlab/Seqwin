@@ -35,7 +35,7 @@ from collections.abc import Sequence
 import numpy as np
 from numpy.typing import NDArray
 
-from ._core import FilteredGraph, SubgraphLoc, Signature, _build_native, _filter_native
+from ._native import FilteredGraph, SubgraphLoc, Signature, _build_native, _filter_native
 
 KMER_DTYPE = np.dtype([
     ('pos', np.uint32),
