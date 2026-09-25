@@ -27,29 +27,16 @@ Attributes:
 __author__ = 'Michael X. Wang'
 __license__ = 'GPL 3.0'
 
-import sys, logging, shutil
+import logging, shutil, sys
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from functools import cached_property
+from pathlib import Path, PurePosixPath, PureWindowsPath
+from types import MappingProxyType
 
 import numpy as np
 from numpy.typing import NDArray
-
-_LOG_FMT = '%(asctime)s | %(levelname)-8s | %(message)s'
-_LOG_DATEFMT = '%Y-%m-%d %H:%M:%S'
-
-# init root logger
-logging.basicConfig(
-    format=_LOG_FMT,
-    datefmt=_LOG_DATEFMT,
-    level=logging.INFO,
-    stream=sys.stdout,
-)
-
-from pathlib import Path
-from dataclasses import dataclass, field
-from types import MappingProxyType
-from collections.abc import Mapping
-from functools import cached_property
-
-from pydantic import BaseModel, ValidationInfo, Field, SecretStr, computed_field, field_validator, model_validator
+from pydantic import BaseModel, SecretStr, ValidationInfo, Field, computed_field, field_validator, model_validator
 
 from .ncbi import Level, Source, Task
 from ._version import __version__
@@ -77,6 +64,7 @@ class Config(BaseModel):
         title (str): Name of the output directory created under `prefix`. ['seqwin-out']
         overwrite (bool): If True, overwrite existing output files. [False]
         save_graph (bool): Save the raw minimizer graph before extracting signatures. [False]
+        save_pickle (bool): Save the completed Seqwin instance. [True]
 
         kmerlen (int): K-mer length. [21]
         windowsize (int): Window size for minimizer sketch. [200]
@@ -121,27 +109,28 @@ class Config(BaseModel):
     title: str = 'seqwin-out'
     overwrite: bool = False
     save_graph: bool = False
+    save_pickle: bool = True
 
     # Signature options
-    kmerlen: int = 21
-    windowsize: int = 200
-    penalty_th: float | None = None
+    kmerlen: int = Field(default=21, ge=5)
+    windowsize: int = Field(default=200, ge=1)
+    penalty_th: float | None = Field(default=None, ge=0, le=1)
     run_mash: bool = False
-    stringency: int = 5
-    min_len: int = 200
-    max_len: int | None = None
+    stringency: int = Field(default=5, ge=0, le=10)
+    min_len: int = Field(default=200, ge=0)
+    max_len: int | None = Field(default=None, ge=1)
     run_blast: bool = False
     blast_neg_only: bool = False # NOTE: need to fix when this is turned on
 
     # Graph filtering options (not included in CLI)
-    penalty_th_cap: float = 0.2
-    edge_w_th_mul: float = 0.3
-    min_nodes_floor: int = 3
-    max_nodes_cap: int | None = 100
-    consec_kmer_mul: float = 1.5
+    penalty_th_cap: float = Field(default=0.2, ge=0, le=1)
+    edge_w_th_mul: float = Field(default=0.3, ge=0, le=1)
+    min_nodes_floor: int = Field(default=3, ge=0)
+    max_nodes_cap: int | None = Field(default=100, ge=1)
+    consec_kmer_mul: float = Field(default=1.5, ge=1)
 
     # Mash parameters (not included in CLI)
-    sketchsize: int = 1000
+    sketchsize: int = Field(default=1000, ge=1)
 
     # NCBI download options
     level: Level = Level.contig
@@ -153,13 +142,37 @@ class Config(BaseModel):
     download_only: bool = False
 
     # Miscellaneous
-    n_cpu: int = 4
+    n_cpu: int = Field(default=4, ge=1)
     low_memory: bool = False
 
     @computed_field
     @cached_property
     def version(self) -> str:
         return __version__
+
+    @field_validator('title', mode='after')
+    @classmethod
+    def _validate_title(cls, v: str) -> str:
+        posix_path = PurePosixPath(v)
+        windows_path = PureWindowsPath(v)
+        if (
+            not v.strip()
+            or v in ('.', '..')
+            or posix_path.is_absolute()
+            or windows_path.is_absolute()
+            or windows_path.drive
+            or posix_path.parts != (v,)
+            or windows_path.parts != (v,)
+        ):
+            raise ValueError('title must be a single, nonempty directory name')
+        return v
+
+    @field_validator('tar_taxa', 'neg_taxa', mode='after')
+    @classmethod
+    def _validate_taxa(cls, v: list[str] | None) -> list[str] | None:
+        if v is not None and any(not taxon.strip() for taxon in v):
+            raise ValueError('Taxonomy names and IDs must not be empty')
+        return v
 
     # resolve all input paths and make sure they exist
     @field_validator(*_INPUT_FILES, *_INPUT_DIRS, mode='before')
@@ -192,12 +205,6 @@ class Config(BaseModel):
                 raise ValueError('You must provide at least one target input: tar_paths, tar_taxa, or tar_dir')
             elif (self.neg_paths is None) and (self.neg_taxa is None) and (self.neg_dir is None):
                 raise ValueError('You must provide at least one non-target input: neg_paths, neg_taxa, or neg_dir')
-
-        if (self.penalty_th is not None) and (self.penalty_th < 0 or self.penalty_th > 1):
-            raise ValueError('penalty_th must be between [0, 1]')
-
-        if self.stringency < 0 or self.stringency > 10:
-            raise ValueError('stringency must be between [0, 10]')
 
         if (self.max_len is not None) and (self.max_len <= self.min_len):
             raise ValueError('max_len must be greater than min_len')
@@ -300,24 +307,30 @@ class BlastConfig:
 
 
 def config_logger(file: Path, level: int) -> None:
-    """Add a file handler and set logging level for the root logger.
+    """Configure console and file handlers for the `seqwin` logger.
 
     Args:
         file (Path): Path to the log file.
         level (int): Logging level (e.g., `logging.INFO`).
     """
-    # use the same format
-    logFormatter = logging.Formatter(
-        fmt=_LOG_FMT,
-        datefmt=_LOG_DATEFMT,
+    log_formatter = logging.Formatter(
+        fmt='%(asctime)s | %(levelname)-8s | %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S',
         style='%'
     )
-    fileHandler = logging.FileHandler(file, mode='a')
-    fileHandler.setFormatter(logFormatter)
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(log_formatter)
+    file_handler = logging.FileHandler(file, mode='a')
+    file_handler.setFormatter(log_formatter)
 
-    logger = logging.getLogger()
-    logger.addHandler(fileHandler)
+    logger = logging.getLogger('seqwin')
+    for handler in logger.handlers:
+        handler.close()
+    logger.handlers.clear()
+    logger.addHandler(console_handler)
+    logger.addHandler(file_handler)
     logger.setLevel(level)
+    logger.propagate = False
 
 
 # freeze dataclasses

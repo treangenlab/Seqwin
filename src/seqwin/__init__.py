@@ -46,5 +46,5 @@ __author__ = 'Michael X. Wang'
 from ._version import __version__
 __license__ = 'GPL 3.0'
 
-from .config import Config # import first to init logger
+from .config import Config
 from .entry import Seqwin, run, load

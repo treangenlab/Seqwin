@@ -143,19 +143,22 @@ class Seqwin(object):
         try:
             # prefix is validated in config.py
             working_dir.mkdir(parents=False, exist_ok=False)
-            logger.info(f'Created output directory {working_dir}')
+            created_working_dir = True
         except FileExistsError:
+            created_working_dir = False
             # if working_dir exist, it should be a directory
             if working_dir.is_file():
                 raise NotADirectoryError(f'Cannot create {working_dir}, since it already exists as a file') from None
-            elif overwrite:
-                overwrite_warning(working_dir)
-            else:
+            elif not overwrite:
                 overwrite_error(working_dir)
 
-        # log to file, must happen after working_dir is created
+        # log to console and file, must happen after working_dir is created
         config_logger(working_dir / WORKINGDIR.log, logging.INFO)
 
+        if created_working_dir:
+            logger.info(f'Created output directory {working_dir}')
+        else:
+            overwrite_warning(working_dir)
         logger.info(f'Running Seqwin v{version}')
         if n_cpu == 1:
             logger.warning('Using only one CPU thread, longer running time is expected')
@@ -206,11 +209,12 @@ class Seqwin(object):
         self.signatures = signatures
         self.metrics = metrics
 
-        # save run instance
-        results_path = working_dir / WORKINGDIR.results
-        file_to_write(results_path, overwrite)
-        results_path.write_bytes(pickle.dumps(self, protocol=5))
-        logger.info(f'Run instance (includes all run data) saved as {results_path}')
+        if config.save_pickle:
+            # save run instance
+            results_path = working_dir / WORKINGDIR.results
+            file_to_write(results_path, overwrite)
+            results_path.write_bytes(pickle.dumps(self, protocol=5))
+            logger.info(f'Run instance (includes all run data) saved as {results_path}')
 
 
 def run(config: Config) -> Seqwin:
