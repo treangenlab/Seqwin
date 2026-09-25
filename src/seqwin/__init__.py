@@ -35,7 +35,7 @@ Modules:
 --------
 - core
 - assemblies
-- markers
+- evaluation
 - ncbi
 - mash
 - utils
