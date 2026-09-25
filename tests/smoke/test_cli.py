@@ -43,8 +43,61 @@ def test_version_prints_package_version() -> None:
 
 def test_missing_required_inputs_fails_cleanly(tmp_path: Path) -> None:
     result = runner.invoke(cli.app, ['--prefix', str(tmp_path)])
+    output = unstyle(result.output)
 
-    assert result.exit_code != 0
+    assert result.exit_code == 2
+    assert '--tar-paths' in output
+    assert '--tar-taxa' in output
+    assert '--tar-dir' in output
+    assert 'tar_paths' not in output
+    assert 'Traceback' not in output
+
+
+def test_field_validation_uses_cli_option_name(
+    tmp_path: Path,
+    targets_txt: Path,
+    non_targets_txt: Path,
+) -> None:
+    result = runner.invoke(
+        cli.app,
+        [
+            '--tar-paths', str(targets_txt),
+            '--neg-paths', str(non_targets_txt),
+            '--threads', '0',
+            '--prefix', str(tmp_path),
+        ],
+    )
+    output = unstyle(result.output)
+
+    assert result.exit_code == 2
+    assert '--threads' in output
+    assert 'n_cpu' not in output
+    assert 'Traceback' not in output
+
+
+def test_cross_field_validation_uses_cli_option_names(
+    tmp_path: Path,
+    targets_txt: Path,
+    non_targets_txt: Path,
+) -> None:
+    result = runner.invoke(
+        cli.app,
+        [
+            '--tar-paths', str(targets_txt),
+            '--neg-paths', str(non_targets_txt),
+            '--max-len', '100',
+            '--min-len', '200',
+            '--prefix', str(tmp_path),
+        ],
+    )
+    output = unstyle(result.output)
+
+    assert result.exit_code == 2
+    assert '--max-len' in output
+    assert '--min-len' in output
+    assert 'max_len' not in output
+    assert 'min_len' not in output
+    assert 'Traceback' not in output
 
 
 def test_cli_to_config_mapping_txt(monkeypatch, tmp_path: Path, targets_txt: Path, non_targets_txt: Path) -> None:

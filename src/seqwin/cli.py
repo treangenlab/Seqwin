@@ -6,8 +6,10 @@ __author__ = 'Michael X. Wang'
 __license__ = 'GPL 3.0'
 
 from pathlib import Path
+from typing import NoReturn
 
 import typer
+from pydantic import ValidationError
 
 from .entry import run
 from .ncbi import Level, Source
@@ -19,7 +21,7 @@ app = typer.Typer(
     help=f'Seqwin: Ultrafast identification of signature sequences',
     add_completion=False, # do not show command completion options in help
     pretty_exceptions_show_locals=False, # do not show huge blocks of local variables
-    add_help_option=False # disable built-in --help
+    add_help_option=False, # disable built-in --help
 )
 
 
@@ -35,8 +37,49 @@ def print_help(ctx: typer.Context, value: bool):
         ctx.exit()
 
 
+def _raise_validation_error(error: ValidationError, ctx: typer.Context) -> NoReturn:
+    """Raise a Typer error for a Pydantic validation failure.
+
+    Input validation is handled by Pydantic through `Config`.
+    The CLI only translates validation errors for user-friendly display.
+    """
+    # Translate the first Pydantic error
+    validation_error = error.errors()[0]
+    message = validation_error['msg']
+    if message.startswith('Value error, '):
+        message = message.removeprefix('Value error, ')
+
+    # Map Pydantic Config field names to Typer parameters
+    field_to_param = {
+        param.name: param
+        for param in ctx.command.get_params(ctx)
+        if param.name is not None
+    }
+
+    # For errors raised by field_validator, get the Config field where the error occurred
+    # Then find its corresponding Typer parameter
+    loc = validation_error['loc']
+    param = field_to_param.get(loc[0]) if loc and isinstance(loc[0], str) else None
+
+    # Errors raised by model_validator do not have validation_error['loc']
+    # Replace any field names in the message with the corresponding CLI option name
+    if param is None:
+        for field_name in sorted(Config.model_fields, key=len, reverse=True):
+            cli_param = field_to_param.get(field_name)
+            if cli_param is not None and field_name in message:
+                option_names = [*cli_param.opts, *cli_param.secondary_opts]
+                option_name = next(
+                    (name for name in option_names if name.startswith('--')),
+                    option_names[0]
+                )
+                message = message.replace(field_name, option_name)
+
+    raise typer.BadParameter(message, ctx=ctx, param=param) from None
+
+
 @app.command()
 def main(
+    ctx: typer.Context,
     # even if only one value is provided, typer will still provide a list with only one element
     tar_taxa: list[str] | None = typer.Option(
         None, '--tar-taxa', '-t', show_default=False,
@@ -86,10 +129,10 @@ def main(
         rich_help_panel='Output options'
     ),
     save_graph: bool = typer.Option(
-            False, '--save-graph', show_default=False,
-            help='Save the raw minimizer graph before extracting signatures.',
-            rich_help_panel='Output options'
-        ),
+        False, '--save-graph', show_default=False,
+        help='Save the raw minimizer graph before extracting signatures.',
+        rich_help_panel='Output options'
+    ),
     kmerlen: int = typer.Option(
         21, '--kmerlen', '-k',
         help='K-mer length.',
@@ -136,10 +179,6 @@ def main(
         'especially when the number of input assemblies is large.',
         rich_help_panel='Signature options'
     ),
-    # blast_neg_only: bool = typer.Option(
-    #     False, '--fast-blast', is_flag=True, flag_value=True, show_default=False,
-    #     help='Only evaluate (BLAST) against non-target assemblies.'
-    # ),
     level: Level = typer.Option(
         Level.contig, '--level', metavar='TEXT', # hide choices
         help="Limit downloads to genomes at or above this assembly level. "
@@ -159,11 +198,6 @@ def main(
     exclude_mag: bool = typer.Option(
         False, '--exclude-mag', show_default=False,
         help='Exclude metagenome-assembled genomes (MAGs).',
-        rich_help_panel='NCBI download options'
-    ),
-    no_gzip: bool = typer.Option(
-        False, '--no-gzip', show_default=False,
-        help='Do not download genomes as gzipped FASTA.',
         rich_help_panel='NCBI download options'
     ),
     api_key: str | None = typer.Option(
@@ -197,42 +231,37 @@ def main(
         is_eager=True, # run this before any other options
         help='Show this message and exit.',
         rich_help_panel='Miscellaneous'
-    )
+    ),
 ):
-    if not download_only:
-        if (tar_paths is None) and (tar_taxa is None) and (tar_dir is None):
-            raise typer.BadParameter('You must provide at least one target input: --tar-paths, --tar-taxa, or --tar-dir')
-        elif (neg_paths is None) and (neg_taxa is None) and (neg_dir is None):
-            raise typer.BadParameter('You must provide at least one non-target input: --neg-paths, --neg-taxa, or --neg-dir')
-
-    config = Config(
-        tar_taxa=tar_taxa,
-        neg_taxa=neg_taxa,
-        tar_paths=tar_paths,
-        neg_paths=neg_paths,
-        tar_dir=tar_dir,
-        neg_dir=neg_dir,
-        prefix=prefix,
-        title=title,
-        overwrite=overwrite,
-        kmerlen=kmerlen,
-        windowsize=windowsize,
-        penalty_th=penalty_th,
-        run_mash=run_mash,
-        stringency=stringency,
-        min_len=min_len,
-        max_len=max_len,
-        run_blast=run_blast,
-        #blast_neg_only=blast_neg_only,
-        level=level,
-        source=source,
-        annotated=annotated,
-        exclude_mag=exclude_mag,
-        gzip=not no_gzip,
-        api_key=api_key,
-        download_only=download_only,
-        n_cpu=n_cpu,
-        low_memory=low_memory,
-        save_graph=save_graph
-    )
+    try:
+        config = Config(
+            tar_taxa=tar_taxa,
+            neg_taxa=neg_taxa,
+            tar_paths=tar_paths,
+            neg_paths=neg_paths,
+            tar_dir=tar_dir,
+            neg_dir=neg_dir,
+            prefix=prefix,
+            title=title,
+            overwrite=overwrite,
+            save_graph=save_graph,
+            kmerlen=kmerlen,
+            windowsize=windowsize,
+            penalty_th=penalty_th,
+            run_mash=run_mash,
+            stringency=stringency,
+            min_len=min_len,
+            max_len=max_len,
+            run_blast=run_blast,
+            level=level,
+            source=source,
+            annotated=annotated,
+            exclude_mag=exclude_mag,
+            api_key=api_key,
+            download_only=download_only,
+            n_cpu=n_cpu,
+            low_memory=low_memory,
+        )
+    except ValidationError as error:
+        _raise_validation_error(error, ctx)
     _ = run(config)

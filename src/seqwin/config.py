@@ -164,7 +164,7 @@ class Config(BaseModel):
             or posix_path.parts != (v,)
             or windows_path.parts != (v,)
         ):
-            raise ValueError('title must be a single, nonempty directory name')
+            raise ValueError('Title must be a single, nonempty directory name')
         return v
 
     @field_validator('tar_taxa', 'neg_taxa', mode='after')
@@ -196,7 +196,7 @@ class Config(BaseModel):
     @model_validator(mode='after')
     def _check_inputs(self) -> 'Config':
         if (not HAS_DATASETS) and (self.tar_taxa or self.neg_taxa):
-            raise FileNotFoundError(
+            raise ValueError(
                 ('ncbi-datasets-cli is not installed. Genomes cannot be downloaded from the '
                 'provided taxon names or IDs. Please provide local files instead'))
 
