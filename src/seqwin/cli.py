@@ -9,7 +9,7 @@ from pathlib import Path
 
 import typer
 
-from .core import run
+from .entry import run
 from .ncbi import Level, Source
 from .config import Config
 from ._version import __version__

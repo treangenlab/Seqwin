@@ -25,7 +25,7 @@ from dataclasses import dataclass, field, fields, asdict, replace
 
 import pandas as pd
 
-from .graph import KmerGraph, FilteredGraph, Signature
+from .core import KmerGraph, FilteredGraph, Signature
 from .assemblies import Assemblies
 from .ncbi import blast
 from .utils import print_time_delta, log_and_raise, file_to_write, mp_wrapper

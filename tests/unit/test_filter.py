@@ -3,9 +3,10 @@ import pickle
 import numpy as np
 import pytest
 
-from seqwin.graph import (
-    EDGE_DTYPE, KMER_DTYPE, NODE_DTYPE, FilteredGraph, Signature, _filter_native
+from seqwin.core import (
+    EDGE_DTYPE, KMER_DTYPE, NODE_DTYPE, FilteredGraph, Signature
 )
+from seqwin.core._native import _filter_native
 
 
 def _paths():

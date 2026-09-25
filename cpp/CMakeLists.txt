@@ -68,7 +68,7 @@ target_compile_definitions(_native PRIVATE PYBIND11_DETAILED_ERROR_MESSAGES)
 set_target_properties(_native PROPERTIES PREFIX "")
 
 install(TARGETS _native
-    LIBRARY DESTINATION seqwin/graph
-    RUNTIME DESTINATION seqwin/graph
-    ARCHIVE DESTINATION seqwin/graph
+    LIBRARY DESTINATION seqwin/core
+    RUNTIME DESTINATION seqwin/core
+    ARCHIVE DESTINATION seqwin/core
 )

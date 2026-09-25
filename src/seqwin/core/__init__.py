@@ -7,7 +7,7 @@ Core classes and dtypes for Seqwin minimizer graphs.
 Usage:
 ------
 ```python
->>> from seqwin.graph import KmerGraph
+>>> from seqwin.core import KmerGraph
 >>> help(KmerGraph)
 ```
 
@@ -35,7 +35,17 @@ from collections.abc import Sequence
 import numpy as np
 from numpy.typing import NDArray
 
-from ._native import FilteredGraph, SubgraphLoc, Signature, _build_native, _filter_native
+from ._native import FilteredGraph, SubgraphLoc, Signature, _build_native
+
+__all__ = [
+    'KmerGraph',
+    'FilteredGraph',
+    'SubgraphLoc',
+    'Signature',
+    'KMER_DTYPE',
+    'NODE_DTYPE',
+    'EDGE_DTYPE',
+]
 
 KMER_DTYPE = np.dtype([
     ('pos', np.uint32),
@@ -63,7 +73,7 @@ class KmerGraph:
 
     Example usage:
     ```python
-    >>> from seqwin.graph import KmerGraph
+    >>> from seqwin.core import KmerGraph
     >>> graph = KmerGraph(
     >>>     assembly_paths = ...,
     >>>     kmerlen = 21,

@@ -3,7 +3,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from seqwin.graph import KMER_DTYPE, NODE_DTYPE, EDGE_DTYPE, KmerGraph
+from seqwin.core import KMER_DTYPE, NODE_DTYPE, EDGE_DTYPE, KmerGraph
 
 
 def _build(*args, **kwargs):

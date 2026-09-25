@@ -19,6 +19,9 @@ namespace py = pybind11;
 
 namespace {
 
+// Make public classes appear as seqwin.core, not seqwin.core._native
+constexpr char public_module[] = "seqwin.core";
+
 // Define an explicit, versioned binary format
 constexpr int pickle_version = 1;
 
@@ -148,7 +151,8 @@ void bind_python_classes(py::module_& module) {
                     state[11].cast<std::optional<std::size_t>>()
                 };
             }
-        ));
+        ))
+        .attr("__module__") = public_module;
 
     py::class_<SubgraphLoc>(module, "SubgraphLoc")
         .def_readonly("assembly_idx", &SubgraphLoc::assembly_idx)
@@ -182,7 +186,8 @@ void bind_python_classes(py::module_& module) {
                     state[6].cast<std::size_t>()
                 };
             }
-        ));
+        ))
+        .attr("__module__") = public_module;
 
     py::class_<Signature>(module, "Signature")
         .def_readonly("subgraph_idx", &Signature::subgraph_idx)
@@ -216,7 +221,8 @@ void bind_python_classes(py::module_& module) {
                     state[6].cast<double>()
                 };
             }
-        ));
+        ))
+        .attr("__module__") = public_module;
 }
 
 } // namespace seqwin::bindings

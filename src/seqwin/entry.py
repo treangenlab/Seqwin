@@ -1,6 +1,6 @@
 """
-Core
-====
+Entry
+=====
 
 Seqwin entry point.
 
@@ -23,8 +23,9 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+from .core import KmerGraph, FilteredGraph, Signature
+from .core._native import _filter_native
 from .assemblies import Assemblies, get_assemblies
-from .graph import KmerGraph, FilteredGraph, Signature, _filter_native
 from .evaluation import SignatureMetrics, process_signatures
 from .utils import print_time_delta, overwrite_warning, overwrite_error, mkdir, file_to_write
 from .config import Config, RunState, config_logger, HAS_MASH, WORKINGDIR
