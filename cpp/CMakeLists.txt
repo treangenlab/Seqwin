@@ -40,6 +40,7 @@ if (NOT PYBIND11_STATUS EQUAL 0)
 endif()
 
 Python_add_library(_native MODULE WITH_SOABI
+    src/bindings/python_classes.cpp
     src/bindings/python_bindings.cpp
     src/seqwin/build.cpp
     src/seqwin/build_internals.cpp

@@ -206,10 +206,10 @@ class Seqwin(object):
         self.metrics = metrics
 
         # save run instance
-        # results_path = working_dir / WORKINGDIR.results
-        # file_to_write(results_path, overwrite)
-        # results_path.write_bytes(pickle.dumps(self))
-        # logger.info(f'Run instance (includes all run data) saved as {results_path}')
+        results_path = working_dir / WORKINGDIR.results
+        file_to_write(results_path, overwrite)
+        results_path.write_bytes(pickle.dumps(self, protocol=5))
+        logger.info(f'Run instance (includes all run data) saved as {results_path}')
 
 
 def run(config: Config) -> Seqwin:
