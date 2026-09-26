@@ -23,7 +23,7 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-from .core import KmerGraph, FilteredGraph, Signature
+from .core import Graph, FilteredGraph, Signature
 from .core._native import _filter_native
 from .assemblies import Assemblies, get_assemblies
 from .evaluation import SignatureMetrics, process_signatures
@@ -31,7 +31,7 @@ from .utils import print_time_delta, overwrite_warning, overwrite_error, mkdir, 
 from .config import Config, RunState, config_logger, HAS_MASH, WORKINGDIR
 
 
-def _build_graph(assemblies: Assemblies, config: Config) -> KmerGraph:
+def _build_graph(assemblies: Assemblies, config: Config) -> Graph:
     """Build the raw (unscored) minimizer graph.
     """
     logger.info(f'Building minimizer graph from {len(assemblies)} assemblies...')
@@ -39,12 +39,12 @@ def _build_graph(assemblies: Assemblies, config: Config) -> KmerGraph:
         logger.warning(' - Low-memory mode is enabled; graph construction may take longer')
     tik = time()
 
-    graph = KmerGraph(
+    graph = Graph(
         assembly_paths=assemblies.paths,
         kmerlen=config.kmerlen,
         windowsize=config.windowsize,
         n_cpu=config.n_cpu,
-        low_memory=config.low_memory
+        low_memory=config.low_memory,
     )
 
     logger.info(f' - Found {len(graph.kmers)} minimizers')
@@ -56,7 +56,7 @@ def _build_graph(assemblies: Assemblies, config: Config) -> KmerGraph:
 
 
 def _filter_graph(
-    graph: KmerGraph, assemblies: Assemblies, config: Config, state: RunState
+    graph: Graph, assemblies: Assemblies, config: Config, state: RunState
 ) -> tuple[FilteredGraph, list[Signature]]:
     """Filter the minimizer graph and extract signatures from low-penalty subgraphs.
     """
@@ -71,7 +71,7 @@ def _filter_graph(
                 sketchsize=config.sketchsize,
                 out_path=state.working_dir / WORKINGDIR.mash,
                 overwrite=config.overwrite,
-                n_cpu=config.n_cpu
+                n_cpu=config.n_cpu,
             )
         else:
             logger.error('Mash is not installed. Falling back to minimizer sketches.')
@@ -95,7 +95,7 @@ def _filter_graph(
         min_nodes_floor=config.min_nodes_floor,
         max_nodes_cap=config.max_nodes_cap,
         consec_kmer_mul=config.consec_kmer_mul,
-        n_cpu=config.n_cpu
+        n_cpu=config.n_cpu,
     )
 
     print_time_delta(time() - tik)
@@ -114,6 +114,8 @@ class Seqwin(object):
         signatures (tuple[Signature] | None): Extracted signatures.
         metrics (tuple[SignatureMetrics] | None): Evaluation metrics parallel to `signatures`.
     """
+    __module__ = 'seqwin'
+
     __slots__ = ('config', 'state', 'assemblies', 'filtered', 'signatures', 'metrics')
     config: Config
     state: RunState

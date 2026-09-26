@@ -7,13 +7,13 @@ Core classes and dtypes of Seqwin.
 Usage:
 ------
 ```python
->>> from seqwin.core import KmerGraph
->>> help(KmerGraph)
+>>> from seqwin.core import Graph
+>>> help(Graph)
 ```
 
 Classes:
-----------
-- KmerGraph
+--------
+- Graph
 - FilteredGraph
 - SubgraphLoc
 - Signature
@@ -25,5 +25,5 @@ Attributes:
 - EDGE_DTYPE (np.dtype)
 """
 
-from .graph import KMER_DTYPE, NODE_DTYPE, EDGE_DTYPE, KmerGraph
+from .graph import KMER_DTYPE, NODE_DTYPE, EDGE_DTYPE, Graph
 from ._native import FilteredGraph, SubgraphLoc, Signature

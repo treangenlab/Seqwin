@@ -6,7 +6,7 @@ Classes and dtypes for Seqwin minimizer graphs.
 
 Classes:
 ----------
-- KmerGraph
+- Graph
 
 Attributes:
 -----------
@@ -47,13 +47,13 @@ EDGE_DTYPE = np.dtype([
 ])
 
 
-class KmerGraph:
-    r"""The minimizer graph class.
+class Graph:
+    r"""The Seqwin minimizer graph class.
 
     Example usage:
     ```python
-    >>> from seqwin.core import KmerGraph
-    >>> graph = KmerGraph(
+    >>> from seqwin.core import Graph
+    >>> graph = Graph(
     >>>     assembly_paths = ...,
     >>>     kmerlen = 21,
     >>>     windowsize = 200,
@@ -103,6 +103,8 @@ class KmerGraph:
         record_offsets (NDArray[np.uint32]): Cumulative global FASTA record offsets by assembly.
         record_ids (NDArray[np.str\_]): FASTA record IDs in global record order.
     """
+    __module__ = 'seqwin.core'
+
     __slots__ = ('kmers', 'nodes', 'edges', 'record_offsets', 'record_ids')
     kmers: NDArray[np.void]
     nodes: NDArray[np.void]
@@ -147,14 +149,14 @@ class KmerGraph:
             np.save(path / f'{name}.npy', getattr(self, name), allow_pickle=False)
 
     @classmethod
-    def load(cls, path: str | Path) -> 'KmerGraph':
+    def load(cls, path: str | Path) -> 'Graph':
         """Load a memory-mapped minimizer graph.
 
         Args:
             path (str | Path): Path to the graph directory.
 
         Returns:
-            KmerGraph: A graph backed by the saved NumPy array files.
+            Graph: A graph backed by the saved NumPy array files.
         """
         path = Path(path)
         if not path.is_dir():

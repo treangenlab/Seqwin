@@ -1,3 +1,13 @@
+"""
+Type declarations for the Seqwin C++ extension
+
+Classes:
+--------
+- FilteredGraph
+- SubgraphLoc
+- Signature
+"""
+
 from collections.abc import Sequence
 
 import numpy as np
@@ -114,7 +124,7 @@ def _build_native(
     NDArray[np.void],
     NDArray[np.void],
     NDArray[np.uint32],
-    list[str]
+    list[str],
 ]: ...
 
 def _filter_native(
@@ -137,4 +147,7 @@ def _filter_native(
     max_nodes_cap: int | None,
     consec_kmer_mul: float,
     n_cpu: int,
-) -> tuple[FilteredGraph, list[Signature]]: ...
+) -> tuple[
+    FilteredGraph,
+    list[Signature],
+]: ...

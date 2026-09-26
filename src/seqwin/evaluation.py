@@ -25,7 +25,7 @@ from dataclasses import dataclass, field, fields, asdict, replace
 
 import pandas as pd
 
-from .core import KmerGraph, FilteredGraph, Signature
+from .core import Graph, FilteredGraph, Signature
 from .assemblies import Assemblies
 from .ncbi import blast
 from .utils import print_time_delta, log_and_raise, file_to_write, mp_wrapper
@@ -62,7 +62,7 @@ class SignatureMetrics:
     blast: pd.DataFrame | None = field(
         default=None,
         compare=False,
-        repr=False
+        repr=False,
     )
 
 # Scalar metrics (excluding 'blast')
@@ -170,12 +170,22 @@ def eval_signatures(
         neg_only = False
         logger.info('BLAST checking signatures against all assemblies (more sensitive but slower)...')
     else:
-        log_and_raise(ValueError, f'Invalid BLAST database title. Must be "{BLASTCONFIG.title_all}" or "{BLASTCONFIG.title_neg_only}"')
+        log_and_raise(
+            ValueError,
+            f'Invalid BLAST database title. Must be "{BLASTCONFIG.title_all}" or "{BLASTCONFIG.title_neg_only}"'
+        )
     tik = time()
     n_seqs = len(all_seqs)
 
     # blast check all markers against all / non-target assemblies
-    blast_out = blast(all_seqs, db=blastdb, task=BLASTCONFIG.task, columns=BLASTCONFIG.columns, n_cpu=n_cpu, batch_size=BLASTCONFIG.batch_size)
+    blast_out = blast(
+        all_seqs,
+        db=blastdb,
+        task=BLASTCONFIG.task,
+        columns=BLASTCONFIG.columns,
+        n_cpu=n_cpu,
+        batch_size=BLASTCONFIG.batch_size,
+    )
     if len(blast_out) == 0:
         log_and_raise(RuntimeError, 'No BLAST hit found')
     # blast_out.to_pickle('blast_out.pkl')
@@ -228,7 +238,7 @@ def eval_signatures(
         all_blast,
         map(len, all_seqs),
         repeat(total_tar, n_seqs),
-        repeat(total_neg, n_seqs)
+        repeat(total_neg, n_seqs),
     )
     metrics = mp_wrapper(
         _get_metrics, metrics_args, n_cpu, n_jobs=n_seqs
@@ -244,8 +254,15 @@ def eval_signatures(
 
 
 def _eval_signatures(
-    signatures: list[Signature], blastdb: Path, total_tar: int, total_neg: int, n_cpu: int
-) -> tuple[list[Signature], list[SignatureMetrics]]:
+    signatures: list[Signature],
+    blastdb: Path,
+    total_tar: int,
+    total_neg: int,
+    n_cpu: int,
+) -> tuple[
+    list[Signature],
+    list[SignatureMetrics],
+]:
     """Evaluate signatures with BLAST and rank them by conservation and divergence.
     """
     metrics = eval_signatures(
@@ -264,10 +281,13 @@ def process_signatures(
     signatures: list[Signature],
     filtered: FilteredGraph,
     assemblies: Assemblies,
-    graph: KmerGraph,
+    graph: Graph,
     config: Config,
-    state: RunState
-) -> tuple[tuple[Signature, ...], tuple[SignatureMetrics, ...]]:
+    state: RunState,
+) -> tuple[
+    tuple[Signature, ...],
+    tuple[SignatureMetrics, ...],
+]:
     """Evaluate extracted signatures and save them to FASTA and CSV.
     """
     total_tar = filtered.total_tar
@@ -289,7 +309,7 @@ def process_signatures(
             prefix=working_dir / WORKINGDIR.blast_dir,
             neg_only=blast_neg_only,
             overwrite=overwrite,
-            n_cpu=n_cpu
+            n_cpu=n_cpu,
         )
         signatures, metrics = _eval_signatures(
             signatures, blastdb, total_tar, total_neg, n_cpu
@@ -318,7 +338,7 @@ def process_signatures(
             s.length,
             *(getattr(m, name) for name in _METRIC_NAMES),
             s.rep_ratio,
-            loc.n_kmers
+            loc.n_kmers,
         ))
     markers_fasta.write_text(''.join(fasta), encoding='utf-8', newline='\n')
     logger.info(f'Candidate signatures saved as {markers_fasta}')
