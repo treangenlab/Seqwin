@@ -25,13 +25,13 @@ app = typer.Typer(
 )
 
 
-def print_version(ctx: typer.Context, value: bool):
+def _print_version(ctx: typer.Context, value: bool):
     if value:
         typer.echo(f'Seqwin v{__version__}')
         ctx.exit()
 
 
-def print_help(ctx: typer.Context, value: bool):
+def _print_help(ctx: typer.Context, value: bool):
     if value:
         typer.echo(ctx.get_help())
         ctx.exit()
@@ -221,13 +221,13 @@ def main(
         rich_help_panel='Miscellaneous'
     ),
     version: bool = typer.Option(
-        False, '--version', callback=print_version, show_default=False, expose_value=False,
+        False, '--version', callback=_print_version, show_default=False, expose_value=False,
         is_eager=True, # run this before any other options
         help='Show Seqwin version and exit.',
         rich_help_panel='Miscellaneous'
     ),
     help_: bool = typer.Option(
-        False, '--help', '-h', callback=print_help, show_default=False, expose_value=False,
+        False, '--help', '-h', callback=_print_help, show_default=False, expose_value=False,
         is_eager=True, # run this before any other options
         help='Show this message and exit.',
         rich_help_panel='Miscellaneous'
