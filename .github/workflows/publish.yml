@@ -37,7 +37,7 @@ jobs:
           ")
 
           echo "Version in src/seqwin/_version.py: $FILE_VERSION"
-          
+
           if [ "$FILE_VERSION" = "NOT_FOUND" ]; then
             echo "::error::Could not find __version__ in src/seqwin/_version.py"
             exit 1
@@ -121,7 +121,7 @@ jobs:
           CIBW_TEST_COMMAND: >
             seqwin --help &&
             python -c "import seqwin; print(seqwin.__version__)" &&
-            python -c "from seqwin.graph import KmerGraph; print(KmerGraph.__name__)" &&
+            python -c "from seqwin.core import Graph; print(Graph.__name__)" &&
             pytest -q {project}/tests/unit &&
             pytest -q {project}/tests/smoke &&
             python {project}/tests/run_example.py
