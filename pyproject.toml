@@ -15,8 +15,8 @@ requires-python = ">=3.10"
 dependencies = [
     "numpy>=2",
     "pandas>=2",
-    "pydantic",
-    "typer"
+    "pydantic>=2",
+    "typer>=0.16"
 ]
 
 [tool.scikit-build.metadata.version]

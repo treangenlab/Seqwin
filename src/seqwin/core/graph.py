@@ -1,23 +1,12 @@
 """
-Minimizer Graph
-===============
+Graph
+=====
 
-Core classes and dtypes for Seqwin minimizer graphs.
-
-Usage:
-------
-```python
->>> from seqwin.graph import KmerGraph
->>> help(KmerGraph)
-```
-
-Dependencies:
--------------
-- numpy
+Classes and dtypes for Seqwin minimizer graphs.
 
 Classes:
 ----------
-- KmerGraph
+- Graph
 
 Attributes:
 -----------
@@ -35,7 +24,7 @@ from collections.abc import Sequence
 import numpy as np
 from numpy.typing import NDArray
 
-from ._native import FilteredGraph, SubgraphLoc, Signature, _build_native, _filter_native
+from ._native import _build_native
 
 KMER_DTYPE = np.dtype([
     ('pos', np.uint32),
@@ -48,7 +37,7 @@ NODE_DTYPE = np.dtype([
     ('stop', np.uintp),
     ('n_tar', np.uint32),
     ('n_neg', np.uint32),
-    ('penalty', np.float64)
+    ('penalty', np.float64),
 ])
 
 EDGE_DTYPE = np.dtype([
@@ -58,13 +47,13 @@ EDGE_DTYPE = np.dtype([
 ])
 
 
-class KmerGraph:
-    r"""The minimizer graph class.
+class Graph:
+    r"""The Seqwin minimizer graph class.
 
     Example usage:
     ```python
-    >>> from seqwin.graph import KmerGraph
-    >>> graph = KmerGraph(
+    >>> from seqwin.core import Graph
+    >>> graph = Graph(
     >>>     assembly_paths = ...,
     >>>     kmerlen = 21,
     >>>     windowsize = 200,
@@ -114,6 +103,8 @@ class KmerGraph:
         record_offsets (NDArray[np.uint32]): Cumulative global FASTA record offsets by assembly.
         record_ids (NDArray[np.str\_]): FASTA record IDs in global record order.
     """
+    __module__ = 'seqwin.core'
+
     __slots__ = ('kmers', 'nodes', 'edges', 'record_offsets', 'record_ids')
     kmers: NDArray[np.void]
     nodes: NDArray[np.void]
@@ -123,27 +114,27 @@ class KmerGraph:
 
     def __init__(
         self,
-        assembly_paths: Sequence[str],
+        assembly_paths: Sequence[str | Path],
         kmerlen: int,
         windowsize: int,
         low_memory: bool = False,
-        n_cpu: int = 1
+        n_cpu: int = 1,
     ) -> None:
         """Build a minimizer graph.
 
         Args:
-            assembly_paths (Iterable[Path]): Paths to input assemblies in FASTA format (plain or gzipped).
+            assembly_paths (Sequence[str | Path]): Paths to input assemblies in FASTA format (plain or gzipped).
             kmerlen (int): K-mer length for minimizer sketch.
             windowsize (int): Window size for minimizer sketch.
-            n_cpu (int, optional): Number of worker threads to use. [1]
             low_memory (bool, optional): Recompute minimizers in a second pass to reduce peak memory. [False]
+            n_cpu (int, optional): Number of worker threads to use. [1]
         """
         self.kmers, self.nodes, self.edges, self.record_offsets, record_ids = _build_native(
             list(map(str, assembly_paths)),
             int(kmerlen),
             int(windowsize),
             int(n_cpu),
-            bool(low_memory)
+            bool(low_memory),
         )
         self.record_ids = np.asarray(record_ids, dtype='U')
 
@@ -158,14 +149,14 @@ class KmerGraph:
             np.save(path / f'{name}.npy', getattr(self, name), allow_pickle=False)
 
     @classmethod
-    def load(cls, path: str | Path) -> 'KmerGraph':
+    def load(cls, path: str | Path) -> 'Graph':
         """Load a memory-mapped minimizer graph.
 
         Args:
             path (str | Path): Path to the graph directory.
 
         Returns:
-            KmerGraph: A graph backed by the saved NumPy array files.
+            Graph: A graph backed by the saved NumPy array files.
         """
         path = Path(path)
         if not path.is_dir():

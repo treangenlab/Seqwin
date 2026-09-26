@@ -40,6 +40,7 @@ if (NOT PYBIND11_STATUS EQUAL 0)
 endif()
 
 Python_add_library(_native MODULE WITH_SOABI
+    src/bindings/python_classes.cpp
     src/bindings/python_bindings.cpp
     src/seqwin/build.cpp
     src/seqwin/build_internals.cpp
@@ -67,7 +68,7 @@ target_compile_definitions(_native PRIVATE PYBIND11_DETAILED_ERROR_MESSAGES)
 set_target_properties(_native PROPERTIES PREFIX "")
 
 install(TARGETS _native
-    LIBRARY DESTINATION seqwin/graph
-    RUNTIME DESTINATION seqwin/graph
-    ARCHIVE DESTINATION seqwin/graph
+    LIBRARY DESTINATION seqwin/core
+    RUNTIME DESTINATION seqwin/core
+    ARCHIVE DESTINATION seqwin/core
 )

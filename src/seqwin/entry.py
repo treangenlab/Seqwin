@@ -1,6 +1,6 @@
 """
-Core
-====
+Entry
+=====
 
 Seqwin entry point.
 
@@ -23,14 +23,15 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+from .core import Graph, FilteredGraph, Signature
+from .core._native import _filter_native
 from .assemblies import Assemblies, get_assemblies
-from .graph import KmerGraph, FilteredGraph, Signature, _filter_native
 from .evaluation import SignatureMetrics, process_signatures
 from .utils import print_time_delta, overwrite_warning, overwrite_error, mkdir, file_to_write
 from .config import Config, RunState, config_logger, HAS_MASH, WORKINGDIR
 
 
-def _build_graph(assemblies: Assemblies, config: Config) -> KmerGraph:
+def _build_graph(assemblies: Assemblies, config: Config) -> Graph:
     """Build the raw (unscored) minimizer graph.
     """
     logger.info(f'Building minimizer graph from {len(assemblies)} assemblies...')
@@ -38,12 +39,12 @@ def _build_graph(assemblies: Assemblies, config: Config) -> KmerGraph:
         logger.warning(' - Low-memory mode is enabled; graph construction may take longer')
     tik = time()
 
-    graph = KmerGraph(
+    graph = Graph(
         assembly_paths=assemblies.paths,
         kmerlen=config.kmerlen,
         windowsize=config.windowsize,
         n_cpu=config.n_cpu,
-        low_memory=config.low_memory
+        low_memory=config.low_memory,
     )
 
     logger.info(f' - Found {len(graph.kmers)} minimizers')
@@ -55,7 +56,7 @@ def _build_graph(assemblies: Assemblies, config: Config) -> KmerGraph:
 
 
 def _filter_graph(
-    graph: KmerGraph, assemblies: Assemblies, config: Config, state: RunState
+    graph: Graph, assemblies: Assemblies, config: Config, state: RunState
 ) -> tuple[FilteredGraph, list[Signature]]:
     """Filter the minimizer graph and extract signatures from low-penalty subgraphs.
     """
@@ -70,7 +71,7 @@ def _filter_graph(
                 sketchsize=config.sketchsize,
                 out_path=state.working_dir / WORKINGDIR.mash,
                 overwrite=config.overwrite,
-                n_cpu=config.n_cpu
+                n_cpu=config.n_cpu,
             )
         else:
             logger.error('Mash is not installed. Falling back to minimizer sketches.')
@@ -94,7 +95,7 @@ def _filter_graph(
         min_nodes_floor=config.min_nodes_floor,
         max_nodes_cap=config.max_nodes_cap,
         consec_kmer_mul=config.consec_kmer_mul,
-        n_cpu=config.n_cpu
+        n_cpu=config.n_cpu,
     )
 
     print_time_delta(time() - tik)
@@ -113,6 +114,8 @@ class Seqwin(object):
         signatures (tuple[Signature] | None): Extracted signatures.
         metrics (tuple[SignatureMetrics] | None): Evaluation metrics parallel to `signatures`.
     """
+    __module__ = 'seqwin'
+
     __slots__ = ('config', 'state', 'assemblies', 'filtered', 'signatures', 'metrics')
     config: Config
     state: RunState
@@ -142,19 +145,22 @@ class Seqwin(object):
         try:
             # prefix is validated in config.py
             working_dir.mkdir(parents=False, exist_ok=False)
-            logger.info(f'Created output directory {working_dir}')
+            created_working_dir = True
         except FileExistsError:
+            created_working_dir = False
             # if working_dir exist, it should be a directory
             if working_dir.is_file():
                 raise NotADirectoryError(f'Cannot create {working_dir}, since it already exists as a file') from None
-            elif overwrite:
-                overwrite_warning(working_dir)
-            else:
+            elif not overwrite:
                 overwrite_error(working_dir)
 
-        # log to file, must happen after working_dir is created
+        # log to console and file, must happen after working_dir is created
         config_logger(working_dir / WORKINGDIR.log, logging.INFO)
 
+        if created_working_dir:
+            logger.info(f'Created output directory {working_dir}')
+        else:
+            overwrite_warning(working_dir)
         logger.info(f'Running Seqwin v{version}')
         if n_cpu == 1:
             logger.warning('Using only one CPU thread, longer running time is expected')
@@ -205,11 +211,12 @@ class Seqwin(object):
         self.signatures = signatures
         self.metrics = metrics
 
-        # save run instance
-        # results_path = working_dir / WORKINGDIR.results
-        # file_to_write(results_path, overwrite)
-        # results_path.write_bytes(pickle.dumps(self))
-        # logger.info(f'Run instance (includes all run data) saved as {results_path}')
+        if config.save_pickle:
+            # save run instance
+            results_path = working_dir / WORKINGDIR.results
+            file_to_write(results_path, overwrite)
+            results_path.write_bytes(pickle.dumps(self, protocol=5))
+            logger.info(f'Run instance (includes all run data) saved as {results_path}')
 
 
 def run(config: Config) -> Seqwin:

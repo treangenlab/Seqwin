@@ -3,16 +3,16 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from seqwin.graph import KMER_DTYPE, NODE_DTYPE, EDGE_DTYPE, KmerGraph
+from seqwin.core import KMER_DTYPE, NODE_DTYPE, EDGE_DTYPE, Graph
 
 
 def _build(*args, **kwargs):
-    graph = KmerGraph(*args, **kwargs)
+    graph = Graph(*args, **kwargs)
     return graph.kmers, graph.nodes, graph.edges, graph.record_offsets, graph.record_ids
 
 
-def _small_graph(targets_dir: Path, non_targets_dir: Path) -> KmerGraph:
-    return KmerGraph(
+def _small_graph(targets_dir: Path, non_targets_dir: Path) -> Graph:
+    return Graph(
         [targets_dir / 'target-1.fasta', non_targets_dir / 'non-target-1.fasta'],
         kmerlen=7,
         windowsize=10,
@@ -28,7 +28,7 @@ def test_graph_save_load_round_trip(tmp_path: Path, targets_dir: Path, non_targe
     names = ('kmers', 'nodes', 'edges', 'record_offsets', 'record_ids')
     assert {path.name for path in graph_path.iterdir()} == {f'{name}.npy' for name in names}
 
-    loaded = KmerGraph.load(graph_path)
+    loaded = Graph.load(graph_path)
     for name in names:
         original_array = getattr(graph, name)
         loaded_array = getattr(loaded, name)
@@ -65,7 +65,7 @@ def test_graph_load_rejects_malformed_arrays(
     np.save(graph_path / f'{name}.npy', array)
 
     with pytest.raises(ValueError, match=message):
-        KmerGraph.load(graph_path)
+        Graph.load(graph_path)
 
 
 def test_graph_load_rejects_missing_array(tmp_path: Path, targets_dir: Path, non_targets_dir: Path) -> None:
@@ -75,7 +75,7 @@ def test_graph_load_rejects_missing_array(tmp_path: Path, targets_dir: Path, non
     (graph_path / 'edges.npy').unlink()
 
     with pytest.raises(FileNotFoundError, match='edges.npy'):
-        KmerGraph.load(graph_path)
+        Graph.load(graph_path)
 
 
 def _assert_edges_weight_sorted(edges: np.ndarray) -> None:
@@ -197,8 +197,8 @@ def test_duplicate_edges_across_workers_are_aggregated(tmp_path: Path) -> None:
     for path in assembly_paths:
         path.write_text('>record\nACGTTGCATGTCGCATGATGCATGAGAGCT\n')
 
-    single_worker = KmerGraph(assembly_paths, kmerlen=5, windowsize=6, n_cpu=1)
-    multiple_workers = KmerGraph(assembly_paths, kmerlen=5, windowsize=6, n_cpu=2)
+    single_worker = Graph(assembly_paths, kmerlen=5, windowsize=6, n_cpu=1)
+    multiple_workers = Graph(assembly_paths, kmerlen=5, windowsize=6, n_cpu=2)
 
     assert len(multiple_workers.edges) > 0
     assert np.all(multiple_workers.edges['weight'] == 2)

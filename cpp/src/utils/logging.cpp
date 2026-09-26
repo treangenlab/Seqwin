@@ -11,7 +11,7 @@ void log_python(const std::string& message, const std::string& level)
     py::gil_scoped_acquire acquire;
 
     py::object logging = py::module_::import("logging");
-    py::object logger = logging.attr("getLogger")();
+    py::object logger = logging.attr("getLogger")("seqwin");
 
     if (level == "debug") {
         logger.attr("debug")(message);

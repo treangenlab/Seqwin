@@ -29,22 +29,22 @@ Dependencies:
 
 Packages:
 --------
-- graph
+- core
 
 Modules:
 --------
-- core
 - assemblies
-- markers
+- evaluation
 - ncbi
 - mash
 - utils
 - config
+- entry
 """
 
 __author__ = 'Michael X. Wang'
 from ._version import __version__
 __license__ = 'GPL 3.0'
 
-from .config import Config # import first to init logger
-from .core import Seqwin, run, load
+from .config import Config
+from .entry import Seqwin, run, load

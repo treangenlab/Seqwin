@@ -1,9 +1,12 @@
+import pickle
+
 import numpy as np
 import pytest
 
-from seqwin.graph import (
-    EDGE_DTYPE, KMER_DTYPE, NODE_DTYPE, FilteredGraph, Signature, _filter_native
+from seqwin.core import (
+    EDGE_DTYPE, KMER_DTYPE, NODE_DTYPE, FilteredGraph, Signature
 )
+from seqwin.core._native import _filter_native
 
 
 def _paths():
@@ -206,3 +209,37 @@ def test_filtered_arrays_keep_native_owner_alive():
     del filtered
     np.testing.assert_array_equal(nodes['hash'], [10, 20, 30, 40])
     assert edges.tolist() == [(0, 1, 1), (1, 2, 1), (2, 3, 1)]
+
+
+def test_native_results_pickle_round_trip():
+    (filtered, signatures), _ = _filter()
+
+    restored = pickle.loads(pickle.dumps(filtered, protocol=5))
+    np.testing.assert_array_equal(restored.nodes, filtered.nodes)
+    np.testing.assert_array_equal(restored.edges, filtered.edges)
+    for name in (
+        'subgraphs', 'total_tar', 'total_neg', 'e_absence_tar',
+        'e_presence_neg', 'penalty_th', 'edge_weight_th', 'min_nodes',
+        'max_nodes',
+    ):
+        assert getattr(restored, name) == getattr(filtered, name)
+    nodes, edges = restored.nodes, restored.edges
+    assert nodes.base is restored
+    assert edges.base is restored
+    del restored
+    np.testing.assert_array_equal(nodes['hash'], [10, 20, 30, 40])
+    assert edges.tolist() == [(0, 1, 1), (1, 2, 1), (2, 3, 1)]
+
+    signature = signatures[0]
+    restored_signature = pickle.loads(pickle.dumps(signature, protocol=5))
+    assert restored_signature.subgraph_idx == signature.subgraph_idx
+    assert restored_signature.sequence == signature.sequence
+    assert restored_signature.length == signature.length
+    assert restored_signature.n_rep == signature.n_rep
+    assert restored_signature.rep_ratio == signature.rep_ratio
+    for name in ('assembly_idx', 'record_idx', 'start', 'stop', 'n_kmers', 'n_repeats'):
+        assert getattr(restored_signature.location, name) == getattr(signature.location, name)
+
+    restored_location = pickle.loads(pickle.dumps(signature.location, protocol=5))
+    for name in ('assembly_idx', 'record_idx', 'start', 'stop', 'n_kmers', 'n_repeats'):
+        assert getattr(restored_location, name) == getattr(signature.location, name)

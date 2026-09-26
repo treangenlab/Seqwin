@@ -13,6 +13,7 @@
 #include "seqwin/build.hpp"
 #include "seqwin/filter.hpp"
 #include "seqwin/graph.hpp"
+#include "bindings/python_classes.hpp"
 
 namespace py = pybind11;
 
@@ -58,50 +59,7 @@ PYBIND11_MODULE(_native, m) {
 
     m.doc() = "Seqwin minimizer graph bindings";
 
-    py::class_<seqwin::FilteredGraph>(m, "FilteredGraph")
-        .def_property_readonly("nodes", [](py::object self) {
-            auto& filtered = self.cast<seqwin::FilteredGraph&>();
-            return py::array_t<seqwin::Node>(
-                {static_cast<py::ssize_t>(filtered.nodes.size())},
-                {static_cast<py::ssize_t>(sizeof(seqwin::Node))},
-                filtered.nodes.data(),
-                self
-            );
-        })
-        .def_property_readonly("edges", [](py::object self) {
-            auto& filtered = self.cast<seqwin::FilteredGraph&>();
-            return py::array_t<seqwin::Edge>(
-                {static_cast<py::ssize_t>(filtered.edges.size())},
-                {static_cast<py::ssize_t>(sizeof(seqwin::Edge))},
-                filtered.edges.data(),
-                self
-            );
-        })
-        .def_readonly("subgraphs", &seqwin::FilteredGraph::subgraphs)
-        .def_readonly("total_tar", &seqwin::FilteredGraph::total_tar)
-        .def_readonly("total_neg", &seqwin::FilteredGraph::total_neg)
-        .def_readonly("e_absence_tar", &seqwin::FilteredGraph::e_absence_tar)
-        .def_readonly("e_presence_neg", &seqwin::FilteredGraph::e_presence_neg)
-        .def_readonly("penalty_th", &seqwin::FilteredGraph::penalty_th)
-        .def_readonly("edge_weight_th", &seqwin::FilteredGraph::edge_weight_th)
-        .def_readonly("min_nodes", &seqwin::FilteredGraph::min_nodes)
-        .def_readonly("max_nodes", &seqwin::FilteredGraph::max_nodes);
-
-    py::class_<seqwin::SubgraphLoc>(m, "SubgraphLoc")
-        .def_readonly("assembly_idx", &seqwin::SubgraphLoc::assembly_idx)
-        .def_readonly("record_idx", &seqwin::SubgraphLoc::record_idx)
-        .def_readonly("start", &seqwin::SubgraphLoc::start)
-        .def_readonly("stop", &seqwin::SubgraphLoc::stop)
-        .def_readonly("n_kmers", &seqwin::SubgraphLoc::n_kmers)
-        .def_readonly("n_repeats", &seqwin::SubgraphLoc::n_repeats);
-
-    py::class_<seqwin::Signature>(m, "Signature")
-        .def_readonly("subgraph_idx", &seqwin::Signature::subgraph_idx)
-        .def_readonly("location", &seqwin::Signature::location)
-        .def_readonly("sequence", &seqwin::Signature::sequence)
-        .def_readonly("length", &seqwin::Signature::length)
-        .def_readonly("n_rep", &seqwin::Signature::n_rep)
-        .def_readonly("rep_ratio", &seqwin::Signature::rep_ratio);
+    seqwin::bindings::bind_python_classes(m);
 
     m.def("_build_native",
         [](const std::vector<std::string>& assembly_paths,

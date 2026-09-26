@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from seqwin.config import Config
-from seqwin.core import run
+from seqwin.entry import run
 
 
 def test_download_only_does_not_execute_full_run(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -13,7 +13,7 @@ def test_download_only_does_not_execute_full_run(monkeypatch: pytest.MonkeyPatch
         invoked['run_called'] = True
         raise AssertionError('Seqwin.run() should not be called in download_only mode')
 
-    monkeypatch.setattr('seqwin.core.Seqwin.run', _boom)
+    monkeypatch.setattr('seqwin.entry.Seqwin.run', _boom)
 
     config = Config(prefix=tmp_path, title='download-only', download_only=True)
     seq = run(config)
