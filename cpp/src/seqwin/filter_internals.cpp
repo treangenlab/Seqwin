@@ -12,6 +12,7 @@
 #include <ankerl/unordered_dense.h>
 
 #include "seqwin/filter.hpp"
+#include "seqwin/shared_internals.hpp"
 #include "utils/logging.hpp"
 #include "utils/thread_pool.hpp"
 
@@ -166,7 +167,8 @@ void prune_graph(
     const Edge* edges,
     std::size_t n_edges,
     double edge_weight_th,
-    FilteredGraph& filtered
+    FilteredGraph& filtered,
+    ThreadPool& pool
 ) {
     const std::size_t th = edge_weight_th;
     std::size_t retained_count = 0;
@@ -191,7 +193,7 @@ void prune_graph(
         connected.push_back(edges[i].first);
         connected.push_back(edges[i].second);
     }
-    std::sort(connected.begin(), connected.end());
+    lsd_radix_sort(connected, pool);
     connected.erase(std::unique(connected.begin(), connected.end()), connected.end());
 
     filtered.nodes = NoInitArray<Node>(connected.size());

@@ -10,6 +10,7 @@
 #include <utility>
 #include <vector>
 
+#include "seqwin/shared_internals.hpp"
 #include "utils/logging.hpp"
 #include "utils/thread_pool.hpp"
 
@@ -33,8 +34,11 @@ struct MergedNodes {
 };
 
 template <typename T, typename MemberPtr>
-NoInitArray<T> concat(std::vector<WorkerGraph>& graphs, MemberPtr member, ThreadPool& pool)
-{
+NoInitArray<T> concat(
+    std::vector<WorkerGraph>& graphs,
+    MemberPtr member,
+    ThreadPool& pool
+) {
     if (graphs.empty()) {
         return {};
     }
@@ -65,87 +69,18 @@ NoInitArray<T> concat(std::vector<WorkerGraph>& graphs, MemberPtr member, Thread
     return out;
 }
 
-NoInitArray<WorkerNode> concat_nodes(std::vector<WorkerGraph>& graphs, ThreadPool& pool)
-{
+NoInitArray<WorkerNode> concat_nodes(
+    std::vector<WorkerGraph>& graphs,
+    ThreadPool& pool
+) {
     return concat<WorkerNode>(graphs, &WorkerGraph::nodes, pool);
 }
 
-NoInitArray<WorkerEdge> concat_edges(std::vector<WorkerGraph>& graphs, ThreadPool& pool)
-{
-    return concat<WorkerEdge>(graphs, &WorkerGraph::edges, pool);
-}
-
-template <typename T, typename KeyPtr>
-static void lsd_radix_sort_key(
-    T*& src,
-    T*& dst,
-    std::size_t n,
-    KeyPtr key,
-    bool ascending,
-    std::vector<std::size_t>& counts,
+NoInitArray<WorkerEdge> concat_edges(
+    std::vector<WorkerGraph>& graphs,
     ThreadPool& pool
 ) {
-    static constexpr std::size_t bucket_count = 65536;
-    static constexpr std::uint64_t bucket_mask = bucket_count - 1;
-
-    for (std::size_t shift = 0; shift < 64; shift += 16) {
-        std::fill(counts.begin(), counts.end(), 0);
-
-        pool.parallel_for(n, [&](std::size_t start, std::size_t end, std::size_t t) {
-            auto* local_counts = counts.data() + t * bucket_count;
-            for (std::size_t i = start; i < end; ++i) {
-                const auto bucket = ((src[i].*key) >> shift) & bucket_mask;
-                ++local_counts[static_cast<std::size_t>(bucket)];
-            }
-        });
-
-        std::size_t current = 0;
-        for (std::size_t bucket_i = 0; bucket_i < bucket_count; ++bucket_i) {
-            const auto bucket = ascending ? bucket_i : bucket_count - bucket_i - 1;
-            for (std::size_t t = 0; t < pool.size(); ++t) {
-                auto& value = counts[t * bucket_count + bucket];
-                const auto c = value;
-                value = current;
-                current += c;
-            }
-        }
-
-        pool.parallel_for(n, [&](std::size_t start, std::size_t end, std::size_t t) {
-            auto* local_offsets = counts.data() + t * bucket_count;
-            for (std::size_t i = start; i < end; ++i) {
-                const auto bucket = ((src[i].*key) >> shift) & bucket_mask;
-                const auto pos = local_offsets[static_cast<std::size_t>(bucket)]++;
-                dst[pos] = src[i];
-            }
-        });
-
-        std::swap(src, dst);
-    }
-}
-
-/**
- * @brief Stable parallel LSD radix sort over one or more 64-bit member keys.
- *
- * Keys should be supplied in least-significant to most-significant order.
- */
-template <typename T, typename... KeyPtrs>
-static void lsd_radix_sort(
-    NoInitArray<T>& values,
-    bool ascending,
-    ThreadPool& pool,
-    KeyPtrs... keys
-) {
-    const std::size_t n = values.size();
-    if (n == 0) {
-        return;
-    }
-
-    NoInitArray<T> buf(n);
-    auto* src = values.data();
-    auto* dst = buf.data();
-    std::vector<std::size_t> counts(pool.size() * 65536);
-
-    (lsd_radix_sort_key(src, dst, n, keys, ascending, counts, pool), ...);
+    return concat<WorkerEdge>(graphs, &WorkerGraph::edges, pool);
 }
 
 /**
@@ -162,7 +97,7 @@ static std::pair<std::vector<std::uint64_t>, std::size_t> sort_nodes(
         return {};
     }
 
-    lsd_radix_sort(nodes, true, pool, &WorkerNode::hash);
+    lsd_radix_sort(nodes, &WorkerNode::hash, pool);
 
     std::vector<std::uint64_t> node_hashes;
     node_hashes.reserve(n_nodes);
@@ -289,7 +224,7 @@ static NoInitArray<Edge> finalize_edges(
     }
 
     // Convert the second endpoints to node indices
-    lsd_radix_sort(edges, true, pool, &WorkerEdge::second);
+    lsd_radix_sort(edges, &WorkerEdge::second, pool);
     std::size_t node_i = 0;
     for (auto& edge : edges) {
         while (node_i < n_nodes && node_hashes[node_i] < edge.second) {
@@ -302,7 +237,7 @@ static NoInitArray<Edge> finalize_edges(
     }
 
     // Convert the first endpoints to node indices, and aggregate weights
-    lsd_radix_sort(edges, true, pool, &WorkerEdge::first);
+    lsd_radix_sort(edges, &WorkerEdge::first, pool);
     node_i = 0;
     std::size_t write_i = 0;
     for (auto& edge : edges) {
@@ -337,7 +272,7 @@ static NoInitArray<Edge> finalize_edges(
     edges.reset();
 
     // Sort by descending weight
-    lsd_radix_sort(out, false, pool, &Edge::weight);
+    lsd_radix_sort(out, &Edge::weight, false, pool);
     return out;
 }
 

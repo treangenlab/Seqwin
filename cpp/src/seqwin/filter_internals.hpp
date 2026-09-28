@@ -97,7 +97,8 @@ void prune_graph(
     const Edge* edges,
     std::size_t n_edges,
     double edge_weight_th,
-    FilteredGraph& filtered
+    FilteredGraph& filtered,
+    ThreadPool& pool
 );
 
 /**

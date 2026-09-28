@@ -188,7 +188,8 @@ std::pair<FilteredGraph, std::vector<Signature>> filter(
         edges,
         n_edges,
         filtered.edge_weight_th,
-        filtered
+        filtered,
+        pool
     );
     internal::log_python(
         " - Removed " + std::to_string(n_edges - filtered.edges.size()) + " edges with weight<" +
