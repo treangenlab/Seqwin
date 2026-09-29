@@ -140,12 +140,18 @@ def test_dtype_layouts() -> None:
 
     assert np.dtype(np.uintp).itemsize == 8
 
-    assert NODE_DTYPE.names == ('hash', 'start', 'stop', 'n_tar', 'n_neg', 'penalty')
+    assert NODE_DTYPE.names == ('hash', 'start', 'stop', 'prevalence', 'n_tar', 'n_neg', 'penalty')
+    assert NODE_DTYPE["hash"] == np.dtype(np.uint64)
     assert NODE_DTYPE["start"] == np.dtype(np.uintp)
     assert NODE_DTYPE["stop"] == np.dtype(np.uintp)
+    assert NODE_DTYPE["prevalence"] == np.dtype(np.uintp)
     assert NODE_DTYPE["n_tar"] == np.dtype(np.uint32)
     assert NODE_DTYPE["n_neg"] == np.dtype(np.uint32)
-    assert NODE_DTYPE.itemsize == 40
+    assert NODE_DTYPE["penalty"] == np.dtype(np.float64)
+    assert NODE_DTYPE.itemsize == 48
+    assert [NODE_DTYPE.fields[name][1] for name in NODE_DTYPE.names] == [
+        0, 8, 16, 24, 32, 36, 40,
+    ]
 
     assert EDGE_DTYPE.names == ("first", "second", "weight")
     assert EDGE_DTYPE["first"] == np.dtype(np.uintp)
@@ -327,6 +333,7 @@ def test_assembly_nodes_match_kmer_memberships(tmp_path: Path) -> None:
         assemblies = np.unique(record_assembly[
             graph.kmers['record_idx'][int(node['start']):int(node['stop'])]
         ])
+        assert node['prevalence'] == len(assemblies)
         for assembly_i in assemblies:
             expected[int(assembly_i)].append(node_i)
 

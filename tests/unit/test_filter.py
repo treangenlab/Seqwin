@@ -26,7 +26,7 @@ def _inputs():
     for node_hash, records in occurrences.items():
         start = len(kmers)
         kmers.extend((i, record) for i, record in enumerate(records))
-        nodes.append((node_hash, start, len(kmers), 0, 0, 0.0))
+        nodes.append((node_hash, start, len(kmers), len(set(records)), 0, 0, 0.0))
     return (
         np.array(kmers, dtype=KMER_DTYPE),
         np.array(nodes, dtype=NODE_DTYPE),
@@ -54,7 +54,7 @@ def _filter_distinct_weights(edge_weight_th):
         dtype=KMER_DTYPE,
     )
     nodes = np.array(
-        [(node_hash, i * 2, i * 2 + 2, 0, 0, 0.0)
+        [(node_hash, i * 2, i * 2 + 2, 2, 0, 0, 0.0)
          for i, node_hash in enumerate((10, 20, 30, 40))],
         dtype=NODE_DTYPE,
     )
@@ -80,6 +80,7 @@ def test_native_filter_preserves_ranges_and_remaps_edges():
 
     np.testing.assert_array_equal(scored['n_tar'], [2, 2, 2, 1])
     np.testing.assert_array_equal(scored['n_neg'], [0, 0, 2, 0])
+    np.testing.assert_array_equal(scored['prevalence'], [2, 2, 4, 1])
     np.testing.assert_allclose(scored['penalty'], [0, 0, 1, .5])
     assert filtered.total_tar == 2 and filtered.total_neg == 2
     assert filtered.e_absence_tar == pytest.approx(1 / 14)
@@ -88,6 +89,7 @@ def test_native_filter_preserves_ranges_and_remaps_edges():
     assert filtered.edge_weight_th == pytest.approx(.42)
     assert filtered.min_nodes == 1 and filtered.max_nodes is None
     np.testing.assert_array_equal(nodes['hash'], [10, 20, 30, 40])
+    np.testing.assert_array_equal(nodes['prevalence'], [2, 2, 4, 1])
     np.testing.assert_array_equal(
         nodes[['start', 'stop']].tolist(), [(0, 2), (2, 4), (4, 8), (8, 9)]
     )

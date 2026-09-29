@@ -35,6 +35,7 @@ NODE_DTYPE = np.dtype([
     ('hash', np.uint64),
     ('start', np.uintp),
     ('stop', np.uintp),
+    ('prevalence', np.uintp),
     ('n_tar', np.uint32),
     ('n_neg', np.uint32),
     ('penalty', np.float64),
@@ -96,6 +97,7 @@ class Graph:
             - 'hash' (uint64): Hash value of the minimizers represented by this node.
             - 'start' (uintp): Start of the half-open range for this node's minimizer entries.
             - 'stop' (uintp): End of the half-open range for this node's minimizer entries.
+            - 'prevalence' (uintp): Number of assemblies containing this node's minimizer.
             - 'n_tar' (uint32): Number of target assemblies containing this node's minimizer. Initialized to 0.
             - 'n_neg' (uint32): Number of non-target assemblies containing this node's minimizer. Initialized to 0.
             - 'penalty' (float64): Node penalty score. Initialized to 0.0.

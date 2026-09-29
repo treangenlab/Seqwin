@@ -109,6 +109,8 @@ struct Node {
     std::size_t start;
     /** End of the half-open range for this node's minimizer entries. */
     std::size_t stop;
+    /** Number of assemblies containing this node's minimizer. */
+    std::size_t prevalence = 0;
     /**
      * Number of target assemblies containing this node's minimizer.
      * Initialized to 0; populated during the filtering phase.
