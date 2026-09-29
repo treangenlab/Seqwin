@@ -43,8 +43,8 @@ std::size_t estimate_minimizer_count(
 ) {
     // Reserve-only heuristic, not correctness-critical
     std::size_t est_total_seq_len = 0;
-    for (std::size_t assembly_i = start_assembly; assembly_i < end_assembly; ++assembly_i) {
-        const auto& assembly_path = assembly_paths[assembly_i];
+    for (std::size_t assembly_idx = start_assembly; assembly_idx < end_assembly; ++assembly_idx) {
+        const auto& assembly_path = assembly_paths[assembly_idx];
         const std::size_t seq_len_per_byte = ends_with(assembly_path, ".gz")
             ? gz_fasta_seq_len_per_byte
             : plain_fasta_seq_len_per_byte;
@@ -125,9 +125,9 @@ WorkerGraph build_worker(
     NodeMap node_map;
     EdgeMap edge_map;
 
-    for (std::size_t assembly_i = start_assembly; assembly_i < end_assembly; ++assembly_i) {
-        const auto assembly_i_u32 = static_cast<std::uint32_t>(assembly_i);
-        auto records = read_fasta(assembly_paths[assembly_i]);
+    for (std::size_t assembly_idx = start_assembly; assembly_idx < end_assembly; ++assembly_idx) {
+        const auto assembly_idx_u32 = static_cast<std::uint32_t>(assembly_idx);
+        auto records = read_fasta(assembly_paths[assembly_idx]);
 
         std::uint32_t record_idx = graph.record_offsets.back();
         if (records.size() > std::numeric_limits<std::uint32_t>::max() - record_idx) {
@@ -140,7 +140,7 @@ WorkerGraph build_worker(
             if (record.sequence.size() > std::numeric_limits<std::uint32_t>::max()) {
                 throw std::runtime_error(
                     "Sequence length exceeds uint32 range for record " +
-                    record.id + " in assembly " + assembly_paths[assembly_i]);
+                    record.id + " in assembly " + assembly_paths[assembly_idx]);
             }
             graph.record_ids.push_back(std::move(record.id));
 
@@ -179,9 +179,9 @@ WorkerGraph build_worker(
                 }
                 const EdgeKey key{u, v};
                 auto edge_it = edge_map.try_emplace(key).first;
-                if (edge_it->second.last_seen_assembly != assembly_i_u32) {
+                if (edge_it->second.last_seen_assembly != assembly_idx_u32) {
                     ++edge_it->second.weight;
-                    edge_it->second.last_seen_assembly = assembly_i_u32;
+                    edge_it->second.last_seen_assembly = assembly_idx_u32;
                 }
             }
         }
@@ -280,19 +280,20 @@ NoInitArray<Kmer> recompute_kmers(
         for (std::size_t worker_id = start; worker_id < end; ++worker_id) {
             const auto& graph = graphs[worker_id];
             auto& hash_to_cursor = kmer_maps[worker_id];
-
-            for (std::size_t assembly_i = graph.start_assembly;
-                 assembly_i < graph.end_assembly;
-                 ++assembly_i) {
-                auto records = read_fasta(assembly_paths[assembly_i]);
-                std::uint32_t record_idx = record_offsets[assembly_i];
+            for (
+                std::size_t assembly_idx = graph.start_assembly;
+                assembly_idx < graph.end_assembly;
+                ++assembly_idx
+            ) {
+                auto records = read_fasta(assembly_paths[assembly_idx]);
+                std::uint32_t record_idx = record_offsets[assembly_idx];
 
                 for (std::size_t record_i = 0; record_i < records.size(); ++record_i) {
                     auto& record = records[record_i];
                     if (record.sequence.size() > std::numeric_limits<std::uint32_t>::max()) {
                         throw std::runtime_error(
                             "Sequence length exceeds uint32 range for record " +
-                            record.id + " in assembly " + assembly_paths[assembly_i]);
+                            record.id + " in assembly " + assembly_paths[assembly_idx]);
                     }
 
                     const auto mins = btllib::minimize_sequence(
@@ -388,6 +389,9 @@ Graph build(
             pool
         );
     }
+    internal::trim_heap();
+
+    internal::build_assembly_nodes(graph, pool);
     internal::trim_heap();
 
     return std::move(graph);

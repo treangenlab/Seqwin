@@ -82,6 +82,10 @@ class Graph:
     >>> record_idx = kmers['record_idx'] - record_offsets[assembly_idx]
     ```
 
+    `assembly_nodes` stores the sorted, unique node indices present in each assembly.
+    For assembly `i`, `assembly_nodes[node_offsets[i]:node_offsets[i + 1]]`
+    contains unique nodes present in that assembly, in ascending node-index order.
+
     Attributes:
         kmers (NDArray[np.void]): A 1-D NumPy structured array of minimizers from all assemblies.
             Dtype: `KMER_DTYPE`
@@ -102,15 +106,27 @@ class Graph:
             - 'weight' (uintp): Number of assemblies where the endpoints are adjacent.
         record_offsets (NDArray[np.uint32]): Cumulative global FASTA record offsets by assembly.
         record_ids (NDArray[np.str\_]): FASTA record IDs in global record order.
+        assembly_nodes (NDArray[np.uintp]): Node indices grouped by assembly.
+        node_offsets (NDArray[np.uintp]): Cumulative offsets into `assembly_nodes` by assembly.
     """
     __module__ = 'seqwin.core'
 
-    __slots__ = ('kmers', 'nodes', 'edges', 'record_offsets', 'record_ids')
+    __slots__ = (
+        'kmers',
+        'nodes',
+        'edges',
+        'record_offsets',
+        'record_ids',
+        'assembly_nodes',
+        'node_offsets',
+    )
     kmers: NDArray[np.void]
     nodes: NDArray[np.void]
     edges: NDArray[np.void]
     record_offsets: NDArray[np.uint32]
     record_ids: NDArray[np.str_]
+    assembly_nodes: NDArray[np.uintp]
+    node_offsets: NDArray[np.uintp]
 
     def __init__(
         self,
@@ -129,7 +145,15 @@ class Graph:
             low_memory (bool, optional): Recompute minimizers in a second pass to reduce peak memory. [False]
             n_cpu (int, optional): Number of worker threads to use. [1]
         """
-        self.kmers, self.nodes, self.edges, self.record_offsets, record_ids = _build_native(
+        (
+            self.kmers,
+            self.nodes,
+            self.edges,
+            self.record_offsets,
+            record_ids,
+            self.assembly_nodes,
+            self.node_offsets,
+        ) = _build_native(
             list(map(str, assembly_paths)),
             int(kmerlen),
             int(windowsize),
@@ -168,6 +192,8 @@ class Graph:
             'edges': 'r',
             'record_offsets': 'r',
             'record_ids': 'r',
+            'assembly_nodes': 'r',
+            'node_offsets': 'r',
         }
         paths = {name: path / f'{name}.npy' for name in modes}
         missing = [array_path.name for array_path in paths.values() if not array_path.is_file()]
@@ -183,6 +209,8 @@ class Graph:
             'nodes': NODE_DTYPE,
             'edges': EDGE_DTYPE,
             'record_offsets': np.dtype(np.uint32),
+            'assembly_nodes': np.dtype(np.uintp),
+            'node_offsets': np.dtype(np.uintp),
         }
         for name, array in arrays.items():
             if array.ndim != 1:
@@ -202,6 +230,15 @@ class Graph:
             raise ValueError(f"Graph array 'record_ids' has dtype {arrays['record_ids'].dtype}, expected 'U'")
         if len(arrays['record_ids']) != int(arrays['record_offsets'][-1]):
             raise ValueError("Graph array 'record_ids' length must equal the final record offset")
+
+        if arrays['node_offsets'].size == 0:
+            raise ValueError("Graph array 'node_offsets' must not be empty")
+        if int(arrays['node_offsets'][0]) != 0:
+            raise ValueError("Graph array 'node_offsets' must start at zero")
+        if int(arrays['node_offsets'][-1]) != len(arrays['assembly_nodes']):
+            raise ValueError("Graph array assembly_nodes length must equal 'node_offsets' final value")
+        if len(arrays['node_offsets']) != len(arrays['record_offsets']):
+            raise ValueError("Graph arrays 'node_offsets' and 'record_offsets' must have equal lengths")
 
         graph = cls.__new__(cls)
         for name, array in arrays.items():

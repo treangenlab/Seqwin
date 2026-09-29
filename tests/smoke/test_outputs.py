@@ -19,7 +19,10 @@ _shared_config = (
 
 
 def _assert_graph_matches_expected(actual_path: Path, expected_path: Path) -> None:
-    required_keys = {'kmers', 'nodes', 'edges', 'record_offsets', 'record_ids'}
+    required_keys = {
+        'kmers', 'nodes', 'edges', 'record_offsets', 'record_ids',
+        'assembly_nodes', 'node_offsets',
+    }
     actual_keys = {path.stem for path in actual_path.glob('*.npy')}
     expected_keys = {path.stem for path in expected_path.glob('*.npy')}
 
@@ -38,6 +41,8 @@ def _assert_graph_matches_expected(actual_path: Path, expected_path: Path) -> No
     np.testing.assert_array_equal(actual['edges'], expected['edges'], err_msg='edges array values mismatch')
     np.testing.assert_array_equal(actual['record_offsets'], expected['record_offsets'], err_msg='record_offsets array values mismatch')
     np.testing.assert_array_equal(actual['record_ids'], expected['record_ids'], err_msg='record_ids array values mismatch')
+    np.testing.assert_array_equal(actual['assembly_nodes'], expected['assembly_nodes'], err_msg='assembly_nodes array values mismatch')
+    np.testing.assert_array_equal(actual['node_offsets'], expected['node_offsets'], err_msg='node_offsets array values mismatch')
 
     nodes_dtype = actual['nodes'].dtype
     for field_name in nodes_dtype.names or ():

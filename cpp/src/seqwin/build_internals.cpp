@@ -383,4 +383,89 @@ std::pair<Graph, KmerMaps> merge_worker_graphs(
     };
 }
 
+void build_assembly_nodes(Graph& graph, ThreadPool& pool) {
+    if (graph.record_offsets.empty()) {
+        throw std::logic_error("Graph record offsets must not be empty");
+    }
+
+    const std::size_t n_assemblies = graph.record_offsets.size() - 1;
+    const std::size_t n_workers = std::min(pool.size(), graph.nodes.size());
+
+    // Map global record_idx to assembly_idx
+    NoInitArray<std::uint32_t> record_to_assembly(graph.record_offsets.back());
+    pool.parallel_for(n_assemblies, [&](std::size_t start, std::size_t end, std::size_t) {
+        for (std::size_t assembly_idx = start; assembly_idx < end; ++assembly_idx) {
+            std::fill(
+                record_to_assembly.begin() + graph.record_offsets[assembly_idx],
+                record_to_assembly.begin() + graph.record_offsets[assembly_idx + 1],
+                static_cast<std::uint32_t>(assembly_idx)
+            );
+        }
+    });
+
+    // Per-worker assembly counts for the first pass
+    // Reused as disjoint output cursors for the second pass
+    NoInitArray<std::size_t> worker_assembly_cursors(n_workers * n_assemblies);
+    pool.parallel_for(worker_assembly_cursors.size(), [&](
+        std::size_t start, std::size_t end, std::size_t
+    ) {
+        std::fill(
+            worker_assembly_cursors.begin() + start,
+            worker_assembly_cursors.begin() + end,
+            0
+        );
+    });
+
+    // Scan node ranges in parallel (used for both the first and the second pass)
+    const auto scan_nodes = [&](auto&& visit) {
+        pool.parallel_for(graph.nodes.size(), [&](
+            std::size_t start, std::size_t end, std::size_t worker_id
+        ) {
+            auto* worker_cursors = worker_assembly_cursors.data() + worker_id * n_assemblies;
+
+            for (std::size_t node_i = start; node_i < end; ++node_i) {
+                const auto& node = graph.nodes[node_i];
+                std::uint32_t previous_assembly = std::numeric_limits<std::uint32_t>::max();
+
+                for (std::size_t kmer_i = node.start; kmer_i < node.stop; ++kmer_i) {
+                    const auto assembly_idx = record_to_assembly[graph.kmers[kmer_i].record_idx];
+                    if (assembly_idx != previous_assembly) {
+                        visit(worker_cursors, assembly_idx, node_i);
+                        previous_assembly = assembly_idx;
+                    }
+                }
+            }
+        });
+    };
+
+    // First pass: count the number of nodes contributed by each worker to each assembly
+    scan_nodes([&](std::size_t* worker_cursors, std::size_t assembly_idx, std::size_t) {
+        ++worker_cursors[assembly_idx];
+    });
+
+    // Build assembly offsets while converting each worker's count in place to
+    // the absolute start of its disjoint output range within that assembly.
+    graph.node_offsets.clear();
+    graph.node_offsets.reserve(n_assemblies + 1);
+    std::size_t global_offset = 0;
+    for (std::size_t assembly_idx = 0; assembly_idx < n_assemblies; ++assembly_idx) {
+        graph.node_offsets.push_back(global_offset);
+
+        for (std::size_t worker_id = 0; worker_id < n_workers; ++worker_id) {
+            auto& value = worker_assembly_cursors[worker_id * n_assemblies + assembly_idx];
+            const auto count = value;
+            value = global_offset;
+            global_offset += count;
+        }
+    }
+    graph.node_offsets.push_back(global_offset);
+    graph.assembly_nodes = NoInitArray<std::size_t>(global_offset);
+
+    // Second pass: write node indices into the reserved worker ranges
+    // Worker ranges follow node-index order, so each assembly slice is strictly ascending
+    scan_nodes([&](std::size_t* worker_cursors, std::size_t assembly_idx, std::size_t node_i) {
+        graph.assembly_nodes[worker_cursors[assembly_idx]++] = node_i;
+    });
+}
+
 } // namespace seqwin::internal

@@ -102,4 +102,16 @@ std::pair<Graph, KmerMaps> merge_worker_graphs(
     bool low_memory
 );
 
+/**
+ * @brief Build the assembly-to-node index for a completed graph.
+ *
+ * The resulting node indices are unique and strictly ascending within each
+ * assembly, with assembly ranges described by `Graph.node_offsets`.
+ *
+ * @param graph Completed graph with final `nodes`, `kmers`, and
+ * `record_offsets`. Populates `assembly_nodes` and `node_offsets`.
+ * @param pool Thread pool.
+ */
+void build_assembly_nodes(Graph& graph, ThreadPool& pool);
+
 } // namespace seqwin::internal

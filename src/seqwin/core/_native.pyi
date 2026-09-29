@@ -125,6 +125,8 @@ def _build_native(
     NDArray[np.void],
     NDArray[np.uint32],
     list[str],
+    NDArray[np.uintp],
+    NDArray[np.uintp],
 ]: ...
 
 def _filter_native(
