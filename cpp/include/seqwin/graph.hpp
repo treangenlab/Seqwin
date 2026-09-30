@@ -111,21 +111,6 @@ struct Node {
     std::size_t stop;
     /** Number of assemblies containing this node's minimizer. */
     std::size_t prevalence = 0;
-    /**
-     * Number of target assemblies containing this node's minimizer.
-     * Initialized to 0; populated during the filtering phase.
-     */
-    std::uint32_t n_tar = 0;
-    /**
-     * Number of non-target assemblies containing this node's minimizer.
-     * Initialized to 0; populated during the filtering phase.
-     */
-    std::uint32_t n_neg = 0;
-    /**
-     * Node penalty score.
-     * Initialized to 0; calculated from `n_tar` and `n_neg`.
-     */
-    double penalty = 0.0;
 };
 
 /**

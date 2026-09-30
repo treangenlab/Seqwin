@@ -44,9 +44,8 @@ def test_graph_save_load_round_trip(tmp_path: Path, targets_dir: Path, non_targe
         assert np.array_equal(loaded_array, original_array)
         assert isinstance(loaded_array, np.memmap)
         assert loaded_array.flags.c_contiguous
-        expected_mode = 'c' if name == 'nodes' else 'r'
+        expected_mode = 'r'
         assert loaded_array.mode == expected_mode
-        assert loaded_array.flags.writeable is (name == 'nodes')
     assert loaded.record_ids.dtype.kind == 'U'
 
 
@@ -140,18 +139,13 @@ def test_dtype_layouts() -> None:
 
     assert np.dtype(np.uintp).itemsize == 8
 
-    assert NODE_DTYPE.names == ('hash', 'start', 'stop', 'prevalence', 'n_tar', 'n_neg', 'penalty')
+    assert NODE_DTYPE.names == ('hash', 'start', 'stop', 'prevalence')
     assert NODE_DTYPE["hash"] == np.dtype(np.uint64)
     assert NODE_DTYPE["start"] == np.dtype(np.uintp)
     assert NODE_DTYPE["stop"] == np.dtype(np.uintp)
     assert NODE_DTYPE["prevalence"] == np.dtype(np.uintp)
-    assert NODE_DTYPE["n_tar"] == np.dtype(np.uint32)
-    assert NODE_DTYPE["n_neg"] == np.dtype(np.uint32)
-    assert NODE_DTYPE["penalty"] == np.dtype(np.float64)
-    assert NODE_DTYPE.itemsize == 48
-    assert [NODE_DTYPE.fields[name][1] for name in NODE_DTYPE.names] == [
-        0, 8, 16, 24, 32, 36, 40,
-    ]
+    assert NODE_DTYPE.itemsize == 32
+    assert [NODE_DTYPE.fields[name][1] for name in NODE_DTYPE.names] == [0, 8, 16, 24]
 
     assert EDGE_DTYPE.names == ("first", "second", "weight")
     assert EDGE_DTYPE["first"] == np.dtype(np.uintp)

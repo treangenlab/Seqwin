@@ -81,6 +81,8 @@ def _filter_graph(
         nodes=graph.nodes,
         edges=graph.edges,
         record_offsets=graph.record_offsets,
+        assembly_nodes=graph.assembly_nodes,
+        node_offsets=graph.node_offsets,
         assembly_paths=list(map(str, assemblies.paths)),
         is_targets=assemblies.is_targets,
         jaccard=jaccard,

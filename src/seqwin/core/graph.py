@@ -36,9 +36,6 @@ NODE_DTYPE = np.dtype([
     ('start', np.uintp),
     ('stop', np.uintp),
     ('prevalence', np.uintp),
-    ('n_tar', np.uint32),
-    ('n_neg', np.uint32),
-    ('penalty', np.float64),
 ])
 
 EDGE_DTYPE = np.dtype([
@@ -98,9 +95,6 @@ class Graph:
             - 'start' (uintp): Start of the half-open range for this node's minimizer entries.
             - 'stop' (uintp): End of the half-open range for this node's minimizer entries.
             - 'prevalence' (uintp): Number of assemblies containing this node's minimizer.
-            - 'n_tar' (uint32): Number of target assemblies containing this node's minimizer. Initialized to 0.
-            - 'n_neg' (uint32): Number of non-target assemblies containing this node's minimizer. Initialized to 0.
-            - 'penalty' (float64): Node penalty score. Initialized to 0.0.
         edges (NDArray[np.void]): A 1-D NumPy structured array of weighted, undirected edges.
             Dtype: `EDGE_DTYPE`
             - 'first' (uintp): Index of the smaller endpoint in `nodes`.
@@ -190,7 +184,7 @@ class Graph:
 
         modes = {
             'kmers': 'r',
-            'nodes': 'c', # copy-on-write: changes affect data in memory, but are not saved to disk
+            'nodes': 'r',
             'edges': 'r',
             'record_offsets': 'r',
             'record_ids': 'r',

@@ -66,8 +66,10 @@ struct CanonicalCount {
 std::optional<Signature> extract_worker(
     std::size_t subgraph_idx,
     const Subgraph& subgraph,
-    const NoInitArray<Node>& nodes,
+    const NoInitArray<FilteredNode>& filtered_nodes,
     const Kmer* kmers,
+    const Node* nodes,
+    std::size_t n_nodes,
     const std::uint32_t* record_offsets,
     std::size_t n_record_offsets,
     const bool* is_targets,
@@ -80,15 +82,16 @@ std::optional<Signature> extract_worker(
 ) {
     // Collect and position-sort all k-mers included in the subgraph
     std::vector<FullKmer> sg_kmers; // K-mers of the current subgraph
-    std::size_t n_sg_kmers = 0;
-    for (const auto node_idx : subgraph) {
-        if (node_idx >= nodes.size()) {
+    // Each node in a low-penalty subgraph should contain roughly total_tar k-mers
+    sg_kmers.reserve(2 * total_tar * subgraph.size());
+    for (const auto filtered_node_idx : subgraph) {
+        if (filtered_node_idx >= filtered_nodes.size()) {
             throw std::invalid_argument("subgraph node index is out of bounds");
         }
-        n_sg_kmers += nodes[node_idx].stop - nodes[node_idx].start;
-    }
-    sg_kmers.reserve(n_sg_kmers);
-    for (const auto node_idx : subgraph) {
+        const auto node_idx = filtered_nodes[filtered_node_idx].idx;
+        if (node_idx >= n_nodes) {
+            throw std::invalid_argument("filtered node index is out of bounds");
+        }
         const auto& node = nodes[node_idx];
         for (std::size_t i = node.start; i < node.stop; ++i) {
             sg_kmers.push_back({node.hash, kmers[i].record_idx, kmers[i].pos});
@@ -335,8 +338,10 @@ void fetch_signature_sequences(
 
 std::vector<Signature> extract_signatures(
     const std::vector<Subgraph>& subgraphs,
-    const NoInitArray<Node>& nodes,
+    const NoInitArray<FilteredNode>& filtered_nodes,
     const Kmer* kmers,
+    const Node* nodes,
+    std::size_t n_nodes,
     const std::uint32_t* record_offsets,
     std::size_t n_record_offsets,
     const std::vector<std::string>& assembly_paths,
@@ -368,8 +373,10 @@ std::vector<Signature> extract_signatures(
             extracted[i] = extract_worker(
                 i,
                 subgraphs[i],
-                nodes,
+                filtered_nodes,
                 kmers,
+                nodes,
+                n_nodes,
                 record_offsets,
                 n_record_offsets,
                 is_targets,

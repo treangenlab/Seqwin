@@ -54,7 +54,8 @@ std::size_t require_1d_size(const Array& array, const char* name) {
 
 PYBIND11_MODULE(_native, m) {
     PYBIND11_NUMPY_DTYPE(seqwin::Kmer, pos, record_idx);
-    PYBIND11_NUMPY_DTYPE(seqwin::Node, hash, start, stop, prevalence, n_tar, n_neg, penalty);
+    PYBIND11_NUMPY_DTYPE(seqwin::Node, hash, start, stop, prevalence);
+    PYBIND11_NUMPY_DTYPE(seqwin::FilteredNode, idx, n_tar, n_neg, penalty);
     PYBIND11_NUMPY_DTYPE(seqwin::Edge, first, second, weight);
 
     m.doc() = "Seqwin minimizer graph bindings";
@@ -102,6 +103,8 @@ PYBIND11_MODULE(_native, m) {
            NumpyArray<seqwin::Node> nodes,
            NumpyArray<seqwin::Edge> edges,
            NumpyArray<std::uint32_t> record_offsets,
+           NumpyArray<std::size_t> assembly_nodes,
+           NumpyArray<std::size_t> node_offsets,
            const std::vector<std::string>& assembly_paths,
            NumpyArray<bool> is_targets,
            std::optional<NumpyArray<double>> jaccard,
@@ -119,18 +122,19 @@ PYBIND11_MODULE(_native, m) {
            std::size_t n_cpu
         ) {
             const auto* kmers_ptr = kmers.data();
-            auto* nodes_ptr = nodes.mutable_data();
+            const auto* nodes_ptr = nodes.data();
             const auto* edges_ptr = edges.data();
             const auto* record_offsets_ptr = record_offsets.data();
             const auto* is_targets_ptr = is_targets.data();
-            if (!nodes.writeable()) {
-                throw std::invalid_argument("nodes must be writable");
-            }
+            const auto* assembly_nodes_ptr = assembly_nodes.data();
+            const auto* node_offsets_ptr = node_offsets.data();
 
             require_1d_size(kmers, "kmers");
             const auto n_nodes = require_1d_size(nodes, "nodes");
             const auto n_edges = require_1d_size(edges, "edges");
             const auto n_record_offsets = require_1d_size(record_offsets, "record_offsets");
+            const auto n_assembly_nodes = require_1d_size(assembly_nodes, "assembly_nodes");
+            const auto n_node_offsets = require_1d_size(node_offsets, "node_offsets");
             const auto n_assemblies = require_1d_size(is_targets, "is_targets");
 
             const double* jaccard_ptr = nullptr;
@@ -170,6 +174,10 @@ PYBIND11_MODULE(_native, m) {
                     n_edges,
                     record_offsets_ptr,
                     n_record_offsets,
+                    assembly_nodes_ptr,
+                    n_assembly_nodes,
+                    node_offsets_ptr,
+                    n_node_offsets,
                     assembly_paths,
                     is_targets_ptr,
                     n_assemblies,
@@ -186,6 +194,8 @@ PYBIND11_MODULE(_native, m) {
         py::arg("nodes").noconvert(),
         py::arg("edges").noconvert(),
         py::arg("record_offsets").noconvert(),
+        py::arg("assembly_nodes").noconvert(),
+        py::arg("node_offsets").noconvert(),
         py::arg("assembly_paths"),
         py::arg("is_targets").noconvert(),
         py::arg("jaccard").noconvert(),

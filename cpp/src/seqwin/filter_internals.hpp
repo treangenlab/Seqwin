@@ -34,11 +34,11 @@ public:
         Iterator end_;
     };
 
-    GraphTopology(const NoInitArray<Node>& nodes, const NoInitArray<Edge>& edges)
-        : offsets_(nodes.size() + 1, 0)
+    GraphTopology(std::size_t n_nodes, const NoInitArray<Edge>& edges)
+        : offsets_(n_nodes + 1, 0)
     {
         for (const auto& edge : edges) {
-            if (edge.first >= nodes.size() || edge.second >= nodes.size()) {
+            if (edge.first >= n_nodes || edge.second >= n_nodes) {
                 throw std::invalid_argument("Edge endpoint does not correspond to a node");
             }
             ++offsets_[edge.first + 1];
@@ -70,18 +70,18 @@ private:
 };
 
 /**
- * @brief Calculate `n_tar`, `n_neg` and `penalty` for each node,
- * and update `nodes` in place.
+ * @brief Collect and sort node indices from target assemblies.
  *
- * Also calculate `total_tar`, `total_neg`, `e_absence_tar` and `e_presence_neg`,
+ * Also calculate `total_tar`, `total_neg`, `e_absence_tar` and `e_presence_neg`
  * and add them to `FilteredGraph`.
  */
-FilteredGraph get_penalty(
-    const Kmer* kmers,
-    Node* nodes,
+std::pair<FilteredGraph, NoInitArray<std::size_t>> collect_target_nodes(
+    const Node* nodes,
     std::size_t n_nodes,
-    const std::uint32_t* record_offsets,
-    std::size_t n_record_offsets,
+    const std::size_t* assembly_nodes,
+    std::size_t n_assembly_nodes,
+    const std::size_t* node_offsets,
+    std::size_t n_node_offsets,
     const bool* is_targets,
     std::size_t n_assemblies,
     ThreadPool& pool
@@ -97,6 +97,7 @@ void prune_graph(
     const Edge* edges,
     std::size_t n_edges,
     double edge_weight_th,
+    const NoInitArray<std::size_t>& target_nodes,
     FilteredGraph& filtered,
     ThreadPool& pool
 );
@@ -106,7 +107,7 @@ void prune_graph(
  * Generated subgraphs are stored directly in `filtered`.
  */
 void get_subgraphs(
-    const NoInitArray<Node>& nodes,
+    const NoInitArray<FilteredNode>& nodes,
     const NoInitArray<Edge>& edges,
     double penalty_th,
     std::size_t min_nodes,
@@ -116,12 +117,13 @@ void get_subgraphs(
 
 /**
  * @brief Extract signatures from low-penalty subgraphs.
- * @return Extracted signatures.
  */
 std::vector<Signature> extract_signatures(
     const std::vector<Subgraph>& subgraphs,
-    const NoInitArray<Node>& nodes,
+    const NoInitArray<FilteredNode>& filtered_nodes,
     const Kmer* kmers,
+    const Node* nodes,
+    std::size_t n_nodes,
     const std::uint32_t* record_offsets,
     std::size_t n_record_offsets,
     const std::vector<std::string>& assembly_paths,

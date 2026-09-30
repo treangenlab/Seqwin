@@ -93,7 +93,7 @@ void calculate_thresholds(
             e_absence_tar = 1.0 - expected_presence(jaccard, n_assemblies, is_targets, true);
             e_presence_neg = expected_presence(jaccard, n_assemblies, is_targets, false);
         } else {
-            // Use values calculated by `get_penalty()`
+            // Use values calculated by `collect_target_nodes()`
             e_absence_tar = filtered.e_absence_tar;
             e_presence_neg = filtered.e_presence_neg;
         }
@@ -144,12 +144,16 @@ void calculate_thresholds(
 
 std::pair<FilteredGraph, std::vector<Signature>> filter(
     const Kmer* kmers,
-    Node* nodes,
+    const Node* nodes,
     std::size_t n_nodes,
     const Edge* edges,
     std::size_t n_edges,
     const std::uint32_t* record_offsets,
     std::size_t n_record_offsets,
+    const std::size_t* assembly_nodes,
+    std::size_t n_assembly_nodes,
+    const std::size_t* node_offsets,
+    std::size_t n_node_offsets,
     const std::vector<std::string>& assembly_paths,
     const bool* is_targets,
     std::size_t n_assemblies,
@@ -161,12 +165,13 @@ std::pair<FilteredGraph, std::vector<Signature>> filter(
     internal::ThreadPool pool(std::max<std::size_t>(1, config.n_cpu));
 
     internal::log_python(" - Calculating node penalty scores...");
-    auto filtered = internal::get_penalty(
-        kmers,
+    auto [filtered, target_nodes] = internal::collect_target_nodes(
         nodes,
         n_nodes,
-        record_offsets,
-        n_record_offsets,
+        assembly_nodes,
+        n_assembly_nodes,
+        node_offsets,
+        n_node_offsets,
         is_targets,
         n_assemblies,
         pool
@@ -188,9 +193,11 @@ std::pair<FilteredGraph, std::vector<Signature>> filter(
         edges,
         n_edges,
         filtered.edge_weight_th,
+        target_nodes,
         filtered,
         pool
     );
+    target_nodes.reset();
     internal::log_python(
         " - Removed " + std::to_string(n_edges - filtered.edges.size()) + " edges with weight<" +
         format_value(filtered.edge_weight_th, 3) + ", " + std::to_string(filtered.edges.size()) + " edges left"
@@ -218,6 +225,8 @@ std::pair<FilteredGraph, std::vector<Signature>> filter(
         filtered.subgraphs,
         filtered.nodes,
         kmers,
+        nodes,
+        n_nodes,
         record_offsets,
         n_record_offsets,
         assembly_paths,

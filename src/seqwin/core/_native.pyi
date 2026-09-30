@@ -20,7 +20,11 @@ class FilteredGraph:
 
     Attributes:
         nodes (NDArray[np.void]): Nodes retained by edge filtering.
-        edges (NDArray[np.void]): Low-weight edges are filtered.
+            - 'idx' (uintp): Index into the original `Graph.nodes` array.
+            - 'n_tar' (uint32): Number of target assemblies containing this node's minimizer.
+            - 'n_neg' (uint32): Number of non-target assemblies containing this node's minimizer.
+            - 'penalty' (float64): Node penalty score.
+        edges (NDArray[np.void]): Edges passed the weight threshold. Endpoints are indices into the retained nodes.
         subgraphs (list[list[int]]): Low-penalty subgraphs represented by indices of retained nodes.
         total_tar (int): Number of target assemblies.
         total_neg (int): Number of non-target assemblies.
@@ -134,6 +138,8 @@ def _filter_native(
     nodes: NDArray[np.void],
     edges: NDArray[np.void],
     record_offsets: NDArray[np.uint32],
+    assembly_nodes: NDArray[np.uintp],
+    node_offsets: NDArray[np.uintp],
     assembly_paths: Sequence[str],
     is_targets: NDArray[np.bool_],
     jaccard: NDArray[np.float64] | None,
