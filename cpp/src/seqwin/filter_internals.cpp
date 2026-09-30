@@ -169,18 +169,26 @@ void prune_graph(
     }
 
     // Indices of retained nodes after edge filtering
+    NoInitArray<std::size_t> connected_multi(retained_count * 2);
+    pool.parallel_for(retained_count, [&](std::size_t begin, std::size_t end, std::size_t) {
+        for (std::size_t i = begin; i < end; ++i) {
+            if (edges[i].first >= n_nodes || edges[i].second >= n_nodes) {
+                throw std::invalid_argument("Edge endpoint does not correspond to a node");
+            }
+            connected_multi[i * 2] = edges[i].first;
+            connected_multi[i * 2 + 1] = edges[i].second;
+        }
+    });
+    lsd_radix_sort(connected_multi, pool);
     // These are the nodes output to FilteredGraph.nodes
     std::vector<std::size_t> connected;
-    connected.reserve(retained_count * 2);
-    for (std::size_t i = 0; i < retained_count; ++i) {
-        if (edges[i].first >= n_nodes || edges[i].second >= n_nodes) {
-            throw std::invalid_argument("Edge endpoint does not correspond to a node");
+    connected.reserve(connected_multi.size());
+    for (std::size_t i = 0; i < connected_multi.size(); ++i) {
+        if (i == 0 || connected_multi[i] != connected_multi[i - 1]) {
+            connected.push_back(connected_multi[i]);
         }
-        connected.push_back(edges[i].first);
-        connected.push_back(edges[i].second);
     }
-    lsd_radix_sort(connected, pool);
-    connected.erase(std::unique(connected.begin(), connected.end()), connected.end());
+    connected_multi.reset();
 
     // Calculate the penalty of each retained node, by using the sorted target_nodes
     // Note that some retained nodes might not present in target_nodes
