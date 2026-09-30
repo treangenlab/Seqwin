@@ -70,12 +70,24 @@ private:
 };
 
 /**
- * @brief Collect and sort node indices from target assemblies.
+ * @brief Graph node present in at least one target assembly.
+ */
+struct TargetNode {
+    /** Index into the original `Graph.nodes` array. */
+    std::size_t idx;
+    /** Number of target assemblies containing this node's minimizer. */
+    std::uint32_t n_tar;
+    /** Number of non-target assemblies containing this node's minimizer. */
+    std::uint32_t n_neg;
+};
+
+/**
+ * @brief Collect, sort and aggregate node indices from target assemblies.
  *
  * Also calculate `total_tar`, `total_neg`, `e_absence_tar` and `e_presence_neg`
  * and add them to `FilteredGraph`.
  */
-std::pair<FilteredGraph, NoInitArray<std::size_t>> collect_target_nodes(
+std::pair<FilteredGraph, std::vector<TargetNode>> collect_target_nodes(
     const Node* nodes,
     std::size_t n_nodes,
     const std::size_t* assembly_nodes,
@@ -97,7 +109,7 @@ void prune_graph(
     const Edge* edges,
     std::size_t n_edges,
     double edge_weight_th,
-    const NoInitArray<std::size_t>& target_nodes,
+    const std::vector<TargetNode>& target_nodes,
     FilteredGraph& filtered,
     ThreadPool& pool
 );

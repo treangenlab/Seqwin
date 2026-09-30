@@ -164,7 +164,7 @@ std::pair<FilteredGraph, std::vector<Signature>> filter(
 ) {
     internal::ThreadPool pool(std::max<std::size_t>(1, config.n_cpu));
 
-    internal::log_python(" - Calculating node penalty scores...");
+    internal::log_python(" - Collecting nodes from target assemblies...");
     auto [filtered, target_nodes] = internal::collect_target_nodes(
         nodes,
         n_nodes,
@@ -186,7 +186,7 @@ std::pair<FilteredGraph, std::vector<Signature>> filter(
         filtered
     );
 
-    internal::log_python(" - Filtering graph edges and nodes...");
+    internal::log_python(" - Filtering graph and calculating node penalty scores...");
     internal::prune_graph(
         nodes,
         n_nodes,
@@ -197,7 +197,6 @@ std::pair<FilteredGraph, std::vector<Signature>> filter(
         filtered,
         pool
     );
-    target_nodes.reset();
     internal::log_python(
         " - Removed " + std::to_string(n_edges - filtered.edges.size()) + " edges with weight<" +
         format_value(filtered.edge_weight_th, 3) + ", " + std::to_string(filtered.edges.size()) + " edges left"
