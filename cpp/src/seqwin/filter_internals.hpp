@@ -5,12 +5,61 @@
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "seqwin/filter.hpp"
 #include "utils/thread_pool.hpp"
 
 namespace seqwin::internal {
+
+/**
+ * @brief Dense assembly occurrence counts for every graph node.
+ *
+ * It stores whichever assembly group (target/non-target) is smaller using the
+ * narrowest safe counter type. Consumers access target counts without needing
+ * to know which group is stored.
+ */
+class TargetCounts {
+public:
+    TargetCounts(NoInitArray<std::uint8_t>&& counts, bool counts_targets)
+        : counts_(std::move(counts))
+        , counts_targets_(counts_targets)
+    {}
+    TargetCounts(NoInitArray<std::uint16_t>&& counts, bool counts_targets)
+        : counts_(std::move(counts))
+        , counts_targets_(counts_targets)
+    {}
+    TargetCounts(NoInitArray<std::uint32_t>&& counts, bool counts_targets)
+        : counts_(std::move(counts))
+        , counts_targets_(counts_targets)
+    {}
+
+    /** Dispatch once on the counter type, then invoke `fn` with an `n_tar` accessor. */
+    template <typename Fn> void visit(const Node* nodes, Fn&& fn) const
+    {
+        std::visit(
+            [&](const auto& counts) {
+                fn([&](std::size_t node_idx) -> std::size_t {
+                    const std::size_t stored = counts[node_idx];
+                    if (counts_targets_) {
+                        return stored;
+                    }
+                    if (stored > nodes[node_idx].prevalence) {
+                        throw std::invalid_argument("Node n_neg exceeds prevalence");
+                    }
+                    return nodes[node_idx].prevalence - stored;
+                });
+            },
+            counts_
+        );
+    }
+
+private:
+    std::variant<NoInitArray<std::uint8_t>, NoInitArray<std::uint16_t>, NoInitArray<std::uint32_t>>
+        counts_;
+    bool counts_targets_;
+};
 
 /**
  * @brief Undirected graph stored as contiguous adjacency lists.
@@ -70,24 +119,12 @@ private:
 };
 
 /**
- * @brief Graph node present in at least one target assembly.
- */
-struct TargetNode {
-    /** Index into the original `Graph.nodes` array. */
-    std::size_t idx;
-    /** Number of target assemblies containing this node's minimizer. */
-    std::uint32_t n_tar;
-    /** Number of non-target assemblies containing this node's minimizer. */
-    std::uint32_t n_neg;
-};
-
-/**
- * @brief Collect, sort and aggregate node indices from target assemblies.
+ * @brief For each graph node, count its occurrences in target assemblies (`n_tar`).
  *
  * Also calculate `total_tar`, `total_neg`, `e_absence_tar` and `e_presence_neg`
  * and add them to `FilteredGraph`.
  */
-std::pair<FilteredGraph, std::vector<TargetNode>> collect_target_nodes(
+std::pair<FilteredGraph, TargetCounts> collect_target_counts(
     const Node* nodes,
     std::size_t n_nodes,
     const std::size_t* assembly_nodes,
@@ -109,7 +146,7 @@ void prune_graph(
     const Edge* edges,
     std::size_t n_edges,
     double edge_weight_th,
-    const std::vector<TargetNode>& target_nodes,
+    const TargetCounts& target_counts,
     FilteredGraph& filtered,
     ThreadPool& pool
 );

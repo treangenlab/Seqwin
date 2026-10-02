@@ -36,10 +36,12 @@ def _inputs():
     )
 
 
-def _filter(*, penalty_th=0.3, jaccard=None, n_cpu=1,
+def _filter(*, penalty_th=0.3, jaccard=None, n_cpu=1, targets=None,
             penalty_th_cap=0.2, edge_w_th_mul=0.3, min_nodes_floor=1,
             max_nodes_cap=None):
-    kmers, nodes, edges, offsets, targets = _inputs()
+    kmers, nodes, edges, offsets, default_targets = _inputs()
+    if targets is None:
+        targets = default_targets
     assembly_nodes = np.array([0, 1, 2, 3, 0, 1, 2, 2, 2], dtype=np.uintp)
     node_offsets = np.array([0, 4, 7, 8, 9], dtype=np.uintp)
     result = _filter_native(
@@ -134,6 +136,23 @@ def test_automatic_threshold_from_minimizers_and_parallel_equivalence():
         signature.length, signature.n_rep, signature.rep_ratio,
     )
     assert list(map(signature_fields, first[1])) == list(map(signature_fields, parallel[1]))
+
+
+@pytest.mark.parametrize(
+    ('targets', 'expected_n_tar', 'expected_n_neg'),
+    (
+        ([True, False, False, False], [1, 1, 1, 1], [1, 1, 3, 0]),
+        ([True, True, True, False], [2, 2, 3, 1], [0, 0, 1, 0]),
+    ),
+)
+def test_dense_counts_use_smaller_assembly_group_in_parallel(
+    targets, expected_n_tar, expected_n_neg,
+):
+    result, _ = _filter(
+        targets=np.array(targets, dtype=np.bool_), penalty_th=.5, n_cpu=4,
+    )
+    np.testing.assert_array_equal(result[0].nodes['n_tar'], expected_n_tar)
+    np.testing.assert_array_equal(result[0].nodes['n_neg'], expected_n_neg)
 
 
 def test_automatic_threshold_from_jaccard_and_cap():

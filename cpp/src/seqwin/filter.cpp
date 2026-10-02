@@ -93,7 +93,6 @@ void calculate_thresholds(
             e_absence_tar = 1.0 - expected_presence(jaccard, n_assemblies, is_targets, true);
             e_presence_neg = expected_presence(jaccard, n_assemblies, is_targets, false);
         } else {
-            // Use values calculated by `collect_target_nodes()`
             e_absence_tar = filtered.e_absence_tar;
             e_presence_neg = filtered.e_presence_neg;
         }
@@ -165,7 +164,7 @@ std::pair<FilteredGraph, std::vector<Signature>> filter(
     internal::ThreadPool pool(std::max<std::size_t>(1, config.n_cpu));
 
     internal::log_python(" - Collecting nodes from target assemblies...");
-    auto [filtered, target_nodes] = internal::collect_target_nodes(
+    auto [filtered, target_counts] = internal::collect_target_counts(
         nodes,
         n_nodes,
         assembly_nodes,
@@ -193,7 +192,7 @@ std::pair<FilteredGraph, std::vector<Signature>> filter(
         edges,
         n_edges,
         filtered.edge_weight_th,
-        target_nodes,
+        target_counts,
         filtered,
         pool
     );
