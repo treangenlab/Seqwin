@@ -28,8 +28,8 @@ class FilteredGraph:
         subgraphs (list[list[int]]): Low-penalty subgraphs represented by indices of retained nodes.
         total_tar (int): Number of target assemblies.
         total_neg (int): Number of non-target assemblies.
-        e_absence_tar (float): Expected k-mer absence in target assemblies.
-        e_presence_neg (float): Expected k-mer presence in non-target assemblies.
+        e_absence_tar (float | None): Expected k-mer absence in target assemblies.
+        e_presence_neg (float | None): Expected k-mer presence in non-target assemblies.
         penalty_th (float): Node penalty threshold (user input or auto-computed).
         edge_weight_th (float): Graph edge weight threshold.
         min_nodes (int): Minimum number of nodes for a low-penalty subgraph.
@@ -46,9 +46,9 @@ class FilteredGraph:
     @property
     def total_neg(self) -> int: ...
     @property
-    def e_absence_tar(self) -> float: ...
+    def e_absence_tar(self) -> float | None: ...
     @property
-    def e_presence_neg(self) -> float: ...
+    def e_presence_neg(self) -> float | None: ...
     @property
     def penalty_th(self) -> float: ...
     @property

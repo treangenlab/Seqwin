@@ -120,12 +120,8 @@ private:
 
 /**
  * @brief For each graph node, count its occurrences in target assemblies (`n_tar`).
- *
- * Also calculate `total_tar`, `total_neg`, `e_absence_tar` and `e_presence_neg`
- * and add them to `FilteredGraph`.
  */
-std::pair<FilteredGraph, TargetCounts> collect_target_counts(
-    const Node* nodes,
+TargetCounts count_target_nodes(
     std::size_t n_nodes,
     const std::size_t* assembly_nodes,
     std::size_t n_assembly_nodes,
@@ -133,20 +129,37 @@ std::pair<FilteredGraph, TargetCounts> collect_target_counts(
     std::size_t n_node_offsets,
     const bool* is_targets,
     std::size_t n_assemblies,
+    std::size_t total_tar,
+    std::size_t total_neg,
     ThreadPool& pool
 );
 
 /**
- * @brief Remove low-weight edges and isolated nodes.
- * Filtered nodes and edges are stored directly in `filtered`.
+ * @brief For k-mers in target assemblies, calculate their expected absence
+ * in target assemblies, and expected presence in non-target assemblies.
+ */
+std::pair<double, double> expected_presence(
+    const Node* nodes,
+    std::size_t n_nodes,
+    const TargetCounts& target_counts,
+    std::size_t total_tar,
+    std::size_t total_neg,
+    ThreadPool& pool
+);
+
+/**
+ * @brief Remove low-weight edges and isolated nodes, and calculate penalty scores
+ * of retained nodes. Retained nodes and edges are stored directly in `filtered`.
  */
 void prune_graph(
     const Node* nodes,
     std::size_t n_nodes,
     const Edge* edges,
     std::size_t n_edges,
-    double edge_weight_th,
     const TargetCounts& target_counts,
+    std::size_t total_tar,
+    std::size_t total_neg,
+    double edge_weight_th,
     FilteredGraph& filtered,
     ThreadPool& pool
 );

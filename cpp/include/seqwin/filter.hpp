@@ -66,9 +66,9 @@ struct FilteredGraph {
     /** Number of non-target assemblies. */
     std::size_t total_neg;
     /** Expected k-mer absence in target assemblies. */
-    double e_absence_tar;
+    std::optional<double> e_absence_tar;
     /** Expected k-mer presence in non-target assemblies. */
-    double e_presence_neg;
+    std::optional<double> e_presence_neg;
     /** Node penalty threshold (user input or auto-computed). */
     double penalty_th;
     /** Graph edge weight threshold. */

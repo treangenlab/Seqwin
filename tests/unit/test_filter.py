@@ -89,8 +89,8 @@ def test_native_filter_preserves_ranges_and_remaps_edges():
 
     np.testing.assert_array_equal(scored['prevalence'], [2, 2, 4, 1])
     assert filtered.total_tar == 2 and filtered.total_neg == 2
-    assert filtered.e_absence_tar == pytest.approx(1 / 14)
-    assert filtered.e_presence_neg == pytest.approx(2 / 7)
+    assert filtered.e_absence_tar is None
+    assert filtered.e_presence_neg is None
     assert filtered.penalty_th == .3
     assert filtered.edge_weight_th == pytest.approx(.42)
     assert filtered.min_nodes == 1 and filtered.max_nodes is None
@@ -121,6 +121,10 @@ def test_automatic_threshold_from_minimizers_and_parallel_equivalence():
     parallel, _ = _filter(penalty_th=None, n_cpu=4)
     expected = .5 * np.sqrt((1 / 14) * (2 / 7))
     assert first[0].penalty_th == pytest.approx(expected)
+    assert first[0].e_absence_tar == pytest.approx(1 / 14)
+    assert first[0].e_presence_neg == pytest.approx(2 / 7)
+    assert parallel[0].e_absence_tar == pytest.approx(first[0].e_absence_tar)
+    assert parallel[0].e_presence_neg == pytest.approx(first[0].e_presence_neg)
     for left, right in ((first[0].nodes, parallel[0].nodes),
                         (first[0].edges, parallel[0].edges),
                         (first[0].subgraphs, parallel[0].subgraphs)):
@@ -159,6 +163,8 @@ def test_automatic_threshold_from_jaccard_and_cap():
     jaccard = np.full((4, 4), .5, dtype=np.float64)
     result, _ = _filter(penalty_th=None, jaccard=jaccard, penalty_th_cap=1)
     assert result[0].penalty_th == pytest.approx(.5 * np.sqrt((1 / 3) * (2 / 3)))
+    assert result[0].e_absence_tar == pytest.approx(1 / 3)
+    assert result[0].e_presence_neg == pytest.approx(2 / 3)
     capped, _ = _filter(penalty_th=None, jaccard=jaccard, penalty_th_cap=.1)
     assert capped[0].penalty_th == .1
 
