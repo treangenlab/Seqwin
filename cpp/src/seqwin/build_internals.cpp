@@ -171,7 +171,7 @@ static MergedNodes merge_nodes(
             ++i;
         }
 
-        merged.nodes[write_i++] = Node{hash, start, n_kmers};
+        merged.nodes[write_i++] = Node{hash, start, n_kmers, 0};
     }
     return merged;
 }

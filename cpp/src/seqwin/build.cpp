@@ -391,6 +391,7 @@ Graph build(
     }
     internal::trim_heap();
 
+    internal::log_python(" - Building assembly-to-node index...");
     internal::build_assembly_nodes(graph, pool);
     internal::trim_heap();
 

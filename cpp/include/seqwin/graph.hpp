@@ -110,7 +110,7 @@ struct Node {
     /** End of the half-open range for this node's minimizer entries. */
     std::size_t stop;
     /** Number of assemblies containing this node's minimizer. */
-    std::size_t prevalence = 0;
+    std::size_t prevalence;
 };
 
 /**
