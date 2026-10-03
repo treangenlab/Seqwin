@@ -5,12 +5,61 @@
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "seqwin/filter.hpp"
 #include "utils/thread_pool.hpp"
 
 namespace seqwin::internal {
+
+/**
+ * @brief Dense assembly occurrence counts for every graph node.
+ *
+ * It stores whichever assembly group (target/non-target) is smaller using the
+ * narrowest safe counter type. Consumers access target counts without needing
+ * to know which group is stored.
+ */
+class TargetCounts {
+public:
+    TargetCounts(NoInitArray<std::uint8_t>&& counts, bool counts_targets)
+        : counts_(std::move(counts))
+        , counts_targets_(counts_targets)
+    {}
+    TargetCounts(NoInitArray<std::uint16_t>&& counts, bool counts_targets)
+        : counts_(std::move(counts))
+        , counts_targets_(counts_targets)
+    {}
+    TargetCounts(NoInitArray<std::uint32_t>&& counts, bool counts_targets)
+        : counts_(std::move(counts))
+        , counts_targets_(counts_targets)
+    {}
+
+    /** Dispatch once on the counter type, then invoke `fn` with an `n_tar` accessor. */
+    template <typename Fn> void visit(const Node* nodes, Fn&& fn) const
+    {
+        std::visit(
+            [&](const auto& counts) {
+                fn([&](std::size_t node_idx) -> std::size_t {
+                    const std::size_t stored = counts[node_idx];
+                    if (counts_targets_) {
+                        return stored;
+                    }
+                    if (stored > nodes[node_idx].prevalence) {
+                        throw std::invalid_argument("Node n_neg exceeds prevalence");
+                    }
+                    return nodes[node_idx].prevalence - stored;
+                });
+            },
+            counts_
+        );
+    }
+
+private:
+    std::variant<NoInitArray<std::uint8_t>, NoInitArray<std::uint16_t>, NoInitArray<std::uint32_t>>
+        counts_;
+    bool counts_targets_;
+};
 
 /**
  * @brief Undirected graph stored as contiguous adjacency lists.
@@ -34,11 +83,11 @@ public:
         Iterator end_;
     };
 
-    GraphTopology(const NoInitArray<Node>& nodes, const NoInitArray<Edge>& edges)
-        : offsets_(nodes.size() + 1, 0)
+    GraphTopology(std::size_t n_nodes, const NoInitArray<Edge>& edges)
+        : offsets_(n_nodes + 1, 0)
     {
         for (const auto& edge : edges) {
-            if (edge.first >= nodes.size() || edge.second >= nodes.size()) {
+            if (edge.first >= n_nodes || edge.second >= n_nodes) {
                 throw std::invalid_argument("Edge endpoint does not correspond to a node");
             }
             ++offsets_[edge.first + 1];
@@ -70,34 +119,49 @@ private:
 };
 
 /**
- * @brief Calculate `n_tar`, `n_neg` and `penalty` for each node,
- * and update `nodes` in place.
- *
- * Also calculate `total_tar`, `total_neg`, `e_absence_tar` and `e_presence_neg`,
- * and add them to `FilteredGraph`.
+ * @brief For each graph node, count its occurrences in target assemblies (`n_tar`).
  */
-FilteredGraph get_penalty(
-    const Kmer* kmers,
-    Node* nodes,
+TargetCounts count_target_nodes(
     std::size_t n_nodes,
-    const std::uint32_t* record_offsets,
-    std::size_t n_record_offsets,
+    const std::size_t* assembly_nodes,
+    std::size_t n_assembly_nodes,
+    const std::size_t* node_offsets,
+    std::size_t n_node_offsets,
     const bool* is_targets,
     std::size_t n_assemblies,
+    std::size_t total_tar,
+    std::size_t total_neg,
     ThreadPool& pool
 );
 
 /**
- * @brief Remove low-weight edges and isolated nodes.
- * Filtered nodes and edges are stored directly in `filtered`.
+ * @brief For k-mers in target assemblies, calculate their expected absence
+ * in target assemblies, and expected presence in non-target assemblies.
+ */
+std::pair<double, double> expected_presence(
+    const Node* nodes,
+    std::size_t n_nodes,
+    const TargetCounts& target_counts,
+    std::size_t total_tar,
+    std::size_t total_neg,
+    ThreadPool& pool
+);
+
+/**
+ * @brief Remove low-weight edges and isolated nodes, and calculate penalty scores
+ * of retained nodes. Retained nodes and edges are stored directly in `filtered`.
  */
 void prune_graph(
     const Node* nodes,
     std::size_t n_nodes,
     const Edge* edges,
     std::size_t n_edges,
+    const TargetCounts& target_counts,
+    std::size_t total_tar,
+    std::size_t total_neg,
     double edge_weight_th,
-    FilteredGraph& filtered
+    FilteredGraph& filtered,
+    ThreadPool& pool
 );
 
 /**
@@ -105,7 +169,7 @@ void prune_graph(
  * Generated subgraphs are stored directly in `filtered`.
  */
 void get_subgraphs(
-    const NoInitArray<Node>& nodes,
+    const NoInitArray<FilteredNode>& nodes,
     const NoInitArray<Edge>& edges,
     double penalty_th,
     std::size_t min_nodes,
@@ -115,12 +179,13 @@ void get_subgraphs(
 
 /**
  * @brief Extract signatures from low-penalty subgraphs.
- * @return Extracted signatures.
  */
 std::vector<Signature> extract_signatures(
     const std::vector<Subgraph>& subgraphs,
-    const NoInitArray<Node>& nodes,
+    const NoInitArray<FilteredNode>& filtered_nodes,
     const Kmer* kmers,
+    const Node* nodes,
+    std::size_t n_nodes,
     const std::uint32_t* record_offsets,
     std::size_t n_record_offsets,
     const std::vector<std::string>& assembly_paths,

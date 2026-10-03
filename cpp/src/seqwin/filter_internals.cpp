@@ -12,28 +12,109 @@
 #include <ankerl/unordered_dense.h>
 
 #include "seqwin/filter.hpp"
+#include "seqwin/shared_internals.hpp"
 #include "utils/logging.hpp"
 #include "utils/thread_pool.hpp"
 
 namespace seqwin::internal {
+namespace {
 
-FilteredGraph get_penalty(
-    const Kmer* kmers,
-    Node* nodes,
+/**
+ * @brief For each graph node, count its occurrences in target or non-target assemblies.
+ *
+ * Partitions the node index range across worker threads. Each worker scans target/non-target
+ * assemblies and updates counts only for nodes in its assigned range. Because node indices in
+ * each assembly slice of `assembly_nodes` is sorted, this range can be determined with binary
+ * search on each assembly slice.
+ */
+template <typename Counter>
+TargetCounts build_target_counts(
     std::size_t n_nodes,
-    const std::uint32_t* record_offsets,
-    std::size_t n_record_offsets,
+    const std::size_t* assembly_nodes,
+    const std::size_t* node_offsets,
     const bool* is_targets,
     std::size_t n_assemblies,
+    bool count_targets,
     ThreadPool& pool
 ) {
-    /** Metadata shared by all FASTA records in one assembly. */
-    struct RecordInfo {
-        /** Inclusive global index of the assembly's final FASTA record. */
-        std::uint32_t last_record_idx;
-        /** Whether the assembly belongs to the target set, as 0 or 1. */
-        std::uint32_t is_target;
-    };
+    NoInitArray<Counter> counts(n_nodes);
+    pool.parallel_for(n_nodes, [&](std::size_t start, std::size_t end, std::size_t) {
+        std::fill(
+            counts.begin() + start,
+            counts.begin() + end,
+            Counter{0}
+        );
+        for (std::size_t assembly_idx = 0; assembly_idx < n_assemblies; ++assembly_idx) {
+            if (is_targets[assembly_idx] != count_targets) {
+                continue;
+            }
+            const auto* assembly_start = assembly_nodes + node_offsets[assembly_idx];
+            const auto* assembly_end = assembly_nodes + node_offsets[assembly_idx + 1];
+            const auto* first = std::lower_bound(assembly_start, assembly_end, start);
+            const auto* last = std::lower_bound(first, assembly_end, end);
+            for (auto it = first; it != last; ++it) {
+                ++counts[*it];
+            }
+        }
+    });
+    return TargetCounts(std::move(counts), count_targets);
+}
+
+} // namespace
+
+TargetCounts count_target_nodes(
+    std::size_t n_nodes,
+    const std::size_t* assembly_nodes,
+    std::size_t n_assembly_nodes,
+    const std::size_t* node_offsets,
+    std::size_t n_node_offsets,
+    const bool* is_targets,
+    std::size_t n_assemblies,
+    std::size_t total_tar,
+    std::size_t total_neg,
+    ThreadPool& pool
+) {
+    if (n_node_offsets != n_assemblies + 1) {
+        throw std::invalid_argument("len(node_offsets) must equal len(is_targets) + 1");
+    }
+    if (n_node_offsets == 0 || node_offsets[0] != 0) {
+        throw std::invalid_argument("node_offsets must start with 0");
+    }
+    for (std::size_t i = 0; i < n_assemblies; ++i) {
+        if (node_offsets[i + 1] < node_offsets[i]) {
+            throw std::invalid_argument("node_offsets must be nondecreasing");
+        }
+    }
+    if (node_offsets[n_assemblies] != n_assembly_nodes) {
+        throw std::invalid_argument("Final node offset must equal len(assembly_nodes)");
+    }
+
+    // The smaller assembly group is counted using the narrowest safe counter type
+    const bool count_targets = total_tar <= total_neg;
+    const std::size_t counted_assemblies = count_targets ? total_tar : total_neg;
+    if (counted_assemblies <= std::numeric_limits<std::uint8_t>::max()) {
+        return build_target_counts<std::uint8_t>(
+            n_nodes, assembly_nodes, node_offsets, is_targets, n_assemblies, count_targets, pool
+        );
+    }
+    if (counted_assemblies <= std::numeric_limits<std::uint16_t>::max()) {
+        return build_target_counts<std::uint16_t>(
+            n_nodes, assembly_nodes, node_offsets, is_targets, n_assemblies, count_targets, pool
+        );
+    }
+    return build_target_counts<std::uint32_t>(
+        n_nodes, assembly_nodes, node_offsets, is_targets, n_assemblies, count_targets, pool
+    );
+}
+
+std::pair<double, double> expected_presence(
+    const Node* nodes,
+    std::size_t n_nodes,
+    const TargetCounts& target_counts,
+    std::size_t total_tar,
+    std::size_t total_neg,
+    ThreadPool& pool
+) {
     /**
      * Sums over all nodes, for penalty threshold calculation.
      * For all k-mers in targets, calculate their total presence in targets or non-targets.
@@ -43,104 +124,36 @@ FilteredGraph get_penalty(
         double presence_tar = 0.0; // `(node.n_tar / total_tar) * node.n_tar`
         double presence_neg = 0.0; // `(node.n_neg / total_neg) * node.n_tar`
     };
-
-    if (n_record_offsets != n_assemblies + 1) {
-        throw std::invalid_argument("len(record_offsets) must equal len(is_targets) + 1");
-    }
-    if (n_record_offsets == 0 || record_offsets[0] != 0) {
-        throw std::invalid_argument("record_offsets must start with 0");
-    }
-    if (n_assemblies > std::numeric_limits<std::uint32_t>::max()) {
-        throw std::invalid_argument("Number of assemblies exceeds uint32 range");
-    }
-    for (std::size_t i = 0; i < n_assemblies; ++i) {
-        if (record_offsets[i + 1] < record_offsets[i]) {
-            throw std::invalid_argument("record_offsets must be nondecreasing");
-        }
-    }
-
-    // Use double for downstream calculation
-    const double total_tar = std::count(is_targets, is_targets + n_assemblies, true);
-    const auto total_neg = n_assemblies - total_tar;
-    if (total_tar == 0.0) {
-        throw std::invalid_argument("is_targets must contain at least one target assembly");
-    }
-    if (total_neg == 0.0) {
-        throw std::invalid_argument("is_targets must contain at least one non-target assembly");
-    }
-
-    const std::uint32_t n_records = record_offsets[n_assemblies];
-    NoInitArray<RecordInfo> record_info(n_records);
-    pool.parallel_for(n_assemblies, [&](std::size_t start, std::size_t end, std::size_t) {
-        for (std::size_t assembly_idx = start; assembly_idx < end; ++assembly_idx) {
-            const std::uint32_t record_start = record_offsets[assembly_idx];
-            const std::uint32_t record_stop = record_offsets[assembly_idx + 1];
-            if (record_start == record_stop) {
-                continue;
-            }
-            const RecordInfo info{
-                record_stop - 1,
-                is_targets[assembly_idx] ? 1U : 0U
-            };
-            std::fill(
-                record_info.begin() + record_start,
-                record_info.begin() + record_stop,
-                info
-            );
-        }
-    });
-
     std::vector<NodeSums> node_sums(pool.size());
-    pool.parallel_for(n_nodes, [&](std::size_t start, std::size_t end, std::size_t worker_i) {
-        auto& sums = node_sums[worker_i];
+    const double total_tar_inv = 1.0 / total_tar;
+    const double total_neg_inv = 1.0 / total_neg;
 
-        for (std::size_t node_i = start; node_i < end; ++node_i) {
-            auto& node = nodes[node_i];
-            if (node.start == node.stop) {
-                node.n_tar = 0;
-                node.n_neg = 0;
-                node.penalty = 1.0;
-                continue;
-            }
+    target_counts.visit(nodes, [&](const auto& n_tar_at) {
+        pool.parallel_for(n_nodes, [&](std::size_t start, std::size_t end, std::size_t worker_id) {
+            NodeSums sums;
 
-            auto previous_record_idx = kmers[node.start].record_idx;
-            if (previous_record_idx >= n_records) {
-                throw std::invalid_argument("record_idx is outside record_offsets range");
-            }
-            auto info = record_info[previous_record_idx];
-            auto last_record_idx = info.last_record_idx;
-            std::uint32_t n_tar = info.is_target;
-            std::uint32_t n_neg = 1U - info.is_target;
-
-            for (std::size_t kmer_i = node.start + 1; kmer_i < node.stop; ++kmer_i) {
-                const std::uint32_t record_idx = kmers[kmer_i].record_idx;
-                if (record_idx < previous_record_idx) {
-                    throw std::invalid_argument("record_idx must be nondecreasing within each node range");
-                }
-                previous_record_idx = record_idx;
-
-                if (record_idx <= last_record_idx) {
+            for (std::size_t node_idx = start; node_idx < end; ++node_idx) {
+                const std::size_t n_tar = n_tar_at(node_idx);
+                if (n_tar == 0) {
                     continue;
                 }
-                if (record_idx >= n_records) {
-                    throw std::invalid_argument("record_idx is outside record_offsets range");
+                if (n_tar > std::numeric_limits<std::uint32_t>::max()) {
+                    throw std::invalid_argument("Node n_tar exceeds uint32 range");
                 }
-                info = record_info[record_idx];
-                last_record_idx = info.last_record_idx;
-                n_tar += info.is_target;
-                n_neg += 1U - info.is_target;
+                const auto prevalence = nodes[node_idx].prevalence;
+                if (n_tar > prevalence) {
+                    throw std::invalid_argument("Node n_tar exceeds prevalence");
+                }
+                const std::size_t n_neg = prevalence - n_tar;
+                if (n_neg > std::numeric_limits<std::uint32_t>::max()) {
+                    throw std::invalid_argument("Node n_neg exceeds uint32 range");
+                }
+                sums.n_tar += n_tar;
+                sums.presence_tar += n_tar * total_tar_inv * n_tar;
+                sums.presence_neg += n_neg * total_neg_inv * n_tar;
             }
-
-            node.n_tar = n_tar;
-            node.n_neg = n_neg;
-            const double frac_tar = n_tar / total_tar;
-            const double frac_neg = n_neg / total_neg;
-            node.penalty = std::sqrt((1.0 - frac_tar) * (1.0 - frac_tar) + frac_neg * frac_neg);
-
-            sums.n_tar += n_tar;
-            sums.presence_tar += frac_tar * n_tar;
-            sums.presence_neg += frac_neg * n_tar;
-        }
+            node_sums[worker_id] = sums;
+        });
     });
     NodeSums totals;
     for (const auto& sums : node_sums) {
@@ -152,12 +165,10 @@ FilteredGraph get_penalty(
         throw std::invalid_argument("No target minimizers are available for threshold estimation");
     }
 
-    FilteredGraph filtered;
-    filtered.total_tar = total_tar;
-    filtered.total_neg = total_neg;
-    filtered.e_absence_tar = 1.0 - totals.presence_tar / totals.n_tar;
-    filtered.e_presence_neg = totals.presence_neg / totals.n_tar;
-    return filtered;
+    return {
+        1.0 - totals.presence_tar / totals.n_tar,
+        totals.presence_neg / totals.n_tar
+    };
 }
 
 void prune_graph(
@@ -165,9 +176,14 @@ void prune_graph(
     std::size_t n_nodes,
     const Edge* edges,
     std::size_t n_edges,
+    const TargetCounts& target_counts,
+    std::size_t total_tar,
+    std::size_t total_neg,
     double edge_weight_th,
-    FilteredGraph& filtered
+    FilteredGraph& filtered,
+    ThreadPool& pool
 ) {
+    // Find edges that pass the weight threshold
     const std::size_t th = edge_weight_th;
     std::size_t retained_count = 0;
     if (n_edges != 0) {
@@ -182,38 +198,83 @@ void prune_graph(
         retained_count = static_cast<std::size_t>(retained_end - edges);
     }
 
-    std::vector<std::size_t> connected;
-    connected.reserve(retained_count * 2);
-    for (std::size_t i = 0; i < retained_count; ++i) {
-        if (edges[i].first >= n_nodes || edges[i].second >= n_nodes) {
-            throw std::invalid_argument("Edge endpoint does not correspond to a node");
+    // Multiset of retained node indices after edge filtering
+    NoInitArray<std::size_t> connected_multi(retained_count * 2);
+    pool.parallel_for(retained_count, [&](std::size_t start, std::size_t end, std::size_t) {
+        for (std::size_t i = start; i < end; ++i) {
+            if (edges[i].first >= n_nodes || edges[i].second >= n_nodes) {
+                throw std::invalid_argument("Edge endpoint does not correspond to a node");
+            }
+            connected_multi[i * 2] = edges[i].first;
+            connected_multi[i * 2 + 1] = edges[i].second;
         }
-        connected.push_back(edges[i].first);
-        connected.push_back(edges[i].second);
-    }
-    std::sort(connected.begin(), connected.end());
-    connected.erase(std::unique(connected.begin(), connected.end()), connected.end());
+    });
+    lsd_radix_sort(connected_multi, pool);
 
-    filtered.nodes = NoInitArray<Node>(connected.size());
+    // Find unique node indices in the sorted multiset
+    std::vector<std::size_t> connected;
+    connected.reserve(connected_multi.size());
+    // Map the original node indices to indices of retained nodes
     ankerl::unordered_dense::map<std::size_t, std::size_t> node_indices;
-    node_indices.reserve(connected.size());
-    for (std::size_t i = 0; i < connected.size(); ++i) {
-        filtered.nodes[i] = nodes[connected[i]];
-        node_indices.emplace(connected[i], i);
+    node_indices.reserve(connected_multi.size());
+    for (std::size_t i = 0; i < connected_multi.size(); ++i) {
+        if (i == 0 || connected_multi[i] != connected_multi[i - 1]) {
+            node_indices.emplace(connected_multi[i], connected.size());
+            connected.push_back(connected_multi[i]);
+        }
     }
+    connected_multi.reset();
 
+    // Calculate the penalty of each retained node
+    filtered.nodes = NoInitArray<FilteredNode>(connected.size());
+    const double total_tar_inv = 1.0 / total_tar;
+    const double total_neg_inv = 1.0 / total_neg;
+
+    target_counts.visit(nodes, [&](const auto& n_tar_at) {
+        pool.parallel_for(connected.size(), [&](std::size_t start, std::size_t end, std::size_t) {
+            for (std::size_t i = start; i < end; ++i) {
+                const auto node_idx = connected[i];
+                const std::size_t n_tar = n_tar_at(node_idx);
+                if (n_tar > std::numeric_limits<std::uint32_t>::max()) {
+                    throw std::invalid_argument("Filtered node n_tar exceeds uint32 range");
+                }
+                const auto prevalence = nodes[node_idx].prevalence;
+                if (n_tar > prevalence) {
+                    throw std::invalid_argument("Filtered node n_tar exceeds prevalence");
+                }
+                const std::size_t n_neg = prevalence - n_tar;
+                if (n_neg > std::numeric_limits<std::uint32_t>::max()) {
+                    throw std::invalid_argument("Filtered node n_neg exceeds uint32 range");
+                }
+
+                const double frac_tar = n_tar * total_tar_inv;
+                const double frac_neg = n_neg * total_neg_inv;
+                filtered.nodes[i] = FilteredNode{
+                    node_idx,
+                    static_cast<std::uint32_t>(n_tar),
+                    static_cast<std::uint32_t>(n_neg),
+                    std::sqrt((1.0 - frac_tar) * (1.0 - frac_tar) + frac_neg * frac_neg)
+                };
+            }
+        });
+    });
+
+    // Update edge endpoints to indices of retained nodes
     filtered.edges = NoInitArray<Edge>(retained_count);
-    for (std::size_t i = 0; i < retained_count; ++i) {
-        filtered.edges[i] = Edge{
-            node_indices.at(edges[i].first),
-            node_indices.at(edges[i].second),
-            edges[i].weight
-        };
-    }
+    const auto& node_indices_read = node_indices;
+    pool.parallel_for(retained_count, [&](std::size_t start, std::size_t end, std::size_t) {
+        for (std::size_t i = start; i < end; ++i) {
+            filtered.edges[i] = Edge{
+                node_indices_read.at(edges[i].first),
+                node_indices_read.at(edges[i].second),
+                edges[i].weight
+            };
+        }
+    });
 }
 
 void get_subgraphs(
-    const NoInitArray<Node>& nodes,
+    const NoInitArray<FilteredNode>& nodes,
     const NoInitArray<Edge>& edges,
     double penalty_th,
     std::size_t min_nodes,
@@ -221,7 +282,7 @@ void get_subgraphs(
     FilteredGraph& filtered
 ) {
     // Graph nodes are represented by indices, instead of hashes
-    const GraphTopology graph(nodes, edges);
+    const GraphTopology graph(nodes.size(), edges);
 
     std::vector<std::size_t> seeds;
     seeds.reserve(nodes.size());

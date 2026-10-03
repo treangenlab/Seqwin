@@ -109,21 +109,8 @@ struct Node {
     std::size_t start;
     /** End of the half-open range for this node's minimizer entries. */
     std::size_t stop;
-    /**
-     * Number of target assemblies containing this node's minimizer.
-     * Initialized to 0; populated during the filtering phase.
-     */
-    std::uint32_t n_tar = 0;
-    /**
-     * Number of non-target assemblies containing this node's minimizer.
-     * Initialized to 0; populated during the filtering phase.
-     */
-    std::uint32_t n_neg = 0;
-    /**
-     * Node penalty score.
-     * Initialized to 0; calculated from `n_tar` and `n_neg`.
-     */
-    double penalty = 0.0;
+    /** Number of assemblies containing this node's minimizer. */
+    std::size_t prevalence;
 };
 
 /**
@@ -156,6 +143,15 @@ struct Graph {
     std::vector<std::uint32_t> record_offsets;
     /** FASTA record IDs in global record order. */
     std::vector<std::string> record_ids;
+    /**
+     * @brief Node indices grouped by assembly.
+     *
+     * For assembly `i`, `[node_offsets[i], node_offsets[i + 1])` contains
+     * unique nodes present in that assembly, in ascending node-index order.
+     */
+    NoInitArray<std::size_t> assembly_nodes;
+    /** Cumulative offsets into `assembly_nodes` by assembly. */
+    std::vector<std::size_t> node_offsets;
 };
 
 } // namespace seqwin

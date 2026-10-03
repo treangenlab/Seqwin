@@ -7,6 +7,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "seqwin/filter_internals.hpp"
@@ -36,7 +37,7 @@ std::string format_value(double value, int precision)
  * `(M+N, M+N)`. The first group is always the target assemblies, and the second group is either
  * targets or non-targets. So the calculation only happens for certain rows and columns in `jaccard`.
  */
-double expected_presence(
+double expected_presence_jaccard(
     const double* jaccard,
     std::size_t n,
     const bool* is_targets,
@@ -68,15 +69,18 @@ double expected_presence(
     return sum / static_cast<double>(count);
 }
 
-/** @brief Calculate thresholds and add them to `filtered`. */
 void calculate_thresholds(
+    const Node* nodes,
+    std::size_t n_nodes,
     const bool* is_targets,
     std::size_t n_assemblies,
     const double* jaccard,
     std::size_t jaccard_rows,
     std::size_t jaccard_cols,
+    const internal::TargetCounts& target_counts,
     const FilterConfig& config,
-    FilteredGraph& filtered
+    FilteredGraph& filtered,
+    internal::ThreadPool& pool
 ) {
     double penalty_th;
     if (config.penalty_th) {
@@ -90,12 +94,17 @@ void calculate_thresholds(
             if (jaccard_rows != n_assemblies || jaccard_cols != n_assemblies) {
                 throw std::invalid_argument("Jaccard matrix shape must match the number of assemblies");
             }
-            e_absence_tar = 1.0 - expected_presence(jaccard, n_assemblies, is_targets, true);
-            e_presence_neg = expected_presence(jaccard, n_assemblies, is_targets, false);
+            e_absence_tar = 1.0 - expected_presence_jaccard(jaccard, n_assemblies, is_targets, true);
+            e_presence_neg = expected_presence_jaccard(jaccard, n_assemblies, is_targets, false);
         } else {
-            // Use values calculated by `get_penalty()`
-            e_absence_tar = filtered.e_absence_tar;
-            e_presence_neg = filtered.e_presence_neg;
+            std::tie(e_absence_tar, e_presence_neg) = internal::expected_presence(
+                nodes,
+                n_nodes,
+                target_counts,
+                filtered.total_tar,
+                filtered.total_neg,
+                pool
+            );
         }
         internal::log_python(" - Expected k-mer absence in targets: " + format_value(e_absence_tar, 5));
         internal::log_python(" - Expected k-mer presence in non-targets: " + format_value(e_presence_neg, 5));
@@ -109,6 +118,8 @@ void calculate_thresholds(
                 "warning"
             );
         }
+        filtered.e_absence_tar = e_absence_tar;
+        filtered.e_presence_neg = e_presence_neg;
     }
 
     // Calculate edge weight threshold
@@ -144,12 +155,16 @@ void calculate_thresholds(
 
 std::pair<FilteredGraph, std::vector<Signature>> filter(
     const Kmer* kmers,
-    Node* nodes,
+    const Node* nodes,
     std::size_t n_nodes,
     const Edge* edges,
     std::size_t n_edges,
     const std::uint32_t* record_offsets,
     std::size_t n_record_offsets,
+    const std::size_t* assembly_nodes,
+    std::size_t n_assembly_nodes,
+    const std::size_t* node_offsets,
+    std::size_t n_node_offsets,
     const std::vector<std::string>& assembly_paths,
     const bool* is_targets,
     std::size_t n_assemblies,
@@ -160,35 +175,55 @@ std::pair<FilteredGraph, std::vector<Signature>> filter(
 ) {
     internal::ThreadPool pool(std::max<std::size_t>(1, config.n_cpu));
 
-    internal::log_python(" - Calculating node penalty scores...");
-    auto filtered = internal::get_penalty(
-        kmers,
-        nodes,
+    FilteredGraph filtered;
+    filtered.total_tar = std::count(is_targets, is_targets + n_assemblies, true);
+    filtered.total_neg = n_assemblies - filtered.total_tar;
+    if (filtered.total_tar == 0) {
+        throw std::invalid_argument("is_targets must contain at least one target assembly");
+    }
+    if (filtered.total_neg == 0) {
+        throw std::invalid_argument("is_targets must contain at least one non-target assembly");
+    }
+
+    internal::log_python(" - Counting target node occurrences...");
+    auto target_counts = internal::count_target_nodes(
         n_nodes,
-        record_offsets,
-        n_record_offsets,
+        assembly_nodes,
+        n_assembly_nodes,
+        node_offsets,
+        n_node_offsets,
         is_targets,
         n_assemblies,
+        filtered.total_tar,
+        filtered.total_neg,
         pool
     );
     calculate_thresholds(
+        nodes,
+        n_nodes,
         is_targets,
         n_assemblies,
         jaccard,
         jaccard_rows,
         jaccard_cols,
+        target_counts,
         config,
-        filtered
+        filtered,
+        pool
     );
 
-    internal::log_python(" - Filtering graph edges and nodes...");
+    internal::log_python(" - Filtering graph and calculating node penalty scores...");
     internal::prune_graph(
         nodes,
         n_nodes,
         edges,
         n_edges,
+        target_counts,
+        filtered.total_tar,
+        filtered.total_neg,
         filtered.edge_weight_th,
-        filtered
+        filtered,
+        pool
     );
     internal::log_python(
         " - Removed " + std::to_string(n_edges - filtered.edges.size()) + " edges with weight<" +
@@ -217,6 +252,8 @@ std::pair<FilteredGraph, std::vector<Signature>> filter(
         filtered.subgraphs,
         filtered.nodes,
         kmers,
+        nodes,
+        n_nodes,
         record_offsets,
         n_record_offsets,
         assembly_paths,

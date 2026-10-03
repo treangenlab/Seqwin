@@ -26,15 +26,13 @@ constexpr char public_module[] = "seqwin.core";
 constexpr int pickle_version = 1;
 
 static_assert(sizeof(std::size_t) == 8, "Seqwin requires a 64-bit platform");
-static_assert(std::is_trivially_copyable_v<seqwin::Node>);
-static_assert(std::is_standard_layout_v<seqwin::Node>);
-static_assert(sizeof(seqwin::Node) == 40);
-static_assert(offsetof(seqwin::Node, hash) == 0);
-static_assert(offsetof(seqwin::Node, start) == 8);
-static_assert(offsetof(seqwin::Node, stop) == 16);
-static_assert(offsetof(seqwin::Node, n_tar) == 24);
-static_assert(offsetof(seqwin::Node, n_neg) == 28);
-static_assert(offsetof(seqwin::Node, penalty) == 32);
+static_assert(std::is_trivially_copyable_v<seqwin::FilteredNode>);
+static_assert(std::is_standard_layout_v<seqwin::FilteredNode>);
+static_assert(sizeof(seqwin::FilteredNode) == 24);
+static_assert(offsetof(seqwin::FilteredNode, idx) == 0);
+static_assert(offsetof(seqwin::FilteredNode, n_tar) == 8);
+static_assert(offsetof(seqwin::FilteredNode, n_neg) == 12);
+static_assert(offsetof(seqwin::FilteredNode, penalty) == 16);
 static_assert(std::is_trivially_copyable_v<seqwin::Edge>);
 static_assert(std::is_standard_layout_v<seqwin::Edge>);
 static_assert(sizeof(seqwin::Edge) == 24);
@@ -91,9 +89,9 @@ void bind_python_classes(py::module_& module) {
     py::class_<FilteredGraph>(module, "FilteredGraph")
         .def_property_readonly("nodes", [](py::object self) {
             auto& filtered = self.cast<FilteredGraph&>();
-            return py::array_t<Node>(
+            return py::array_t<FilteredNode>(
                 {static_cast<py::ssize_t>(filtered.nodes.size())},
-                {static_cast<py::ssize_t>(sizeof(Node))},
+                {static_cast<py::ssize_t>(sizeof(FilteredNode))},
                 filtered.nodes.data(),
                 self
             );
@@ -138,13 +136,13 @@ void bind_python_classes(py::module_& module) {
                     throw std::runtime_error("Invalid FilteredGraph pickle state or version");
                 }
                 return FilteredGraph{
-                    bytes_to_array<Node>(state[1].cast<py::bytes>(), "nodes"),
+                    bytes_to_array<FilteredNode>(state[1].cast<py::bytes>(), "nodes"),
                     bytes_to_array<Edge>(state[2].cast<py::bytes>(), "edges"),
                     state[3].cast<std::vector<Subgraph>>(),
                     state[4].cast<std::size_t>(),
                     state[5].cast<std::size_t>(),
-                    state[6].cast<double>(),
-                    state[7].cast<double>(),
+                    state[6].cast<std::optional<double>>(),
+                    state[7].cast<std::optional<double>>(),
                     state[8].cast<double>(),
                     state[9].cast<double>(),
                     state[10].cast<std::size_t>(),

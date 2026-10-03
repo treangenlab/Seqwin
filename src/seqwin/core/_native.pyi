@@ -20,12 +20,16 @@ class FilteredGraph:
 
     Attributes:
         nodes (NDArray[np.void]): Nodes retained by edge filtering.
-        edges (NDArray[np.void]): Low-weight edges are filtered.
+            - 'idx' (uintp): Index into the original `Graph.nodes` array.
+            - 'n_tar' (uint32): Number of target assemblies containing this node's minimizer.
+            - 'n_neg' (uint32): Number of non-target assemblies containing this node's minimizer.
+            - 'penalty' (float64): Node penalty score.
+        edges (NDArray[np.void]): Edges passed the weight threshold. Endpoints are indices into the retained nodes.
         subgraphs (list[list[int]]): Low-penalty subgraphs represented by indices of retained nodes.
         total_tar (int): Number of target assemblies.
         total_neg (int): Number of non-target assemblies.
-        e_absence_tar (float): Expected k-mer absence in target assemblies.
-        e_presence_neg (float): Expected k-mer presence in non-target assemblies.
+        e_absence_tar (float | None): Expected k-mer absence in target assemblies.
+        e_presence_neg (float | None): Expected k-mer presence in non-target assemblies.
         penalty_th (float): Node penalty threshold (user input or auto-computed).
         edge_weight_th (float): Graph edge weight threshold.
         min_nodes (int): Minimum number of nodes for a low-penalty subgraph.
@@ -42,9 +46,9 @@ class FilteredGraph:
     @property
     def total_neg(self) -> int: ...
     @property
-    def e_absence_tar(self) -> float: ...
+    def e_absence_tar(self) -> float | None: ...
     @property
-    def e_presence_neg(self) -> float: ...
+    def e_presence_neg(self) -> float | None: ...
     @property
     def penalty_th(self) -> float: ...
     @property
@@ -125,6 +129,8 @@ def _build_native(
     NDArray[np.void],
     NDArray[np.uint32],
     list[str],
+    NDArray[np.uintp],
+    NDArray[np.uintp],
 ]: ...
 
 def _filter_native(
@@ -132,6 +138,8 @@ def _filter_native(
     nodes: NDArray[np.void],
     edges: NDArray[np.void],
     record_offsets: NDArray[np.uint32],
+    assembly_nodes: NDArray[np.uintp],
+    node_offsets: NDArray[np.uintp],
     assembly_paths: Sequence[str],
     is_targets: NDArray[np.bool_],
     jaccard: NDArray[np.float64] | None,
