@@ -184,6 +184,7 @@ std::vector<Signature> extract_signatures(
     const std::vector<Subgraph>& subgraphs,
     const NoInitArray<FilteredNode>& filtered_nodes,
     const Kmer* kmers,
+    std::size_t n_kmers,
     const Node* nodes,
     std::size_t n_nodes,
     const std::uint32_t* record_offsets,

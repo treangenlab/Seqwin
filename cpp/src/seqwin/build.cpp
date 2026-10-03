@@ -17,6 +17,7 @@
 #include <btllib/minimizer.hpp>
 
 #include "seqwin/build_internals.hpp"
+#include "seqwin/shared_internals.hpp"
 #include "utils/fasta_reader.hpp"
 #include "utils/logging.hpp"
 #include "utils/memory.hpp"
@@ -130,9 +131,7 @@ WorkerGraph build_worker(
 
         std::uint32_t record_idx = graph.record_offsets.back();
         if (records.size() > std::numeric_limits<std::uint32_t>::max() - record_idx) {
-            throw std::runtime_error(
-                "Total number of FASTA records exceeds uint32 range"
-            );
+            throw std::runtime_error("Total number of FASTA records exceeds uint32 range");
         }
         for (std::size_t record_i = 0; record_i < records.size(); ++record_i) {
             auto& record = records[record_i];
@@ -196,7 +195,7 @@ WorkerGraph build_worker(
         // Build WorkerGraph.kmers (grouped by hash)
         graph.kmers = NoInitArray<Kmer>(graph.n_kmers);
 
-        // node_map values are counts while assigning node ranges,
+        // node_map values are counts while assigning k-mer ranges,
         // then cursors while scattering raw k-mers into those ranges
         std::size_t cursor = 0;
         for (auto& [hash, node_val] : node_map) {
@@ -347,10 +346,13 @@ void build_assembly_nodes(Graph& graph, ThreadPool& pool) {
 
         for (std::size_t node_i = start; node_i < end; ++node_i) {
             auto& node = graph.nodes[node_i];
+            const auto [kmer_start, kmer_stop] = kmer_range(
+                graph.nodes.data(), n_nodes, graph.kmers.size(), node_i
+            );
             std::uint32_t previous_assembly = std::numeric_limits<std::uint32_t>::max();
             std::size_t prevalence = 0;
 
-            for (std::size_t kmer_i = node.start; kmer_i < node.stop; ++kmer_i) {
+            for (std::size_t kmer_i = kmer_start; kmer_i < kmer_stop; ++kmer_i) {
                 const auto assembly_idx = record_to_assembly[graph.kmers[kmer_i].record_idx];
                 if (assembly_idx != previous_assembly) {
                     ++worker_counts[assembly_idx];
@@ -385,10 +387,12 @@ void build_assembly_nodes(Graph& graph, ThreadPool& pool) {
         auto* worker_cursors = assembly_counts.data() + worker_id * n_assemblies;
 
         for (std::size_t node_i = start; node_i < end; ++node_i) {
-            const auto& node = graph.nodes[node_i];
+            const auto [kmer_start, kmer_stop] = kmer_range(
+                graph.nodes.data(), n_nodes, graph.kmers.size(), node_i
+            );
             std::uint32_t previous_assembly = std::numeric_limits<std::uint32_t>::max();
 
-            for (std::size_t kmer_i = node.start; kmer_i < node.stop; ++kmer_i) {
+            for (std::size_t kmer_i = kmer_start; kmer_i < kmer_stop; ++kmer_i) {
                 const auto assembly_idx = record_to_assembly[graph.kmers[kmer_i].record_idx];
                 if (assembly_idx != previous_assembly) {
                     graph.assembly_nodes[worker_cursors[assembly_idx]++] = node_i;

@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <functional>
 #include <limits>
+#include <stdexcept>
 #include <type_traits>
 #include <utility>
 
@@ -12,6 +13,31 @@
 #include "utils/thread_pool.hpp"
 
 namespace seqwin::internal {
+
+/**
+ * @brief Return the half-open k-mer range for a node in `Graph`.
+ *
+ * Nodes and k-mers share hash order, so the end is the next node's `start`,
+ * or `n_kmers` for the final node.
+ */
+inline std::pair<std::size_t, std::size_t> kmer_range(
+    const Node* nodes,
+    std::size_t n_nodes,
+    std::size_t n_kmers,
+    std::size_t node_idx
+) {
+    if (node_idx >= n_nodes) {
+        throw std::invalid_argument("Node index is out of bounds");
+    }
+    const auto start = nodes[node_idx].start;
+    const auto stop = node_idx + 1 < n_nodes
+        ? nodes[node_idx + 1].start
+        : n_kmers;
+    if (start >= stop || stop > n_kmers) {
+        throw std::invalid_argument("Node k-mer range is invalid");
+    }
+    return {start, stop};
+}
 
 /**
  * @brief Stable parallel LSD radix sort over an unsigned 64-bit key.

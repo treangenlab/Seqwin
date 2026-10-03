@@ -122,9 +122,9 @@ def _assert_graph_outputs_equal(standard, low_memory) -> None:
 
 def _assert_node_ranges(kmers: np.ndarray, nodes: np.ndarray) -> None:
     total = 0
-    for node in nodes:
+    for i, node in enumerate(nodes):
         start = int(node['start'])
-        stop = int(node['stop'])
+        stop = int(nodes[i + 1]['start']) if i + 1 < len(nodes) else len(kmers)
         assert 0 <= start <= stop <= len(kmers)
         assert len(kmers[start:stop]) == (stop - start)
         assert np.all(kmers[start:stop]['record_idx'][:-1] <= kmers[start:stop]['record_idx'][1:])
@@ -139,13 +139,12 @@ def test_dtype_layouts() -> None:
 
     assert np.dtype(np.uintp).itemsize == 8
 
-    assert NODE_DTYPE.names == ('hash', 'start', 'stop', 'prevalence')
+    assert NODE_DTYPE.names == ('hash', 'start', 'prevalence')
     assert NODE_DTYPE["hash"] == np.dtype(np.uint64)
     assert NODE_DTYPE["start"] == np.dtype(np.uintp)
-    assert NODE_DTYPE["stop"] == np.dtype(np.uintp)
     assert NODE_DTYPE["prevalence"] == np.dtype(np.uintp)
-    assert NODE_DTYPE.itemsize == 32
-    assert [NODE_DTYPE.fields[name][1] for name in NODE_DTYPE.names] == [0, 8, 16, 24]
+    assert NODE_DTYPE.itemsize == 24
+    assert [NODE_DTYPE.fields[name][1] for name in NODE_DTYPE.names] == [0, 8, 16]
 
     assert EDGE_DTYPE.names == ("first", "second", "weight")
     assert EDGE_DTYPE["first"] == np.dtype(np.uintp)
@@ -324,8 +323,12 @@ def test_assembly_nodes_match_kmer_memberships(tmp_path: Path) -> None:
 
     expected = [[] for _ in assembly_paths]
     for node_i, node in enumerate(graph.nodes):
+        stop = (
+            int(graph.nodes[node_i + 1]['start'])
+            if node_i + 1 < len(graph.nodes) else len(graph.kmers)
+        )
         assemblies = np.unique(record_assembly[
-            graph.kmers['record_idx'][int(node['start']):int(node['stop'])]
+            graph.kmers['record_idx'][int(node['start']):stop]
         ])
         assert node['prevalence'] == len(assemblies)
         for assembly_i in assemblies:

@@ -84,6 +84,7 @@ struct FilteredGraph {
  */
 std::pair<FilteredGraph, std::vector<Signature>> filter(
     const Kmer* kmers,
+    std::size_t n_kmers,
     const Node* nodes,
     std::size_t n_nodes,
     const Edge* edges,

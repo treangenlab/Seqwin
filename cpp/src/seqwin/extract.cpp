@@ -10,6 +10,7 @@
 
 #include <ankerl/unordered_dense.h>
 
+#include "seqwin/shared_internals.hpp"
 #include "utils/fasta_reader.hpp"
 #include "utils/logging.hpp"
 
@@ -68,6 +69,7 @@ std::optional<Signature> extract_worker(
     const Subgraph& subgraph,
     const NoInitArray<FilteredNode>& filtered_nodes,
     const Kmer* kmers,
+    std::size_t n_kmers,
     const Node* nodes,
     std::size_t n_nodes,
     const std::uint32_t* record_offsets,
@@ -93,7 +95,8 @@ std::optional<Signature> extract_worker(
             throw std::invalid_argument("filtered node index is out of bounds");
         }
         const auto& node = nodes[node_idx];
-        for (std::size_t i = node.start; i < node.stop; ++i) {
+        const auto [start, stop] = kmer_range(nodes, n_nodes, n_kmers, node_idx);
+        for (std::size_t i = start; i < stop; ++i) {
             sg_kmers.push_back({node.hash, kmers[i].record_idx, kmers[i].pos});
         }
     }
@@ -340,6 +343,7 @@ std::vector<Signature> extract_signatures(
     const std::vector<Subgraph>& subgraphs,
     const NoInitArray<FilteredNode>& filtered_nodes,
     const Kmer* kmers,
+    std::size_t n_kmers,
     const Node* nodes,
     std::size_t n_nodes,
     const std::uint32_t* record_offsets,
@@ -375,6 +379,7 @@ std::vector<Signature> extract_signatures(
                 subgraphs[i],
                 filtered_nodes,
                 kmers,
+                n_kmers,
                 nodes,
                 n_nodes,
                 record_offsets,

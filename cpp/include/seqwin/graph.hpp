@@ -99,16 +99,14 @@ struct Kmer {
 /**
  * @brief Minimizer graph node for one unique minimizer hash.
  *
- * The `[start, stop)` range is a half-open interval into `Graph.kmers`
- * for minimizers with this hash.
+ * `start` is the beginning of this node's entries in `Graph.kmers`. The end
+ * is the next node's `start`, or `Graph.kmers.size()` for the final node.
  */
 struct Node {
     /** Hash value of the minimizers represented by this node. */
     std::uint64_t hash;
-    /** Start of the half-open range for this node's minimizer entries. */
+    /** Start of this node's minimizer entries in `Graph.kmers`. */
     std::size_t start;
-    /** End of the half-open range for this node's minimizer entries. */
-    std::size_t stop;
     /** Number of assemblies containing this node's minimizer. */
     std::size_t prevalence;
 };
