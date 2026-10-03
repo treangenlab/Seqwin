@@ -422,6 +422,9 @@ Graph build(
     if (n_assemblies > 0) {
         n_workers = std::min(n_workers, n_assemblies);
     }
+    if (n_workers > internal::WorkerNode::max_workers) {
+        throw std::runtime_error("Number of workers exceeds WorkerNode range");
+    }
 
     internal::ThreadPool pool(n_workers); // Avoid spawning threads every time
     std::vector<internal::WorkerGraph> graphs(n_workers);

@@ -155,13 +155,13 @@ static MergedNodes merge_nodes(
         const auto start = n_kmers;
 
         while (i < n_nodes && nodes[i].hash == hash) {
-            const auto count = nodes[i].count;
+            const auto count = nodes[i].count();
 
             if (low_memory) {
-                merged.kmer_maps[nodes[i].worker_id][hash] = n_kmers;
+                merged.kmer_maps[nodes[i].worker_id()][hash] = n_kmers;
             } else {
                 merged.kmer_segments.push_back(KmerSegment{
-                    nodes[i].worker_id,
+                    nodes[i].worker_id(),
                     nodes[i].start,
                     n_kmers,
                     count

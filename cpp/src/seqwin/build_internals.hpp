@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -20,18 +21,71 @@ class ThreadPool;
 /**
  * @brief Worker-local minimizer graph node.
  *
- * `start` and `count` define a range in `WorkerGraph.kmers`.
+ * `start` and `count()` define a range in `WorkerGraph.kmers`. The count and
+ * worker ID share a packed 64-bit representation, using 48 and 16 bits, respectively.
  */
 struct WorkerNode {
+private:
+    static constexpr unsigned worker_bits = 16;
+
+public:
+    /**
+     * Maximum number of logical workers representable by `WorkerNode`.
+     * Callers must validate against this limit before assigning worker IDs.
+     */
+    static constexpr std::size_t max_workers = std::size_t{1} << worker_bits;
+
+    WorkerNode() noexcept = default;
+
+    WorkerNode(
+        std::uint64_t hash_,
+        std::size_t start_,
+        std::size_t count_,
+        std::size_t worker_id_
+    )
+        : hash(hash_),
+          start(start_),
+          packed_(pack(count_, worker_id_))
+    {}
+
     /** Hash value of the minimizers represented by this node. */
     std::uint64_t hash;
     /** Start of entries in `WorkerGraph.kmers` for this node. */
     std::size_t start;
     /** Number of entries in `WorkerGraph.kmers` for this node. */
-    std::size_t count;
+    std::size_t count() const noexcept
+    {
+        return static_cast<std::size_t>(packed_ >> worker_bits);
+    }
     /** Logical worker that produced this node. Used by the merging step. */
-    std::size_t worker_id;
+    std::size_t worker_id() const noexcept
+    {
+        return static_cast<std::size_t>(packed_ & worker_mask);
+    }
+
+private:
+    static constexpr unsigned count_bits = 64 - worker_bits;
+    static constexpr std::uint64_t count_max = (std::uint64_t{1} << count_bits) - 1;
+    static constexpr std::uint64_t worker_mask = (std::uint64_t{1} << worker_bits) - 1;
+
+    static std::uint64_t pack(
+        std::size_t count,
+        std::size_t worker_id
+    ) {
+        if (count > count_max) {
+            throw std::overflow_error("Worker-node k-mer count exceeds 48-bit range");
+        }
+        return
+            (static_cast<std::uint64_t>(count) << worker_bits) |
+            static_cast<std::uint64_t>(worker_id);
+    }
+    std::uint64_t packed_;
 };
+
+static_assert(sizeof(WorkerNode) == 24);
+static_assert(std::is_default_constructible_v<WorkerNode>);
+static_assert(std::is_copy_assignable_v<WorkerNode>);
+static_assert(std::is_trivially_copyable_v<WorkerNode>);
 
 /**
  * @brief Worker-local edge whose endpoints are minimizer hashes.
