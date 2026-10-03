@@ -210,11 +210,16 @@ void prune_graph(
         }
     });
     lsd_radix_sort(connected_multi, pool);
+
     // Find unique node indices in the sorted multiset
     std::vector<std::size_t> connected;
     connected.reserve(connected_multi.size());
+    // Map the original node indices to indices of retained nodes
+    ankerl::unordered_dense::map<std::size_t, std::size_t> node_indices;
+    node_indices.reserve(connected_multi.size());
     for (std::size_t i = 0; i < connected_multi.size(); ++i) {
         if (i == 0 || connected_multi[i] != connected_multi[i - 1]) {
+            node_indices.emplace(connected_multi[i], connected.size());
             connected.push_back(connected_multi[i]);
         }
     }
@@ -224,47 +229,48 @@ void prune_graph(
     filtered.nodes = NoInitArray<FilteredNode>(connected.size());
     const double total_tar_inv = 1.0 / total_tar;
     const double total_neg_inv = 1.0 / total_neg;
-    // Map the original node indices to indices of retained nodes
-    ankerl::unordered_dense::map<std::size_t, std::size_t> node_indices;
-    node_indices.reserve(connected.size());
 
     target_counts.visit(nodes, [&](const auto& n_tar_at) {
-        for (std::size_t i = 0; i < connected.size(); ++i) {
-            const auto node_idx = connected[i];
-            const std::size_t n_tar = n_tar_at(node_idx);
-            if (n_tar > std::numeric_limits<std::uint32_t>::max()) {
-                throw std::invalid_argument("Filtered node n_tar exceeds uint32 range");
-            }
-            const auto prevalence = nodes[node_idx].prevalence;
-            if (n_tar > prevalence) {
-                throw std::invalid_argument("Filtered node n_tar exceeds prevalence");
-            }
-            const std::size_t n_neg = prevalence - n_tar;
-            if (n_neg > std::numeric_limits<std::uint32_t>::max()) {
-                throw std::invalid_argument("Filtered node n_neg exceeds uint32 range");
-            }
+        pool.parallel_for(connected.size(), [&](std::size_t start, std::size_t end, std::size_t) {
+            for (std::size_t i = start; i < end; ++i) {
+                const auto node_idx = connected[i];
+                const std::size_t n_tar = n_tar_at(node_idx);
+                if (n_tar > std::numeric_limits<std::uint32_t>::max()) {
+                    throw std::invalid_argument("Filtered node n_tar exceeds uint32 range");
+                }
+                const auto prevalence = nodes[node_idx].prevalence;
+                if (n_tar > prevalence) {
+                    throw std::invalid_argument("Filtered node n_tar exceeds prevalence");
+                }
+                const std::size_t n_neg = prevalence - n_tar;
+                if (n_neg > std::numeric_limits<std::uint32_t>::max()) {
+                    throw std::invalid_argument("Filtered node n_neg exceeds uint32 range");
+                }
 
-            const double frac_tar = n_tar * total_tar_inv;
-            const double frac_neg = n_neg * total_neg_inv;
-            filtered.nodes[i] = FilteredNode{
-                node_idx,
-                static_cast<std::uint32_t>(n_tar),
-                static_cast<std::uint32_t>(n_neg),
-                std::sqrt((1.0 - frac_tar) * (1.0 - frac_tar) + frac_neg * frac_neg)
-            };
-            node_indices.emplace(node_idx, i);
-        }
+                const double frac_tar = n_tar * total_tar_inv;
+                const double frac_neg = n_neg * total_neg_inv;
+                filtered.nodes[i] = FilteredNode{
+                    node_idx,
+                    static_cast<std::uint32_t>(n_tar),
+                    static_cast<std::uint32_t>(n_neg),
+                    std::sqrt((1.0 - frac_tar) * (1.0 - frac_tar) + frac_neg * frac_neg)
+                };
+            }
+        });
     });
 
     // Update edge endpoints to indices of retained nodes
     filtered.edges = NoInitArray<Edge>(retained_count);
-    for (std::size_t i = 0; i < retained_count; ++i) {
-        filtered.edges[i] = Edge{
-            node_indices.at(edges[i].first),
-            node_indices.at(edges[i].second),
-            edges[i].weight
-        };
-    }
+    const auto& node_indices_read = node_indices;
+    pool.parallel_for(retained_count, [&](std::size_t start, std::size_t end, std::size_t) {
+        for (std::size_t i = start; i < end; ++i) {
+            filtered.edges[i] = Edge{
+                node_indices_read.at(edges[i].first),
+                node_indices_read.at(edges[i].second),
+                edges[i].weight
+            };
+        }
+    });
 }
 
 void get_subgraphs(

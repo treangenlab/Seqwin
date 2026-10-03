@@ -225,20 +225,28 @@ static NoInitArray<Edge> finalize_edges(
 
     // Convert the second endpoints to node indices
     lsd_radix_sort(edges, &WorkerEdge::second, pool);
-    std::size_t node_i = 0;
-    for (auto& edge : edges) {
-        while (node_i < n_nodes && node_hashes[node_i] < edge.second) {
-            ++node_i;
+    pool.parallel_for(n_edges, [&](std::size_t start, std::size_t end, std::size_t) {
+        if (start == end) {
+            return;
         }
-        if (node_i == n_nodes || node_hashes[node_i] != edge.second) {
-            throw std::logic_error("Edge endpoint does not correspond to a node");
+        auto node_start = std::lower_bound(
+            node_hashes.begin(), node_hashes.end(), edges[start].second
+        );
+        std::size_t node_i = static_cast<std::size_t>(node_start - node_hashes.begin());
+        for (std::size_t i = start; i < end; ++i) {
+            while (node_i < n_nodes && node_hashes[node_i] < edges[i].second) {
+                ++node_i;
+            }
+            if (node_i == n_nodes || node_hashes[node_i] != edges[i].second) {
+                throw std::logic_error("Edge endpoint does not correspond to a node");
+            }
+            edges[i].second = node_i;
         }
-        edge.second = node_i;
-    }
+    });
 
     // Convert the first endpoints to node indices, and aggregate weights
     lsd_radix_sort(edges, &WorkerEdge::first, pool);
-    node_i = 0;
+    std::size_t node_i = 0;
     std::size_t write_i = 0;
     for (auto& edge : edges) {
         while (node_i < n_nodes && node_hashes[node_i] < edge.first) {
@@ -262,13 +270,15 @@ static NoInitArray<Edge> finalize_edges(
     std::vector<std::uint64_t>().swap(node_hashes);
 
     NoInitArray<Edge> out(write_i);
-    for (std::size_t i = 0; i < write_i; ++i) {
-        out[i] = Edge{
-            static_cast<std::size_t>(edges[i].first),
-            static_cast<std::size_t>(edges[i].second),
-            edges[i].weight
-        };
-    }
+    pool.parallel_for(write_i, [&](std::size_t start, std::size_t end, std::size_t) {
+        for (std::size_t i = start; i < end; ++i) {
+            out[i] = Edge{
+                static_cast<std::size_t>(edges[i].first),
+                static_cast<std::size_t>(edges[i].second),
+                edges[i].weight
+            };
+        }
+    });
     edges.reset();
 
     // Sort by descending weight
