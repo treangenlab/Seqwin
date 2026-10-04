@@ -119,7 +119,6 @@ WorkerGraph build_worker(
 
     WorkerGraph graph;
     graph.record_offsets.reserve(end_assembly - start_assembly + 1);
-    graph.record_offsets.push_back(0);
     graph.start_assembly = start_assembly;
     graph.end_assembly = end_assembly;
     NodeMap node_map;
@@ -322,10 +321,10 @@ void build_assembly_nodes(Graph& graph, ThreadPool& pool) {
         );
     });
 
-    // Each worker is assigned with a contiguous chunk in graph.nodes
+    // Split graph.nodes into contiguous chunks and process them in parallel
     const std::size_t n_chunks = std::min(pool.size(), n_nodes);
 
-    // First pass: each worker counts the number its assigned nodes in each assembly
+    // First pass: each chunk counts its assigned nodes in each assembly
     // This matrix is reused as disjoint output cursors in the second pass
     NoInitArray<std::size_t> assembly_counts(n_chunks * n_assemblies);
     pool.parallel_for_chunks(assembly_counts.size(), [&](
@@ -338,60 +337,61 @@ void build_assembly_nodes(Graph& graph, ThreadPool& pool) {
         );
     });
 
-    pool.parallel_for(n_nodes, [&](std::size_t node_i, std::size_t chunk_id) {
+    pool.parallel_for(n_nodes, [&](std::size_t node_idx, std::size_t chunk_id) {
         auto* chunk_counts = assembly_counts.data() + chunk_id * n_assemblies;
-        auto& node = graph.nodes[node_i];
-        const auto [kmer_start, kmer_stop] = kmer_range(
-            graph.nodes.data(), n_nodes, graph.kmers.size(), node_i
+        const auto [start, end] = kmer_range(
+            graph.nodes.data(), n_nodes, graph.kmers.size(), node_idx
         );
         std::uint32_t previous_assembly = std::numeric_limits<std::uint32_t>::max();
         std::size_t prevalence = 0;
 
-        for (std::size_t kmer_i = kmer_start; kmer_i < kmer_stop; ++kmer_i) {
-            const auto assembly_idx = record_to_assembly[graph.kmers[kmer_i].record_idx];
+        for (std::size_t i = start; i < end; ++i) {
+            const auto assembly_idx = record_to_assembly[graph.kmers[i].record_idx];
             if (assembly_idx != previous_assembly) {
                 ++chunk_counts[assembly_idx];
                 ++prevalence;
                 previous_assembly = assembly_idx;
             }
         }
-        node.prevalence = prevalence;
+        graph.nodes[node_idx].prevalence = prevalence;
     });
 
     // Build node_offsets and convert assembly_counts to output cursors
-    graph.node_offsets.clear();
-    graph.node_offsets.reserve(n_assemblies + 1);
+    std::vector<std::size_t> node_offsets{0};
+    node_offsets.reserve(n_assemblies + 1);
+
     std::size_t global_offset = 0;
     for (std::size_t assembly_idx = 0; assembly_idx < n_assemblies; ++assembly_idx) {
-        graph.node_offsets.push_back(global_offset);
-
         for (std::size_t chunk_id = 0; chunk_id < n_chunks; ++chunk_id) {
             auto& value = assembly_counts[chunk_id * n_assemblies + assembly_idx];
             const auto count = value;
             value = global_offset;
             global_offset += count;
         }
+        node_offsets.push_back(global_offset);
     }
-    graph.node_offsets.push_back(global_offset);
-    graph.assembly_nodes = NoInitArray<std::size_t>(global_offset);
 
-    // Second pass: each worker writes node indices into its reserved range in each assembly
-    // Worker ranges follow node-index order, so each assembly slice is strictly ascending
-    pool.parallel_for(n_nodes, [&](std::size_t node_i, std::size_t chunk_id) {
+    // Second pass: each chunk writes node indices into its reserved range in each assembly
+    // Chunk ranges follow node-index order, so each assembly slice is strictly ascending
+    NoInitArray<std::size_t> assembly_nodes(global_offset);
+    pool.parallel_for(n_nodes, [&](std::size_t node_idx, std::size_t chunk_id) {
         auto* chunk_cursors = assembly_counts.data() + chunk_id * n_assemblies;
-        const auto [kmer_start, kmer_stop] = kmer_range(
-            graph.nodes.data(), n_nodes, graph.kmers.size(), node_i
+        const auto [start, end] = kmer_range(
+            graph.nodes.data(), n_nodes, graph.kmers.size(), node_idx
         );
         std::uint32_t previous_assembly = std::numeric_limits<std::uint32_t>::max();
 
-        for (std::size_t kmer_i = kmer_start; kmer_i < kmer_stop; ++kmer_i) {
-            const auto assembly_idx = record_to_assembly[graph.kmers[kmer_i].record_idx];
+        for (std::size_t i = start; i < end; ++i) {
+            const auto assembly_idx = record_to_assembly[graph.kmers[i].record_idx];
             if (assembly_idx != previous_assembly) {
-                graph.assembly_nodes[chunk_cursors[assembly_idx]++] = node_i;
+                assembly_nodes[chunk_cursors[assembly_idx]++] = node_idx;
                 previous_assembly = assembly_idx;
             }
         }
     });
+
+    graph.assembly_nodes = std::move(assembly_nodes);
+    graph.node_offsets = std::move(node_offsets);
 }
 
 } // namespace
@@ -409,23 +409,20 @@ Graph build(
     }
 
     const auto n_assemblies = assembly_paths.size();
-    std::size_t n_workers = std::max<std::size_t>(1, n_cpu);
-    if (n_assemblies > 0) {
-        n_workers = std::min(n_workers, n_assemblies);
-    }
+    const std::size_t n_workers = std::min(
+        std::max<std::size_t>(1, n_cpu),
+        std::max<std::size_t>(1, n_assemblies)
+    );
     if (n_workers > internal::WorkerNode::max_workers) {
         throw std::runtime_error("Number of workers exceeds WorkerNode range");
     }
 
-    internal::ThreadPool pool(n_workers); // Avoid spawning threads every time
+    internal::ThreadPool pool(n_workers);
     std::vector<internal::WorkerGraph> graphs(n_workers);
 
-    const std::size_t base = n_assemblies / n_workers;
-    const std::size_t rem = n_assemblies % n_workers;
-
-    pool.parallel_for(n_workers, [&](std::size_t worker_id) {
-        std::size_t start_assembly = worker_id * base + std::min(worker_id, rem);
-        std::size_t end_assembly = start_assembly + base + (worker_id < rem ? 1 : 0);
+    pool.parallel_for_chunks(n_assemblies, [&](
+        std::size_t start_assembly, std::size_t end_assembly, std::size_t worker_id
+    ) {
         graphs[worker_id] = internal::build_worker(
             assembly_paths,
             kmerlen,

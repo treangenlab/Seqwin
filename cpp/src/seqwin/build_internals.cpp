@@ -379,9 +379,8 @@ std::pair<Graph, KmerMaps> merge_worker_graphs(
     // Record index offsets in each worker
     std::vector<std::uint32_t> worker_record_offsets(graphs.size());
     // Record index offsets in each assembly
-    std::vector<std::uint32_t> record_offsets;
+    std::vector<std::uint32_t> record_offsets{0};
     record_offsets.reserve(n_assemblies + 1);
-    record_offsets.push_back(0);
 
     std::uint32_t total_records = 0;
     for (std::size_t t = 0; t < graphs.size(); ++t) {

@@ -126,6 +126,10 @@ struct Edge {
 
 /**
  * @brief Container for the minimizer graph returned by `build()`.
+ *
+ * `Graph` members do not encode semantic defaults. Build and merge routines
+ * construct owned containers separately and transfer them into the final graph
+ * with move assignment or move construction.
  */
 struct Graph {
     /**
