@@ -6,6 +6,7 @@
 #include <iterator>
 #include <limits>
 #include <stdexcept>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -15,6 +16,15 @@
 
 namespace seqwin::internal {
 namespace {
+
+/**
+ * @brief Final k-mer output position for one `WorkerNode`.
+ * Used in low-memory mode for constructing `KmerMaps` in parallel.
+ */
+struct KmerMapEntry {
+    std::uint64_t hash;
+    std::size_t out_start;
+};
 
 template <typename T, typename MemberPtr>
 NoInitArray<T> concat(
@@ -69,7 +79,7 @@ NoInitArray<WorkerEdge> concat_edges(
 /**
  * @brief Sort worker-local nodes by hash and collect unique hashes in ascending order.
  *
- * The sorted `WorkerNode` array is subsequently consumed by `merge_nodes()`.
+ * The sorted `WorkerNode` array is subsequently consumed by a node/k-mer merge helper.
  */
 static std::pair<std::vector<std::uint64_t>, std::size_t> sort_nodes(
     NoInitArray<WorkerNode>& nodes,
@@ -99,36 +109,29 @@ static std::pair<std::vector<std::uint64_t>, std::size_t> sort_nodes(
 }
 
 /**
- * @brief Materialize final nodes and k-mer metadata from sorted worker nodes.
+ * @brief Merge sorted worker nodes and their k-mers into the final arrays.
  *
- * Nodes with identical hashes are merged. In standard mode, each `WorkerNode::hash` is
- * repurposed to store its final k-mer output start. K-mer maps are produced in low-memory mode.
+ * Each `WorkerNode::hash` is repurposed to store its final k-mer output start.
+ * The underlying memory of `nodes` and `WorkerGraph::kmers` are released before returning.
  */
-static std::pair<NoInitArray<Node>, KmerMaps> merge_nodes(
+static std::pair<NoInitArray<Node>, NoInitArray<Kmer>> merge_standard(
     NoInitArray<WorkerNode>& nodes,
     std::size_t unique_count,
-    const std::vector<WorkerGraph>& graphs,
-    bool low_memory
+    std::vector<WorkerGraph>& graphs,
+    const std::vector<std::uint32_t>& worker_record_offsets,
+    ThreadPool& pool
 ) {
-    NoInitArray<Node> merged_nodes;
-    KmerMaps kmer_maps;
-    if (low_memory) {
-        kmer_maps = KmerMaps(graphs.size());
-    }
-
     const std::size_t n_nodes = nodes.size();
     if (n_nodes == 0) {
-        return {std::move(merged_nodes), std::move(kmer_maps)};
-    }
-
-    merged_nodes = NoInitArray<Node>(unique_count);
-    if (low_memory) {
-        for (std::size_t i = 0; i < graphs.size(); ++i) {
-            kmer_maps[i].reserve(graphs[i].n_nodes);
+        nodes.reset();
+        for (auto& graph : graphs) {
+            graph.kmers.reset();
         }
+        return {};
     }
 
     // Aggregate nodes and track final k-mer output starts
+    NoInitArray<Node> merged_nodes(unique_count);
     std::size_t n_kmers = 0;
     std::size_t write_i = 0;
     std::size_t i = 0;
@@ -138,36 +141,18 @@ static std::pair<NoInitArray<Node>, KmerMaps> merge_nodes(
 
         while (i < n_nodes && nodes[i].hash == hash) {
             const auto count = nodes[i].count();
-
-            if (low_memory) {
-                kmer_maps[nodes[i].worker_id()][hash] = n_kmers;
-            } else {
-                nodes[i].hash = n_kmers;
-            }
+            nodes[i].hash = n_kmers;
             n_kmers += count;
             ++i;
         }
         merged_nodes[write_i++] = Node{hash, start, 0};
     }
-    return {std::move(merged_nodes), std::move(kmer_maps)};
-}
-
-/**
- * @brief Merge worker-local k-mers using final output starts stored in `WorkerNode::hash`.
- */
-static NoInitArray<Kmer> merge_kmers(
-    const std::vector<WorkerGraph>& graphs,
-    const NoInitArray<WorkerNode>& nodes,
-    const std::vector<std::uint32_t>& worker_record_offsets,
-    ThreadPool& pool
-) {
-    std::size_t total_kmers = 0;
-    for (const auto& graph : graphs) {
-        total_kmers += graph.n_kmers;
+    if (write_i != unique_count) {
+        throw std::logic_error("Merged node count does not match unique node count");
     }
-    NoInitArray<Kmer> kmers(total_kmers);
 
-    pool.parallel_for(nodes.size(), [&](std::size_t start, std::size_t end, std::size_t) {
+    NoInitArray<Kmer> kmers(n_kmers);
+    pool.parallel_for(n_nodes, [&](std::size_t start, std::size_t end, std::size_t) {
         for (std::size_t i = start; i < end; ++i) {
             const auto& node = nodes[i];
             const auto worker_id = node.worker_id();
@@ -183,7 +168,91 @@ static NoInitArray<Kmer> merge_kmers(
             }
         }
     });
-    return kmers;
+
+    nodes.reset();
+    for (auto& graph : graphs) {
+        graph.kmers.reset();
+    }
+    return {std::move(merged_nodes), std::move(kmers)};
+}
+
+/**
+ * @brief Merge sorted worker nodes and build `KmerMaps` for low-memory recomputation.
+ *
+ * The underlying memory of `nodes` is released before returning.
+ */
+static std::pair<NoInitArray<Node>, KmerMaps> merge_low_memory(
+    NoInitArray<WorkerNode>& nodes,
+    std::size_t unique_count,
+    const std::vector<WorkerGraph>& graphs,
+    ThreadPool& pool
+) {
+    KmerMaps kmer_maps(graphs.size());
+
+    const std::size_t n_nodes = nodes.size();
+    if (n_nodes == 0) {
+        nodes.reset();
+        return {NoInitArray<Node>{}, std::move(kmer_maps)};
+    }
+
+    // KmerMap entries grouped by worker
+    NoInitArray<KmerMapEntry> map_entries(n_nodes);
+
+    // Each worker's contiguous range in map_entries
+    std::vector<std::size_t> worker_offsets(graphs.size() + 1);
+    for (std::size_t worker_id = 0; worker_id < graphs.size(); ++worker_id) {
+        worker_offsets[worker_id + 1] = worker_offsets[worker_id] + graphs[worker_id].n_nodes;
+    }
+    if (worker_offsets.back() != n_nodes) {
+        throw std::logic_error("Worker-node count does not match worker graphs");
+    }
+    // Write cursors for scattering entries into each worker's range
+    auto worker_cursors = worker_offsets;
+
+    // Aggregate nodes and track final k-mer output starts
+    NoInitArray<Node> merged_nodes(unique_count);
+    std::size_t n_kmers = 0;
+    std::size_t write_i = 0;
+    std::size_t i = 0;
+    while (i < n_nodes) {
+        const auto hash = nodes[i].hash;
+        const auto start = n_kmers;
+
+        while (i < n_nodes && nodes[i].hash == hash) {
+            const auto worker_id = nodes[i].worker_id();
+            const auto count = nodes[i].count();
+            map_entries[worker_cursors[worker_id]++] = KmerMapEntry{hash, n_kmers};
+            n_kmers += count;
+            ++i;
+        }
+        merged_nodes[write_i++] = Node{hash, start, 0};
+    }
+    if (write_i != unique_count) {
+        throw std::logic_error("Merged node count does not match unique node count");
+    }
+    for (std::size_t worker_id = 0; worker_id < graphs.size(); ++worker_id) {
+        if (worker_cursors[worker_id] != worker_offsets[worker_id + 1]) {
+            throw std::logic_error("Worker-node scatter did not fill worker range");
+        }
+    }
+    nodes.reset();
+
+    pool.parallel_for(graphs.size(), [&](std::size_t start, std::size_t end, std::size_t) {
+        for (std::size_t worker_id = start; worker_id < end; ++worker_id) {
+            KmerMap map;
+            map.reserve(graphs[worker_id].n_nodes);
+            for (
+                std::size_t i = worker_offsets[worker_id];
+                i < worker_offsets[worker_id + 1];
+                ++i
+            ) {
+                const auto& entry = map_entries[i];
+                map.emplace(entry.hash, entry.out_start);
+            }
+            kmer_maps[worker_id] = std::move(map);
+        }
+    });
+    return {std::move(merged_nodes), std::move(kmer_maps)};
 }
 
 /**
@@ -282,14 +351,22 @@ std::pair<Graph, KmerMaps> merge_worker_graphs(
         auto [node_hashes, unique_count] = sort_nodes(graph.nodes, pool);
         auto edges = finalize_edges(graph.edges, node_hashes, pool);
 
-        auto [nodes, kmer_maps] = merge_nodes(graph.nodes, unique_count, graphs, low_memory);
-
+        NoInitArray<Node> nodes;
         NoInitArray<Kmer> kmers;
-        if (!low_memory) {
-            kmers = merge_kmers(graphs, graph.nodes, std::vector<std::uint32_t>{0}, pool);
-            graph.kmers.reset();
+        KmerMaps kmer_maps;
+        if (low_memory) {
+            std::tie(nodes, kmer_maps) = merge_low_memory(
+                graph.nodes, unique_count, graphs, pool
+            );
+        } else {
+            std::tie(nodes, kmers) = merge_standard(
+                graph.nodes,
+                unique_count,
+                graphs,
+                std::vector<std::uint32_t>{0},
+                pool
+            );
         }
-        graph.nodes.reset();
 
         return {
             Graph{
@@ -334,16 +411,18 @@ std::pair<Graph, KmerMaps> merge_worker_graphs(
     auto worker_edges = concat_edges(graphs, pool);
     auto edges = finalize_edges(worker_edges, node_hashes, pool);
 
-    auto [nodes, kmer_maps] = merge_nodes(worker_nodes, unique_count, graphs, low_memory);
-
+    NoInitArray<Node> nodes;
     NoInitArray<Kmer> kmers;
-    if (!low_memory) {
-        kmers = merge_kmers(graphs, worker_nodes, worker_record_offsets, pool);
-        for (auto& graph : graphs) {
-            graph.kmers.reset();
-        }
+    KmerMaps kmer_maps;
+    if (low_memory) {
+        std::tie(nodes, kmer_maps) = merge_low_memory(
+            worker_nodes, unique_count, graphs, pool
+        );
+    } else {
+        std::tie(nodes, kmers) = merge_standard(
+            worker_nodes, unique_count, graphs, worker_record_offsets, pool
+        );
     }
-    worker_nodes.reset();
 
     std::vector<std::string> record_ids;
     record_ids.reserve(total_records);

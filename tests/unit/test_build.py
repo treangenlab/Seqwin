@@ -290,13 +290,14 @@ def test_low_memory_build_matches_standard(targets_dir, non_targets_dir) -> None
         non_targets_dir / 'non-target-2.fasta',
     ]
     standard = _build(
-        assembly_paths, kmerlen=7, windowsize=10, n_cpu=2, low_memory=False,
-    )
-    low_memory = _build(
-        assembly_paths, kmerlen=7, windowsize=10, n_cpu=2, low_memory=True,
+        assembly_paths, kmerlen=7, windowsize=10, n_cpu=1, low_memory=False,
     )
 
-    _assert_graph_outputs_equal(standard, low_memory)
+    for n_cpu in (1, 2, 99):
+        low_memory = _build(
+            assembly_paths, kmerlen=7, windowsize=10, n_cpu=n_cpu, low_memory=True,
+        )
+        _assert_graph_outputs_equal(standard, low_memory)
 
 
 def test_assembly_nodes_match_kmer_memberships(tmp_path: Path) -> None:
