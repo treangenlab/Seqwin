@@ -44,19 +44,17 @@ NoInitArray<T> concat(
     }
     NoInitArray<T> out(cursor);
 
-    pool.parallel_for(graphs.size(), [&](std::size_t start, std::size_t end, std::size_t) {
-        for (std::size_t i = start; i < end; ++i) {
-            auto& local = graphs[i].*member;
-            const auto local_size = local.size();
-            if (local_size != 0) {
-                std::copy(
-                    local.begin(),
-                    local.end(),
-                    out.begin() + static_cast<std::ptrdiff_t>(offsets[i])
-                );
-            }
-            local.reset();
+    pool.parallel_for(graphs.size(), [&](std::size_t i) {
+        auto& local = graphs[i].*member;
+        const auto local_size = local.size();
+        if (local_size != 0) {
+            std::copy(
+                local.begin(),
+                local.end(),
+                out.begin() + static_cast<std::ptrdiff_t>(offsets[i])
+            );
         }
+        local.reset();
     });
 
     return out;
@@ -152,20 +150,18 @@ static std::pair<NoInitArray<Node>, NoInitArray<Kmer>> merge_standard(
     }
 
     NoInitArray<Kmer> kmers(n_kmers);
-    pool.parallel_for(n_worker_nodes, [&](std::size_t start, std::size_t end, std::size_t) {
-        for (std::size_t i = start; i < end; ++i) {
-            const auto& node = worker_nodes[i];
-            const auto worker_id = node.worker_id();
-            const auto& local_kmers = graphs[worker_id].kmers;
-            const auto offset = worker_record_offsets[worker_id];
-            const auto out_start = static_cast<std::size_t>(node.hash);
-            const auto count = node.count();
+    pool.parallel_for(n_worker_nodes, [&](std::size_t i) {
+        const auto& node = worker_nodes[i];
+        const auto worker_id = node.worker_id();
+        const auto& local_kmers = graphs[worker_id].kmers;
+        const auto offset = worker_record_offsets[worker_id];
+        const auto out_start = static_cast<std::size_t>(node.hash);
+        const auto count = node.count();
 
-            for (std::size_t k = 0; k < count; ++k) {
-                auto kmer = local_kmers[node.start + k];
-                kmer.record_idx += offset;
-                kmers[out_start + k] = kmer;
-            }
+        for (std::size_t k = 0; k < count; ++k) {
+            auto kmer = local_kmers[node.start + k];
+            kmer.record_idx += offset;
+            kmers[out_start + k] = kmer;
         }
     });
 
@@ -237,20 +233,18 @@ static std::pair<NoInitArray<Node>, KmerMaps> merge_low_memory(
     }
     worker_nodes.reset();
 
-    pool.parallel_for(graphs.size(), [&](std::size_t start, std::size_t end, std::size_t) {
-        for (std::size_t worker_id = start; worker_id < end; ++worker_id) {
-            KmerMap map;
-            map.reserve(graphs[worker_id].n_nodes);
-            for (
-                std::size_t i = worker_offsets[worker_id];
-                i < worker_offsets[worker_id + 1];
-                ++i
-            ) {
-                const auto& entry = map_entries[i];
-                map.emplace(entry.hash, entry.out_start);
-            }
-            kmer_maps[worker_id] = std::move(map);
+    pool.parallel_for(graphs.size(), [&](std::size_t worker_id) {
+        KmerMap map;
+        map.reserve(graphs[worker_id].n_nodes);
+        for (
+            std::size_t i = worker_offsets[worker_id];
+            i < worker_offsets[worker_id + 1];
+            ++i
+        ) {
+            const auto& entry = map_entries[i];
+            map.emplace(entry.hash, entry.out_start);
         }
+        kmer_maps[worker_id] = std::move(map);
     });
     return {std::move(nodes), std::move(kmer_maps)};
 }
@@ -276,7 +270,9 @@ static NoInitArray<Edge> finalize_edges(
 
     // Convert the second endpoints to node indices
     lsd_radix_sort(worker_edges, &WorkerEdge::second, pool);
-    pool.parallel_for(n_worker_edges, [&](std::size_t start, std::size_t end, std::size_t) {
+    pool.parallel_for_chunks(n_worker_edges, [&](
+        std::size_t start, std::size_t end, std::size_t
+    ) {
         if (start == end) {
             return;
         }
@@ -321,14 +317,12 @@ static NoInitArray<Edge> finalize_edges(
     std::vector<std::uint64_t>().swap(node_hashes);
 
     NoInitArray<Edge> edges(write_i);
-    pool.parallel_for(write_i, [&](std::size_t start, std::size_t end, std::size_t) {
-        for (std::size_t i = start; i < end; ++i) {
-            edges[i] = Edge{
-                static_cast<std::size_t>(worker_edges[i].first),
-                static_cast<std::size_t>(worker_edges[i].second),
-                worker_edges[i].weight
-            };
-        }
+    pool.parallel_for(write_i, [&](std::size_t i) {
+        edges[i] = Edge{
+            static_cast<std::size_t>(worker_edges[i].first),
+            static_cast<std::size_t>(worker_edges[i].second),
+            worker_edges[i].weight
+        };
     });
     worker_edges.reset();
 

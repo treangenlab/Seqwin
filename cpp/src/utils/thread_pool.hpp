@@ -8,13 +8,17 @@
 #include <memory>
 #include <mutex>
 #include <thread>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
 namespace seqwin::internal {
 
 /**
- * @brief Simple fixed-size worker pool for parallel range processing.
+ * @brief Simple fixed-size worker pool for parallel item and range processing.
+ *
+ * Calls that submit work to the same pool must not overlap, and callbacks must
+ * not recursively submit work to the same pool.
  */
 class ThreadPool {
 public:
@@ -23,8 +27,8 @@ public:
     {
         workers_.reserve(n_workers_);
         for (std::size_t i = 0; i < n_workers_; ++i) {
-            workers_.emplace_back([this, i]() {
-                worker_loop(i);
+            workers_.emplace_back([this]() {
+                worker_loop();
             });
         }
     }
@@ -49,24 +53,80 @@ public:
     std::size_t size() const noexcept { return n_workers_; }
 
     /**
+     * @brief Run a function for every item in `[0, n_items)`.
+     *
+     * Work is scheduled in contiguous chunks, but the callable is invoked for each
+     * item and receives either `(item_index)` or `(item_index, chunk_id)`. The
+     * `chunk_id` identifies the logical partition assigned by the scheduler, not
+     * necessarily the physical thread executing it. Multiple item callbacks can
+     * therefore share the same `chunk_id`. Chunk IDs are contiguous from zero and
+     * always less than `size()`.
+     *
+     * Any exception thrown while processing an item is captured and rethrown on
+     * the calling thread.
+     *
+     * @tparam Fn Callable type.
+     * @param n_items Number of items in the range.
+     * @param fn Function invoked once for each item.
+     */
+    template <typename Fn>
+    void parallel_for(std::size_t n_items, Fn&& fn)
+    {
+        using FnType = std::decay_t<Fn>;
+        static_assert(
+            std::is_invocable_v<FnType&, std::size_t> ||
+            std::is_invocable_v<FnType&, std::size_t, std::size_t>,
+            "parallel_for callback must accept (item_index) or (item_index, chunk_id)"
+        );
+        if (n_items == 0) {
+            return;
+        }
+
+        auto item_fn = std::make_shared<FnType>(std::forward<Fn>(fn));
+        parallel_for_chunks(n_items, [item_fn](
+            std::size_t start, std::size_t end, std::size_t chunk_id
+        ) {
+            for (std::size_t i = start; i < end; ++i) {
+                if constexpr (std::is_invocable_v<FnType&, std::size_t, std::size_t>) {
+                    std::invoke(*item_fn, i, chunk_id);
+                } else {
+                    std::invoke(*item_fn, i);
+                }
+            }
+        });
+    }
+
+    /**
      * @brief Run a function over contiguous chunks of `[0, n_items)`.
      *
-     * The callable receives `(start, end, worker_id)`. Any exception thrown by a
-     * worker is captured and rethrown on the calling thread.
+     * The callable receives `(start, end, chunk_id)`, where `[start, end)` is a
+     * non-empty contiguous partition. The `chunk_id` identifies that logical
+     * scheduler partition and is not guaranteed to identify the physical thread
+     * executing it. Chunk IDs are contiguous from zero and always less than
+     * `size()`.
+     *
+     * Any exception thrown while processing a chunk is captured and rethrown on
+     * the calling thread.
      *
      * @tparam Fn Callable type.
      * @param n_items Number of items in the range.
      * @param fn Function invoked once for each non-empty chunk.
      */
     template <typename Fn>
-    void parallel_for(std::size_t n_items, Fn&& fn)
+    void parallel_for_chunks(std::size_t n_items, Fn&& fn)
     {
+        using FnType = std::decay_t<Fn>;
+        static_assert(
+            std::is_invocable_v<FnType&, std::size_t, std::size_t, std::size_t>,
+            "parallel_for_chunks callback must accept (start, end, chunk_id)"
+        );
         if (n_items == 0) {
             return;
         }
 
-        const std::size_t active_workers = std::min(n_workers_, n_items);
-        const std::size_t chunk_size = (n_items + active_workers - 1) / active_workers;
+        const std::size_t n_chunks = std::min(n_workers_, n_items);
+        const std::size_t base = n_items / n_chunks;
+        const std::size_t rem = n_items % n_chunks;
 
         auto shared_fn = std::make_shared<std::function<void(std::size_t, std::size_t, std::size_t)>>(std::forward<Fn>(fn));
 
@@ -78,14 +138,11 @@ public:
             current_epoch_ = epoch_;
             pending_tasks_ = 0;
 
-            for (std::size_t worker_id = 0; worker_id < active_workers; ++worker_id) {
-                const std::size_t start = worker_id * chunk_size;
-                if (start >= n_items) {
-                    break;
-                }
-                const std::size_t end = std::min(start + chunk_size, n_items);
+            for (std::size_t chunk_id = 0; chunk_id < n_chunks; ++chunk_id) {
+                const std::size_t start = chunk_id * base + std::min(chunk_id, rem);
+                const std::size_t end = start + base + (chunk_id < rem ? 1 : 0);
                 ++pending_tasks_;
-                tasks_.push_back(Task{start, end, worker_id, shared_fn, current_epoch_});
+                tasks_.push_back(Task{start, end, chunk_id, shared_fn, current_epoch_});
             }
             cv_job_.notify_all();
         }
@@ -101,14 +158,13 @@ private:
     struct Task {
         std::size_t start;
         std::size_t end;
-        std::size_t worker_id;
+        std::size_t chunk_id;
         std::shared_ptr<std::function<void(std::size_t, std::size_t, std::size_t)>> fn;
         std::size_t epoch;
     };
 
-    void worker_loop(std::size_t worker_index)
+    void worker_loop()
     {
-        (void)worker_index;
         while (true) {
             Task task;
             {
@@ -122,7 +178,7 @@ private:
             }
 
             try {
-                (*task.fn)(task.start, task.end, task.worker_id);
+                (*task.fn)(task.start, task.end, task.chunk_id);
             } catch (...) {
                 std::lock_guard<std::mutex> lock(mutex_);
                 if (!current_exception_) {
