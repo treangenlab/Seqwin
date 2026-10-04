@@ -82,48 +82,48 @@ NoInitArray<WorkerEdge> concat_edges(
  * The sorted `WorkerNode` array is subsequently consumed by a node/k-mer merge helper.
  */
 static std::pair<std::vector<std::uint64_t>, std::size_t> sort_nodes(
-    NoInitArray<WorkerNode>& nodes,
+    NoInitArray<WorkerNode>& worker_nodes,
     ThreadPool& pool
 ) {
-    const std::size_t n_nodes = nodes.size();
-    if (n_nodes == 0) {
+    const std::size_t n_worker_nodes = worker_nodes.size();
+    if (n_worker_nodes == 0) {
         return {};
     }
 
-    lsd_radix_sort(nodes, &WorkerNode::hash, pool);
+    lsd_radix_sort(worker_nodes, &WorkerNode::hash, pool);
 
     std::vector<std::uint64_t> node_hashes;
-    node_hashes.reserve(n_nodes);
+    node_hashes.reserve(n_worker_nodes);
     std::size_t i = 0;
-    while (i < n_nodes) {
-        const auto hash = nodes[i].hash;
+    while (i < n_worker_nodes) {
+        const auto hash = worker_nodes[i].hash;
         node_hashes.push_back(hash);
-        while (i < n_nodes && nodes[i].hash == hash) {
+        while (i < n_worker_nodes && worker_nodes[i].hash == hash) {
             ++i;
         }
     }
     node_hashes.shrink_to_fit();
 
-    const auto unique_count = node_hashes.size();
-    return {std::move(node_hashes), unique_count};
+    const auto n_nodes = node_hashes.size();
+    return {std::move(node_hashes), n_nodes};
 }
 
 /**
  * @brief Merge sorted worker nodes and their k-mers into the final arrays.
  *
  * Each `WorkerNode::hash` is repurposed to store its final k-mer output start.
- * The underlying memory of `nodes` and `WorkerGraph::kmers` are released before returning.
+ * The underlying memory of `worker_nodes` and `WorkerGraph::kmers` are released before returning.
  */
 static std::pair<NoInitArray<Node>, NoInitArray<Kmer>> merge_standard(
-    NoInitArray<WorkerNode>& nodes,
-    std::size_t unique_count,
+    NoInitArray<WorkerNode>& worker_nodes,
+    std::size_t n_nodes,
     std::vector<WorkerGraph>& graphs,
     const std::vector<std::uint32_t>& worker_record_offsets,
     ThreadPool& pool
 ) {
-    const std::size_t n_nodes = nodes.size();
-    if (n_nodes == 0) {
-        nodes.reset();
+    const std::size_t n_worker_nodes = worker_nodes.size();
+    if (n_worker_nodes == 0) {
+        worker_nodes.reset();
         for (auto& graph : graphs) {
             graph.kmers.reset();
         }
@@ -131,30 +131,30 @@ static std::pair<NoInitArray<Node>, NoInitArray<Kmer>> merge_standard(
     }
 
     // Aggregate nodes and track final k-mer output starts
-    NoInitArray<Node> merged_nodes(unique_count);
+    NoInitArray<Node> nodes(n_nodes);
     std::size_t n_kmers = 0;
     std::size_t write_i = 0;
     std::size_t i = 0;
-    while (i < n_nodes) {
-        const auto hash = nodes[i].hash;
+    while (i < n_worker_nodes) {
+        const auto hash = worker_nodes[i].hash;
         const auto start = n_kmers;
 
-        while (i < n_nodes && nodes[i].hash == hash) {
-            const auto count = nodes[i].count();
-            nodes[i].hash = n_kmers;
+        while (i < n_worker_nodes && worker_nodes[i].hash == hash) {
+            const auto count = worker_nodes[i].count();
+            worker_nodes[i].hash = n_kmers;
             n_kmers += count;
             ++i;
         }
-        merged_nodes[write_i++] = Node{hash, start, 0};
+        nodes[write_i++] = Node{hash, start, 0};
     }
-    if (write_i != unique_count) {
+    if (write_i != n_nodes) {
         throw std::logic_error("Merged node count does not match unique node count");
     }
 
     NoInitArray<Kmer> kmers(n_kmers);
-    pool.parallel_for(n_nodes, [&](std::size_t start, std::size_t end, std::size_t) {
+    pool.parallel_for(n_worker_nodes, [&](std::size_t start, std::size_t end, std::size_t) {
         for (std::size_t i = start; i < end; ++i) {
-            const auto& node = nodes[i];
+            const auto& node = worker_nodes[i];
             const auto worker_id = node.worker_id();
             const auto& local_kmers = graphs[worker_id].kmers;
             const auto offset = worker_record_offsets[worker_id];
@@ -169,65 +169,65 @@ static std::pair<NoInitArray<Node>, NoInitArray<Kmer>> merge_standard(
         }
     });
 
-    nodes.reset();
+    worker_nodes.reset();
     for (auto& graph : graphs) {
         graph.kmers.reset();
     }
-    return {std::move(merged_nodes), std::move(kmers)};
+    return {std::move(nodes), std::move(kmers)};
 }
 
 /**
  * @brief Merge sorted worker nodes and build `KmerMaps` for low-memory recomputation.
  *
- * The underlying memory of `nodes` is released before returning.
+ * The underlying memory of `worker_nodes` is released before returning.
  */
 static std::pair<NoInitArray<Node>, KmerMaps> merge_low_memory(
-    NoInitArray<WorkerNode>& nodes,
-    std::size_t unique_count,
+    NoInitArray<WorkerNode>& worker_nodes,
+    std::size_t n_nodes,
     const std::vector<WorkerGraph>& graphs,
     ThreadPool& pool
 ) {
     KmerMaps kmer_maps(graphs.size());
 
-    const std::size_t n_nodes = nodes.size();
-    if (n_nodes == 0) {
-        nodes.reset();
+    const std::size_t n_worker_nodes = worker_nodes.size();
+    if (n_worker_nodes == 0) {
+        worker_nodes.reset();
         return {NoInitArray<Node>{}, std::move(kmer_maps)};
     }
 
     // KmerMap entries grouped by worker
-    NoInitArray<KmerMapEntry> map_entries(n_nodes);
+    NoInitArray<KmerMapEntry> map_entries(n_worker_nodes);
 
     // Each worker's contiguous range in map_entries
     std::vector<std::size_t> worker_offsets(graphs.size() + 1);
     for (std::size_t worker_id = 0; worker_id < graphs.size(); ++worker_id) {
         worker_offsets[worker_id + 1] = worker_offsets[worker_id] + graphs[worker_id].n_nodes;
     }
-    if (worker_offsets.back() != n_nodes) {
+    if (worker_offsets.back() != n_worker_nodes) {
         throw std::logic_error("Worker-node count does not match worker graphs");
     }
     // Write cursors for scattering entries into each worker's range
     auto worker_cursors = worker_offsets;
 
     // Aggregate nodes and track final k-mer output starts
-    NoInitArray<Node> merged_nodes(unique_count);
+    NoInitArray<Node> nodes(n_nodes);
     std::size_t n_kmers = 0;
     std::size_t write_i = 0;
     std::size_t i = 0;
-    while (i < n_nodes) {
-        const auto hash = nodes[i].hash;
+    while (i < n_worker_nodes) {
+        const auto hash = worker_nodes[i].hash;
         const auto start = n_kmers;
 
-        while (i < n_nodes && nodes[i].hash == hash) {
-            const auto worker_id = nodes[i].worker_id();
-            const auto count = nodes[i].count();
+        while (i < n_worker_nodes && worker_nodes[i].hash == hash) {
+            const auto worker_id = worker_nodes[i].worker_id();
+            const auto count = worker_nodes[i].count();
             map_entries[worker_cursors[worker_id]++] = KmerMapEntry{hash, n_kmers};
             n_kmers += count;
             ++i;
         }
-        merged_nodes[write_i++] = Node{hash, start, 0};
+        nodes[write_i++] = Node{hash, start, 0};
     }
-    if (write_i != unique_count) {
+    if (write_i != n_nodes) {
         throw std::logic_error("Merged node count does not match unique node count");
     }
     for (std::size_t worker_id = 0; worker_id < graphs.size(); ++worker_id) {
@@ -235,7 +235,7 @@ static std::pair<NoInitArray<Node>, KmerMaps> merge_low_memory(
             throw std::logic_error("Worker-node scatter did not fill worker range");
         }
     }
-    nodes.reset();
+    worker_nodes.reset();
 
     pool.parallel_for(graphs.size(), [&](std::size_t start, std::size_t end, std::size_t) {
         for (std::size_t worker_id = start; worker_id < end; ++worker_id) {
@@ -252,54 +252,54 @@ static std::pair<NoInitArray<Node>, KmerMaps> merge_low_memory(
             kmer_maps[worker_id] = std::move(map);
         }
     });
-    return {std::move(merged_nodes), std::move(kmer_maps)};
+    return {std::move(nodes), std::move(kmer_maps)};
 }
 
 /**
  * @brief Convert worker-local edge endpoints from hashes to node indices, and merge duplicates.
  *
  * `node_hashes` must contain the unique node hashes in ascending order (the final node order).
- * The underlying memory of `edges` and `node_hashes` is released before returning.
+ * The underlying memory of `worker_edges` and `node_hashes` is released before returning.
  */
 static NoInitArray<Edge> finalize_edges(
-    NoInitArray<WorkerEdge>& edges,
+    NoInitArray<WorkerEdge>& worker_edges,
     std::vector<std::uint64_t>& node_hashes,
     ThreadPool& pool
 ) {
-    const std::size_t n_edges = edges.size();
+    const std::size_t n_worker_edges = worker_edges.size();
     const std::size_t n_nodes = node_hashes.size();
-    if (n_edges == 0 || n_nodes == 0) {
-        edges.reset();
+    if (n_worker_edges == 0 || n_nodes == 0) {
+        worker_edges.reset();
         std::vector<std::uint64_t>().swap(node_hashes);
         return {};
     }
 
     // Convert the second endpoints to node indices
-    lsd_radix_sort(edges, &WorkerEdge::second, pool);
-    pool.parallel_for(n_edges, [&](std::size_t start, std::size_t end, std::size_t) {
+    lsd_radix_sort(worker_edges, &WorkerEdge::second, pool);
+    pool.parallel_for(n_worker_edges, [&](std::size_t start, std::size_t end, std::size_t) {
         if (start == end) {
             return;
         }
         auto node_start = std::lower_bound(
-            node_hashes.begin(), node_hashes.end(), edges[start].second
+            node_hashes.begin(), node_hashes.end(), worker_edges[start].second
         );
         std::size_t node_i = static_cast<std::size_t>(node_start - node_hashes.begin());
         for (std::size_t i = start; i < end; ++i) {
-            while (node_i < n_nodes && node_hashes[node_i] < edges[i].second) {
+            while (node_i < n_nodes && node_hashes[node_i] < worker_edges[i].second) {
                 ++node_i;
             }
-            if (node_i == n_nodes || node_hashes[node_i] != edges[i].second) {
+            if (node_i == n_nodes || node_hashes[node_i] != worker_edges[i].second) {
                 throw std::logic_error("Edge endpoint does not correspond to a node");
             }
-            edges[i].second = node_i;
+            worker_edges[i].second = node_i;
         }
     });
 
     // Convert the first endpoints to node indices, and aggregate weights
-    lsd_radix_sort(edges, &WorkerEdge::first, pool);
+    lsd_radix_sort(worker_edges, &WorkerEdge::first, pool);
     std::size_t node_i = 0;
-    std::size_t write_i = 0;
-    for (auto& edge : edges) {
+    std::size_t n_edges = 0;
+    for (auto& edge : worker_edges) {
         while (node_i < n_nodes && node_hashes[node_i] < edge.first) {
             ++node_i;
         }
@@ -309,32 +309,32 @@ static NoInitArray<Edge> finalize_edges(
 
         const WorkerEdge converted{node_i, edge.second, edge.weight};
         if (
-            write_i != 0 &&
-            edges[write_i - 1].first == converted.first &&
-            edges[write_i - 1].second == converted.second
+            n_edges != 0 &&
+            worker_edges[n_edges - 1].first == converted.first &&
+            worker_edges[n_edges - 1].second == converted.second
         ) {
-            edges[write_i - 1].weight += converted.weight;
+            worker_edges[n_edges - 1].weight += converted.weight;
         } else {
-            edges[write_i++] = converted;
+            worker_edges[n_edges++] = converted;
         }
     }
     std::vector<std::uint64_t>().swap(node_hashes);
 
-    NoInitArray<Edge> out(write_i);
-    pool.parallel_for(write_i, [&](std::size_t start, std::size_t end, std::size_t) {
+    NoInitArray<Edge> edges(n_edges);
+    pool.parallel_for(n_edges, [&](std::size_t start, std::size_t end, std::size_t) {
         for (std::size_t i = start; i < end; ++i) {
-            out[i] = Edge{
-                static_cast<std::size_t>(edges[i].first),
-                static_cast<std::size_t>(edges[i].second),
-                edges[i].weight
+            edges[i] = Edge{
+                static_cast<std::size_t>(worker_edges[i].first),
+                static_cast<std::size_t>(worker_edges[i].second),
+                worker_edges[i].weight
             };
         }
     });
-    edges.reset();
+    worker_edges.reset();
 
     // Sort by descending weight
-    lsd_radix_sort(out, &Edge::weight, false, pool);
-    return out;
+    lsd_radix_sort(edges, &Edge::weight, false, pool);
+    return edges;
 }
 
 } // namespace
@@ -348,7 +348,7 @@ std::pair<Graph, KmerMaps> merge_worker_graphs(
     if (graphs.size() == 1) {
         auto& graph = graphs[0];
 
-        auto [node_hashes, unique_count] = sort_nodes(graph.nodes, pool);
+        auto [node_hashes, n_nodes] = sort_nodes(graph.nodes, pool);
         auto edges = finalize_edges(graph.edges, node_hashes, pool);
 
         NoInitArray<Node> nodes;
@@ -356,12 +356,12 @@ std::pair<Graph, KmerMaps> merge_worker_graphs(
         KmerMaps kmer_maps;
         if (low_memory) {
             std::tie(nodes, kmer_maps) = merge_low_memory(
-                graph.nodes, unique_count, graphs, pool
+                graph.nodes, n_nodes, graphs, pool
             );
         } else {
             std::tie(nodes, kmers) = merge_standard(
                 graph.nodes,
-                unique_count,
+                n_nodes,
                 graphs,
                 std::vector<std::uint32_t>{0},
                 pool
@@ -407,7 +407,7 @@ std::pair<Graph, KmerMaps> merge_worker_graphs(
     }
 
     auto worker_nodes = concat_nodes(graphs, pool);
-    auto [node_hashes, unique_count] = sort_nodes(worker_nodes, pool);
+    auto [node_hashes, n_nodes] = sort_nodes(worker_nodes, pool);
     auto worker_edges = concat_edges(graphs, pool);
     auto edges = finalize_edges(worker_edges, node_hashes, pool);
 
@@ -416,11 +416,11 @@ std::pair<Graph, KmerMaps> merge_worker_graphs(
     KmerMaps kmer_maps;
     if (low_memory) {
         std::tie(nodes, kmer_maps) = merge_low_memory(
-            worker_nodes, unique_count, graphs, pool
+            worker_nodes, n_nodes, graphs, pool
         );
     } else {
         std::tie(nodes, kmers) = merge_standard(
-            worker_nodes, unique_count, graphs, worker_record_offsets, pool
+            worker_nodes, n_nodes, graphs, worker_record_offsets, pool
         );
     }
 
