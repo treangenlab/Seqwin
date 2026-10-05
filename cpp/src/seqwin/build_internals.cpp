@@ -18,7 +18,7 @@ namespace seqwin::internal {
 namespace {
 
 /**
- * @brief Final k-mer output position for one `WorkerNode`.
+ * @brief Final k-mer output position for one worker-local node.
  * Used in low-memory mode for constructing `KmerMaps` in parallel.
  */
 struct KmerMapEntry {
@@ -67,6 +67,13 @@ NoInitArray<WorkerNode> concat_nodes(
     return concat<WorkerNode>(graphs, &WorkerGraph::nodes, pool);
 }
 
+NoInitArray<WorkerNodeLM> concat_nodes_lm(
+    std::vector<WorkerGraph>& graphs,
+    ThreadPool& pool
+) {
+    return concat<WorkerNodeLM>(graphs, &WorkerGraph::nodes_lm, pool);
+}
+
 NoInitArray<WorkerEdge> concat_edges(
     std::vector<WorkerGraph>& graphs,
     ThreadPool& pool
@@ -77,10 +84,11 @@ NoInitArray<WorkerEdge> concat_edges(
 /**
  * @brief Sort worker-local nodes by hash and collect unique hashes in ascending order.
  *
- * The sorted `WorkerNode` array is subsequently consumed by a node/k-mer merge helper.
+ * The sorted worker-node array is subsequently consumed by a node/k-mer merge helper.
  */
-static std::pair<std::vector<std::uint64_t>, std::size_t> sort_nodes(
-    NoInitArray<WorkerNode>& worker_nodes,
+template <typename WorkerNodeT>
+static std::vector<std::uint64_t> sort_nodes(
+    NoInitArray<WorkerNodeT>& worker_nodes,
     ThreadPool& pool
 ) {
     const std::size_t n_worker_nodes = worker_nodes.size();
@@ -88,7 +96,13 @@ static std::pair<std::vector<std::uint64_t>, std::size_t> sort_nodes(
         return {};
     }
 
-    lsd_radix_sort(worker_nodes, &WorkerNode::hash, pool);
+    lsd_radix_sort(
+        worker_nodes,
+        [](const WorkerNodeT& node) {
+            return node.hash;
+        },
+        pool
+    );
 
     std::vector<std::uint64_t> node_hashes;
     node_hashes.reserve(n_worker_nodes);
@@ -101,9 +115,7 @@ static std::pair<std::vector<std::uint64_t>, std::size_t> sort_nodes(
         }
     }
     node_hashes.shrink_to_fit();
-
-    const auto n_nodes = node_hashes.size();
-    return {std::move(node_hashes), n_nodes};
+    return node_hashes;
 }
 
 /**
@@ -178,7 +190,7 @@ static std::pair<NoInitArray<Node>, NoInitArray<Kmer>> merge_standard(
  * The memory of `worker_nodes` is released before returning.
  */
 static std::pair<NoInitArray<Node>, KmerMaps> merge_low_memory(
-    NoInitArray<WorkerNode>& worker_nodes,
+    NoInitArray<WorkerNodeLM>& worker_nodes,
     std::size_t n_nodes,
     const std::vector<WorkerGraph>& graphs,
     ThreadPool& pool
@@ -342,7 +354,13 @@ std::pair<Graph, KmerMaps> merge_worker_graphs(
     if (graphs.size() == 1) {
         auto& worker_graph = graphs[0];
 
-        auto [node_hashes, n_nodes] = sort_nodes(worker_graph.nodes, pool);
+        std::vector<std::uint64_t> node_hashes;
+        if (low_memory) {
+            node_hashes = sort_nodes(worker_graph.nodes_lm, pool);
+        } else {
+            node_hashes = sort_nodes(worker_graph.nodes, pool);
+        }
+        const auto n_nodes = node_hashes.size();
         auto edges = finalize_edges(worker_graph.edges, node_hashes, pool);
 
         NoInitArray<Node> nodes;
@@ -350,7 +368,7 @@ std::pair<Graph, KmerMaps> merge_worker_graphs(
         KmerMaps kmer_maps;
         if (low_memory) {
             std::tie(nodes, kmer_maps) = merge_low_memory(
-                worker_graph.nodes, n_nodes, graphs, pool
+                worker_graph.nodes_lm, n_nodes, graphs, pool
             );
         } else {
             std::tie(nodes, kmers) = merge_standard(
@@ -399,8 +417,17 @@ std::pair<Graph, KmerMaps> merge_worker_graphs(
         std::vector<std::uint32_t>().swap(local_offsets);
     }
 
-    auto worker_nodes = concat_nodes(graphs, pool);
-    auto [node_hashes, n_nodes] = sort_nodes(worker_nodes, pool);
+    NoInitArray<WorkerNode> worker_nodes;
+    NoInitArray<WorkerNodeLM> worker_nodes_lm;
+    std::vector<std::uint64_t> node_hashes;
+    if (low_memory) {
+        worker_nodes_lm = concat_nodes_lm(graphs, pool);
+        node_hashes = sort_nodes(worker_nodes_lm, pool);
+    } else {
+        worker_nodes = concat_nodes(graphs, pool);
+        node_hashes = sort_nodes(worker_nodes, pool);
+    }
+    const auto n_nodes = node_hashes.size();
     auto worker_edges = concat_edges(graphs, pool);
     auto edges = finalize_edges(worker_edges, node_hashes, pool);
 
@@ -409,7 +436,7 @@ std::pair<Graph, KmerMaps> merge_worker_graphs(
     KmerMaps kmer_maps;
     if (low_memory) {
         std::tie(nodes, kmer_maps) = merge_low_memory(
-            worker_nodes, n_nodes, graphs, pool
+            worker_nodes_lm, n_nodes, graphs, pool
         );
     } else {
         std::tie(nodes, kmers) = merge_standard(

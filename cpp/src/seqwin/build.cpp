@@ -64,6 +64,7 @@ struct RawKmer {
     Kmer kmer;
 };
 
+/** Maps nodes to their k-mer occurrence counts. */
 using NodeMap = ankerl::unordered_dense::segmented_map<
     std::uint64_t,
     std::size_t,
@@ -188,14 +189,17 @@ WorkerGraph build_worker(
     EdgeMap{}.swap(edge_map);
 
     graph.n_nodes = node_map.size();
-    graph.nodes = NoInitArray<WorkerNode>(graph.n_nodes);
     std::size_t node_i = 0;
-    if (!low_memory) {
-        // Build WorkerGraph.kmers (grouped by hash)
+    if (low_memory) {
+        graph.nodes_lm = NoInitArray<WorkerNodeLM>(graph.n_nodes);
+        for (const auto& [hash, count] : node_map) {
+            graph.nodes_lm[node_i++] = WorkerNodeLM{hash, count, worker_id};
+        }
+    } else {
+        graph.nodes = NoInitArray<WorkerNode>(graph.n_nodes);
         graph.kmers = NoInitArray<Kmer>(graph.n_kmers);
 
-        // node_map values are counts while assigning k-mer ranges,
-        // then cursors while scattering raw k-mers into those ranges
+        // node_map values are repurposed as output cursors into graph.kmers
         std::size_t cursor = 0;
         for (auto& [hash, node_val] : node_map) {
             const std::size_t count = node_val;
@@ -219,11 +223,6 @@ WorkerGraph build_worker(
             graph.kmers[node_it->second++] = rk.kmer;
         }
         std::vector<RawKmer>().swap(raw_kmers);
-    } else {
-        // In low-memory mode node_map values remain counts
-        for (const auto& [hash, count] : node_map) {
-            graph.nodes[node_i++] = WorkerNode{hash, 0, count, worker_id};
-        }
     }
     NodeMap{}.swap(node_map);
 
@@ -413,8 +412,8 @@ Graph build(
         std::max<std::size_t>(1, n_cpu),
         std::max<std::size_t>(1, n_assemblies)
     );
-    if (n_workers > internal::WorkerNode::max_workers) {
-        throw std::runtime_error("Number of workers exceeds WorkerNode range");
+    if (n_workers > internal::WorkerNodeLM::max_workers) {
+        throw std::runtime_error("Number of workers exceeds worker-node range");
     }
 
     internal::ThreadPool pool(n_workers);
