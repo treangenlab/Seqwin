@@ -1,6 +1,7 @@
 #include "seqwin/build_internals.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
@@ -18,12 +19,40 @@ namespace seqwin::internal {
 namespace {
 
 /**
- * @brief Final k-mer output position for one worker-local node.
- * Used in low-memory mode for constructing `KmerMaps` in parallel.
+ * @brief Metadata for one contiguous chunk of sorted worker nodes.
  */
-struct KmerMapEntry {
-    std::uint64_t hash;
-    std::size_t out_start;
+struct MergeChunk {
+    /**
+     * Start of the chunk in the sorted worker nodes.
+     * Might be in the middle of a hash run.
+     */
+    std::size_t start = 0;
+    /** End of the chunk in the sorted worker nodes. */
+    std::size_t end = 0;
+    /** Output offset into `Graph::nodes`. */
+    std::size_t node_start = 0;
+    /** Number of final nodes whose hash runs start in this chunk. */
+    std::size_t node_count = 0;
+    /** Output offset into `Graph::kmers`. */
+    std::size_t kmer_start = 0;
+    /** Number of k-mers represented by the nodes in this chunk. */
+    std::size_t kmer_count = 0;
+    /** True if the first worker node starts a new hash run. */
+    bool first_is_new_node = false;
+};
+
+/**
+ * @brief Plan for parallel merging of sorted worker nodes.
+ */
+struct MergePlan {
+    /** Unique hashes in ascending order (final node order). */
+    NoInitArray<std::uint64_t> node_hashes;
+    /** Merge metadata for each chunk. */
+    std::vector<MergeChunk> chunks;
+    /** Size of `Graph::nodes`. */
+    std::size_t n_nodes = 0;
+    /** Size of `Graph::kmers`. */
+    std::size_t n_kmers = 0;
 };
 
 template <typename T, typename MemberPtr>
@@ -82,12 +111,10 @@ NoInitArray<WorkerEdge> concat_edges(
 }
 
 /**
- * @brief Sort worker-local nodes by hash and collect unique hashes in ascending order.
- *
- * The sorted worker-node array is subsequently consumed by a node/k-mer merge helper.
+ * @brief Sort worker-local nodes and prepare `MergePlan` for parallel merging.
  */
 template <typename WorkerNodeT>
-static std::vector<std::uint64_t> sort_nodes(
+static MergePlan prepare_merge(
     NoInitArray<WorkerNodeT>& worker_nodes,
     ThreadPool& pool
 ) {
@@ -104,29 +131,115 @@ static std::vector<std::uint64_t> sort_nodes(
         pool
     );
 
-    std::vector<std::uint64_t> node_hashes;
-    node_hashes.reserve(n_worker_nodes);
-    std::size_t i = 0;
-    while (i < n_worker_nodes) {
-        const auto hash = worker_nodes[i].hash;
-        node_hashes.push_back(hash);
-        while (i < n_worker_nodes && worker_nodes[i].hash == hash) {
-            ++i;
+    const auto n_chunks = std::min(pool.size(), n_worker_nodes);
+    MergePlan plan;
+    plan.chunks.resize(n_chunks);
+    // Hashes whose runs start in each chunk
+    std::vector<std::vector<std::uint64_t>> chunk_hashes(n_chunks);
+
+    pool.parallel_for_chunks(n_worker_nodes, [&](
+        std::size_t start, std::size_t end, std::size_t chunk_id
+    ) {
+        MergeChunk chunk;
+        chunk.start = start;
+        chunk.end = end;
+        // A chunk may start in the middle of a hash run
+        // Compare its first hash with the preceding global worker node
+        chunk.first_is_new_node =
+            start == 0 ||
+            worker_nodes[start - 1].hash != worker_nodes[start].hash;
+        std::vector<std::uint64_t> hashes;
+        hashes.reserve(end - start);
+
+        std::uint64_t previous_hash = 0;
+        for (std::size_t i = start; i < end; ++i) {
+            const auto& worker_node = worker_nodes[i];
+            const auto hash = worker_node.hash;
+
+            const bool is_new_node = i == start
+                ? chunk.first_is_new_node
+                : hash != previous_hash;
+            if (is_new_node) {
+                ++chunk.node_count;
+                hashes.push_back(hash);
+            }
+            chunk.kmer_count += worker_node.count();
+            previous_hash = hash;
         }
+        plan.chunks[chunk_id] = chunk;
+        chunk_hashes[chunk_id] = std::move(hashes);
+    });
+
+    // Prefixing k-mer counts keeps kmer_start correct even when a hash run crosses chunks
+    for (auto& chunk : plan.chunks) {
+        chunk.node_start = plan.n_nodes;
+        chunk.kmer_start = plan.n_kmers;
+        plan.n_nodes += chunk.node_count;
+        plan.n_kmers += chunk.kmer_count;
     }
-    node_hashes.shrink_to_fit();
-    return node_hashes;
+
+    plan.node_hashes = NoInitArray<std::uint64_t>(plan.n_nodes);
+    pool.parallel_for(n_chunks, [&](std::size_t chunk_id) {
+        const auto& hashes = chunk_hashes[chunk_id];
+        const auto& chunk = plan.chunks[chunk_id];
+        std::copy(
+            hashes.begin(),
+            hashes.end(),
+            plan.node_hashes.begin() + chunk.node_start
+        );
+    });
+    return plan;
+}
+
+/**
+ * @brief Apply `MergePlan` to build final nodes and process each worker node.
+ */
+template <typename WorkerNodeT, typename VisitWorkerNode>
+static NoInitArray<Node> apply_merge_plan(
+    const NoInitArray<WorkerNodeT>& worker_nodes,
+    const MergePlan& plan,
+    VisitWorkerNode&& visit_worker_node,
+    ThreadPool& pool
+) {
+    NoInitArray<Node> nodes(plan.n_nodes);
+    pool.parallel_for(plan.chunks.size(), [&](std::size_t chunk_id) {
+        const auto& chunk = plan.chunks[chunk_id];
+        std::size_t node_cursor = chunk.node_start;
+        std::size_t kmer_cursor = chunk.kmer_start;
+
+        std::uint64_t previous_hash = 0;
+        for (std::size_t i = chunk.start; i < chunk.end; ++i) {
+            const auto& worker_node = worker_nodes[i];
+            const auto hash = worker_node.hash;
+
+            const bool is_new_node = i == chunk.start
+                ? chunk.first_is_new_node
+                : hash != previous_hash;
+            if (is_new_node) {
+                nodes[node_cursor++] = Node{hash, kmer_cursor, 0};
+            }
+            visit_worker_node(worker_node, hash, kmer_cursor);
+            kmer_cursor += worker_node.count();
+            previous_hash = hash;
+        }
+        if (node_cursor != chunk.node_start + chunk.node_count) {
+            throw std::logic_error("Merge chunk produced unexpected node count");
+        }
+        if (kmer_cursor != chunk.kmer_start + chunk.kmer_count) {
+            throw std::logic_error("Merge chunk produced unexpected k-mer count");
+        }
+    });
+    return nodes;
 }
 
 /**
  * @brief Merge sorted worker nodes and their k-mers into the final arrays.
  *
- * Each `WorkerNode::hash` is repurposed to store its final k-mer output start.
  * The memory of `worker_nodes` and `WorkerGraph::kmers` is released before returning.
  */
 static std::pair<NoInitArray<Node>, NoInitArray<Kmer>> merge_standard(
     NoInitArray<WorkerNode>& worker_nodes,
-    std::size_t n_nodes,
+    const MergePlan& plan,
     std::vector<WorkerGraph>& graphs,
     const std::vector<std::uint32_t>& worker_record_offsets,
     ThreadPool& pool
@@ -140,42 +253,24 @@ static std::pair<NoInitArray<Node>, NoInitArray<Kmer>> merge_standard(
         return {};
     }
 
-    // Aggregate nodes and track final k-mer output starts
-    NoInitArray<Node> nodes(n_nodes);
-    std::size_t n_kmers = 0;
-    std::size_t write_i = 0;
-    std::size_t i = 0;
-    while (i < n_worker_nodes) {
-        const auto hash = worker_nodes[i].hash;
-        const auto start = n_kmers;
+    NoInitArray<Kmer> kmers(plan.n_kmers);
+    auto nodes = apply_merge_plan(
+        worker_nodes,
+        plan,
+        [&](const WorkerNode& worker_node, std::uint64_t, std::size_t kmer_cursor) {
+            const auto worker_id = worker_node.worker_id();
+            const auto& local_kmers = graphs[worker_id].kmers;
+            const auto offset = worker_record_offsets[worker_id];
+            const auto count = worker_node.count();
 
-        while (i < n_worker_nodes && worker_nodes[i].hash == hash) {
-            const auto count = worker_nodes[i].count();
-            worker_nodes[i].hash = n_kmers;
-            n_kmers += count;
-            ++i;
-        }
-        nodes[write_i++] = Node{hash, start, 0};
-    }
-    if (write_i != n_nodes) {
-        throw std::logic_error("Merged node count does not match unique node count");
-    }
-
-    NoInitArray<Kmer> kmers(n_kmers);
-    pool.parallel_for(n_worker_nodes, [&](std::size_t i) {
-        const auto& node = worker_nodes[i];
-        const auto worker_id = node.worker_id();
-        const auto& local_kmers = graphs[worker_id].kmers;
-        const auto offset = worker_record_offsets[worker_id];
-        const auto out_start = static_cast<std::size_t>(node.hash);
-        const auto count = node.count();
-
-        for (std::size_t k = 0; k < count; ++k) {
-            auto kmer = local_kmers[node.start + k];
-            kmer.record_idx += offset;
-            kmers[out_start + k] = kmer;
-        }
-    });
+            for (std::size_t i = 0; i < count; ++i) {
+                auto kmer = local_kmers[worker_node.start + i];
+                kmer.record_idx += offset;
+                kmers[kmer_cursor + i] = kmer;
+            }
+        },
+        pool
+    );
 
     worker_nodes.reset();
     for (auto& worker_graph : graphs) {
@@ -191,10 +286,15 @@ static std::pair<NoInitArray<Node>, NoInitArray<Kmer>> merge_standard(
  */
 static std::pair<NoInitArray<Node>, KmerMaps> merge_low_memory(
     NoInitArray<WorkerNodeLM>& worker_nodes,
-    std::size_t n_nodes,
+    const MergePlan& plan,
     const std::vector<WorkerGraph>& graphs,
     ThreadPool& pool
 ) {
+    // Final k-mer output position for one worker-local node
+    struct KmerMapEntry {
+        std::uint64_t hash;
+        std::size_t out_start;
+    };
     KmerMaps kmer_maps(graphs.size());
 
     const std::size_t n_worker_nodes = worker_nodes.size();
@@ -215,31 +315,30 @@ static std::pair<NoInitArray<Node>, KmerMaps> merge_low_memory(
         throw std::logic_error("Worker-node count does not match worker graphs");
     }
     // Write cursors for scattering entries into each worker's range
-    auto worker_cursors = worker_offsets;
-
-    // Aggregate nodes and track final k-mer output starts
-    NoInitArray<Node> nodes(n_nodes);
-    std::size_t n_kmers = 0;
-    std::size_t write_i = 0;
-    std::size_t i = 0;
-    while (i < n_worker_nodes) {
-        const auto hash = worker_nodes[i].hash;
-        const auto start = n_kmers;
-
-        while (i < n_worker_nodes && worker_nodes[i].hash == hash) {
-            const auto worker_id = worker_nodes[i].worker_id();
-            const auto count = worker_nodes[i].count();
-            map_entries[worker_cursors[worker_id]++] = KmerMapEntry{hash, n_kmers};
-            n_kmers += count;
-            ++i;
-        }
-        nodes[write_i++] = Node{hash, start, 0};
-    }
-    if (write_i != n_nodes) {
-        throw std::logic_error("Merged node count does not match unique node count");
-    }
+    std::vector<std::atomic<std::size_t>> worker_cursors(graphs.size());
     for (std::size_t worker_id = 0; worker_id < graphs.size(); ++worker_id) {
-        if (worker_cursors[worker_id] != worker_offsets[worker_id + 1]) {
+        worker_cursors[worker_id].store(
+            worker_offsets[worker_id], std::memory_order_relaxed
+        );
+    }
+
+    auto nodes = apply_merge_plan(
+        worker_nodes,
+        plan,
+        [&](const WorkerNodeLM& worker_node, std::uint64_t hash, std::size_t kmer_cursor) {
+            const auto worker_id = worker_node.worker_id();
+            const auto pos = worker_cursors[worker_id].fetch_add(
+                1, std::memory_order_relaxed
+            );
+            map_entries[pos] = KmerMapEntry{hash, kmer_cursor};
+        },
+        pool
+    );
+    for (std::size_t worker_id = 0; worker_id < graphs.size(); ++worker_id) {
+        if (
+            worker_cursors[worker_id].load(std::memory_order_relaxed) !=
+            worker_offsets[worker_id + 1]
+        ) {
             throw std::logic_error("Worker-node scatter did not fill worker range");
         }
     }
@@ -269,14 +368,14 @@ static std::pair<NoInitArray<Node>, KmerMaps> merge_low_memory(
  */
 static NoInitArray<Edge> finalize_edges(
     NoInitArray<WorkerEdge>& worker_edges,
-    std::vector<std::uint64_t>& node_hashes,
+    NoInitArray<std::uint64_t>& node_hashes,
     ThreadPool& pool
 ) {
     const std::size_t n_worker_edges = worker_edges.size();
     const std::size_t n_nodes = node_hashes.size();
     if (n_worker_edges == 0 || n_nodes == 0) {
         worker_edges.reset();
-        std::vector<std::uint64_t>().swap(node_hashes);
+        node_hashes.reset();
         return {};
     }
 
@@ -326,7 +425,7 @@ static NoInitArray<Edge> finalize_edges(
             worker_edges[write_i++] = converted;
         }
     }
-    std::vector<std::uint64_t>().swap(node_hashes);
+    node_hashes.reset();
 
     NoInitArray<Edge> edges(write_i);
     pool.parallel_for(write_i, [&](std::size_t i) {
@@ -354,29 +453,24 @@ std::pair<Graph, KmerMaps> merge_worker_graphs(
     if (graphs.size() == 1) {
         auto& worker_graph = graphs[0];
 
-        std::vector<std::uint64_t> node_hashes;
+        MergePlan plan;
         if (low_memory) {
-            node_hashes = sort_nodes(worker_graph.nodes_lm, pool);
+            plan = prepare_merge(worker_graph.nodes_lm, pool);
         } else {
-            node_hashes = sort_nodes(worker_graph.nodes, pool);
+            plan = prepare_merge(worker_graph.nodes, pool);
         }
-        const auto n_nodes = node_hashes.size();
-        auto edges = finalize_edges(worker_graph.edges, node_hashes, pool);
+        auto edges = finalize_edges(worker_graph.edges, plan.node_hashes, pool);
 
         NoInitArray<Node> nodes;
         NoInitArray<Kmer> kmers;
         KmerMaps kmer_maps;
         if (low_memory) {
             std::tie(nodes, kmer_maps) = merge_low_memory(
-                worker_graph.nodes_lm, n_nodes, graphs, pool
+                worker_graph.nodes_lm, plan, graphs, pool
             );
         } else {
             std::tie(nodes, kmers) = merge_standard(
-                worker_graph.nodes,
-                n_nodes,
-                graphs,
-                std::vector<std::uint32_t>{0},
-                pool
+                worker_graph.nodes, plan, graphs, std::vector<std::uint32_t>{0}, pool
             );
         }
 
@@ -419,28 +513,27 @@ std::pair<Graph, KmerMaps> merge_worker_graphs(
 
     NoInitArray<WorkerNode> worker_nodes;
     NoInitArray<WorkerNodeLM> worker_nodes_lm;
-    std::vector<std::uint64_t> node_hashes;
+    MergePlan plan;
     if (low_memory) {
         worker_nodes_lm = concat_nodes_lm(graphs, pool);
-        node_hashes = sort_nodes(worker_nodes_lm, pool);
+        plan = prepare_merge(worker_nodes_lm, pool);
     } else {
         worker_nodes = concat_nodes(graphs, pool);
-        node_hashes = sort_nodes(worker_nodes, pool);
+        plan = prepare_merge(worker_nodes, pool);
     }
-    const auto n_nodes = node_hashes.size();
     auto worker_edges = concat_edges(graphs, pool);
-    auto edges = finalize_edges(worker_edges, node_hashes, pool);
+    auto edges = finalize_edges(worker_edges, plan.node_hashes, pool);
 
     NoInitArray<Node> nodes;
     NoInitArray<Kmer> kmers;
     KmerMaps kmer_maps;
     if (low_memory) {
         std::tie(nodes, kmer_maps) = merge_low_memory(
-            worker_nodes_lm, n_nodes, graphs, pool
+            worker_nodes_lm, plan, graphs, pool
         );
     } else {
         std::tie(nodes, kmers) = merge_standard(
-            worker_nodes, n_nodes, graphs, worker_record_offsets, pool
+            worker_nodes, plan, graphs, worker_record_offsets, pool
         );
     }
 
