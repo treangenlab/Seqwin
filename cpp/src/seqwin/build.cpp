@@ -325,34 +325,31 @@ void build_assembly_nodes(Graph& graph, ThreadPool& pool) {
 
     // First pass: each chunk counts its assigned nodes in each assembly
     // This matrix is reused as disjoint output cursors in the second pass
-    NoInitArray<std::size_t> assembly_counts(n_chunks * n_assemblies);
-    pool.parallel_for_chunks(assembly_counts.size(), [&](
-        std::size_t start, std::size_t end, std::size_t
+    std::vector<std::vector<std::size_t>> assembly_counts;
+    assembly_counts.resize(n_chunks);
+    pool.parallel_for_chunks(n_nodes, [&](
+        std::size_t start, std::size_t end, std::size_t chunk_id
     ) {
-        std::fill(
-            assembly_counts.begin() + start,
-            assembly_counts.begin() + end,
-            0
-        );
-    });
+        std::vector<std::size_t> chunk_counts;
+        chunk_counts.resize(n_assemblies, 0);
+        for (std::size_t node_idx = start; node_idx < end; ++node_idx) {
+            const auto [kmer_start, kmer_end] = kmer_range(
+                graph.nodes.data(), n_nodes, graph.kmers.size(), node_idx
+            );
+            std::uint32_t previous_assembly = std::numeric_limits<std::uint32_t>::max();
+            std::size_t prevalence = 0;
 
-    pool.parallel_for(n_nodes, [&](std::size_t node_idx, std::size_t chunk_id) {
-        auto* chunk_counts = assembly_counts.data() + chunk_id * n_assemblies;
-        const auto [start, end] = kmer_range(
-            graph.nodes.data(), n_nodes, graph.kmers.size(), node_idx
-        );
-        std::uint32_t previous_assembly = std::numeric_limits<std::uint32_t>::max();
-        std::size_t prevalence = 0;
-
-        for (std::size_t i = start; i < end; ++i) {
-            const auto assembly_idx = record_to_assembly[graph.kmers[i].record_idx];
-            if (assembly_idx != previous_assembly) {
-                ++chunk_counts[assembly_idx];
-                ++prevalence;
-                previous_assembly = assembly_idx;
+            for (std::size_t i = kmer_start; i < kmer_end; ++i) {
+                const auto assembly_idx = record_to_assembly[graph.kmers[i].record_idx];
+                if (assembly_idx != previous_assembly) {
+                    ++chunk_counts[assembly_idx];
+                    ++prevalence;
+                    previous_assembly = assembly_idx;
+                }
             }
+            graph.nodes[node_idx].prevalence = prevalence;
         }
-        graph.nodes[node_idx].prevalence = prevalence;
+        assembly_counts[chunk_id] = std::move(chunk_counts);
     });
 
     // Build node_offsets and convert assembly_counts to output cursors
@@ -362,7 +359,7 @@ void build_assembly_nodes(Graph& graph, ThreadPool& pool) {
     std::size_t global_offset = 0;
     for (std::size_t assembly_idx = 0; assembly_idx < n_assemblies; ++assembly_idx) {
         for (std::size_t chunk_id = 0; chunk_id < n_chunks; ++chunk_id) {
-            auto& value = assembly_counts[chunk_id * n_assemblies + assembly_idx];
+            auto& value = assembly_counts[chunk_id][assembly_idx];
             const auto count = value;
             value = global_offset;
             global_offset += count;
@@ -374,13 +371,13 @@ void build_assembly_nodes(Graph& graph, ThreadPool& pool) {
     // Chunk ranges follow node-index order, so each assembly slice is strictly ascending
     NoInitArray<std::size_t> assembly_nodes(global_offset);
     pool.parallel_for(n_nodes, [&](std::size_t node_idx, std::size_t chunk_id) {
-        auto* chunk_cursors = assembly_counts.data() + chunk_id * n_assemblies;
-        const auto [start, end] = kmer_range(
+        auto& chunk_cursors = assembly_counts[chunk_id];
+        const auto [kmer_start, kmer_end] = kmer_range(
             graph.nodes.data(), n_nodes, graph.kmers.size(), node_idx
         );
         std::uint32_t previous_assembly = std::numeric_limits<std::uint32_t>::max();
 
-        for (std::size_t i = start; i < end; ++i) {
+        for (std::size_t i = kmer_start; i < kmer_end; ++i) {
             const auto assembly_idx = record_to_assembly[graph.kmers[i].record_idx];
             if (assembly_idx != previous_assembly) {
                 assembly_nodes[chunk_cursors[assembly_idx]++] = node_idx;
