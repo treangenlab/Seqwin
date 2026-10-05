@@ -1,7 +1,6 @@
 #include "seqwin/build_internals.hpp"
 
 #include <algorithm>
-#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
@@ -39,6 +38,8 @@ struct MergeChunk {
     std::size_t kmer_count = 0;
     /** True if the first worker node starts a new hash run. */
     bool first_is_new_node = false;
+    /** Number of worker nodes from each worker in this chunk. */
+    std::vector<std::size_t> worker_counts;
 };
 
 /**
@@ -112,10 +113,13 @@ NoInitArray<WorkerEdge> concat_edges(
 
 /**
  * @brief Sort worker-local nodes and prepare `MergePlan` for parallel merging.
+ *
+ * `n_workers` is used for preparing low-memory metadata. Pass 0 for standard mode.
  */
 template <typename WorkerNodeT>
 static MergePlan prepare_merge(
     NoInitArray<WorkerNodeT>& worker_nodes,
+    std::size_t n_workers,
     ThreadPool& pool
 ) {
     const std::size_t n_worker_nodes = worker_nodes.size();
@@ -143,6 +147,9 @@ static MergePlan prepare_merge(
         MergeChunk chunk;
         chunk.start = start;
         chunk.end = end;
+        if (n_workers != 0) {
+            chunk.worker_counts.resize(n_workers, 0);
+        }
         // A chunk may start in the middle of a hash run
         // Compare its first hash with the preceding global worker node
         chunk.first_is_new_node =
@@ -155,6 +162,9 @@ static MergePlan prepare_merge(
         for (std::size_t i = start; i < end; ++i) {
             const auto& worker_node = worker_nodes[i];
             const auto hash = worker_node.hash;
+            if (n_workers != 0) {
+                ++chunk.worker_counts[worker_node.worker_id()];
+            }
 
             const bool is_new_node = i == start
                 ? chunk.first_is_new_node
@@ -166,7 +176,7 @@ static MergePlan prepare_merge(
             chunk.kmer_count += worker_node.count();
             previous_hash = hash;
         }
-        plan.chunks[chunk_id] = chunk;
+        plan.chunks[chunk_id] = std::move(chunk);
         chunk_hashes[chunk_id] = std::move(hashes);
     });
 
@@ -218,7 +228,7 @@ static NoInitArray<Node> apply_merge_plan(
             if (is_new_node) {
                 nodes[node_cursor++] = Node{hash, kmer_cursor, 0};
             }
-            visit_worker_node(worker_node, hash, kmer_cursor);
+            visit_worker_node(worker_node, hash, kmer_cursor, chunk_id);
             kmer_cursor += worker_node.count();
             previous_hash = hash;
         }
@@ -257,7 +267,12 @@ static std::pair<NoInitArray<Node>, NoInitArray<Kmer>> merge_standard(
     auto nodes = apply_merge_plan(
         worker_nodes,
         plan,
-        [&](const WorkerNode& worker_node, std::uint64_t, std::size_t kmer_cursor) {
+        [&](
+            const WorkerNode& worker_node,
+            std::uint64_t,
+            std::size_t kmer_cursor,
+            std::size_t
+        ) {
             const auto worker_id = worker_node.worker_id();
             const auto& local_kmers = graphs[worker_id].kmers;
             const auto offset = worker_record_offsets[worker_id];
@@ -295,9 +310,11 @@ static std::pair<NoInitArray<Node>, KmerMaps> merge_low_memory(
         std::uint64_t hash;
         std::size_t out_start;
     };
-    KmerMaps kmer_maps(graphs.size());
 
     const std::size_t n_worker_nodes = worker_nodes.size();
+    const std::size_t n_chunks = plan.chunks.size();
+    const std::size_t n_workers = graphs.size();
+    KmerMaps kmer_maps(n_workers);
     if (n_worker_nodes == 0) {
         worker_nodes.reset();
         return {NoInitArray<Node>{}, std::move(kmer_maps)};
@@ -307,41 +324,40 @@ static std::pair<NoInitArray<Node>, KmerMaps> merge_low_memory(
     NoInitArray<KmerMapEntry> map_entries(n_worker_nodes);
 
     // Each worker's contiguous range in map_entries
-    std::vector<std::size_t> worker_offsets(graphs.size() + 1);
-    for (std::size_t worker_id = 0; worker_id < graphs.size(); ++worker_id) {
+    std::vector<std::size_t> worker_offsets(n_workers + 1, 0);
+    for (std::size_t worker_id = 0; worker_id < n_workers; ++worker_id) {
         worker_offsets[worker_id + 1] = worker_offsets[worker_id] + graphs[worker_id].n_nodes;
     }
     if (worker_offsets.back() != n_worker_nodes) {
         throw std::logic_error("Worker-node count does not match worker graphs");
     }
-    // Write cursors for scattering entries into each worker's range
-    std::vector<std::atomic<std::size_t>> worker_cursors(graphs.size());
-    for (std::size_t worker_id = 0; worker_id < graphs.size(); ++worker_id) {
-        worker_cursors[worker_id].store(
-            worker_offsets[worker_id], std::memory_order_relaxed
-        );
+    // Convert per-chunk counts to write cursors within each worker's range
+    NoInitArray<std::size_t> worker_cursors(n_chunks * n_workers);
+    for (std::size_t worker_id = 0; worker_id < n_workers; ++worker_id) {
+        std::size_t cursor = worker_offsets[worker_id];
+        for (std::size_t chunk_id = 0; chunk_id < n_chunks; ++chunk_id) {
+            worker_cursors[chunk_id * n_workers + worker_id] = cursor;
+            cursor += plan.chunks[chunk_id].worker_counts[worker_id];
+        }
+        if (cursor != worker_offsets[worker_id + 1]) {
+            throw std::logic_error("Worker-node scatter count does not match worker range");
+        }
     }
 
     auto nodes = apply_merge_plan(
         worker_nodes,
         plan,
-        [&](const WorkerNodeLM& worker_node, std::uint64_t hash, std::size_t kmer_cursor) {
-            const auto worker_id = worker_node.worker_id();
-            const auto pos = worker_cursors[worker_id].fetch_add(
-                1, std::memory_order_relaxed
-            );
-            map_entries[pos] = KmerMapEntry{hash, kmer_cursor};
+        [&](
+            const WorkerNodeLM& worker_node,
+            std::uint64_t hash,
+            std::size_t kmer_cursor,
+            std::size_t chunk_id
+        ) {
+            auto& cursor = worker_cursors[chunk_id * n_workers + worker_node.worker_id()];
+            map_entries[cursor++] = KmerMapEntry{hash, kmer_cursor};
         },
         pool
     );
-    for (std::size_t worker_id = 0; worker_id < graphs.size(); ++worker_id) {
-        if (
-            worker_cursors[worker_id].load(std::memory_order_relaxed) !=
-            worker_offsets[worker_id + 1]
-        ) {
-            throw std::logic_error("Worker-node scatter did not fill worker range");
-        }
-    }
     worker_nodes.reset();
 
     pool.parallel_for(graphs.size(), [&](std::size_t worker_id) {
@@ -455,9 +471,9 @@ std::pair<Graph, KmerMaps> merge_worker_graphs(
 
         MergePlan plan;
         if (low_memory) {
-            plan = prepare_merge(worker_graph.nodes_lm, pool);
+            plan = prepare_merge(worker_graph.nodes_lm, graphs.size(), pool);
         } else {
-            plan = prepare_merge(worker_graph.nodes, pool);
+            plan = prepare_merge(worker_graph.nodes, 0, pool);
         }
         auto edges = finalize_edges(worker_graph.edges, plan.node_hashes, pool);
 
@@ -516,10 +532,10 @@ std::pair<Graph, KmerMaps> merge_worker_graphs(
     MergePlan plan;
     if (low_memory) {
         worker_nodes_lm = concat_nodes_lm(graphs, pool);
-        plan = prepare_merge(worker_nodes_lm, pool);
+        plan = prepare_merge(worker_nodes_lm, graphs.size(), pool);
     } else {
         worker_nodes = concat_nodes(graphs, pool);
-        plan = prepare_merge(worker_nodes, pool);
+        plan = prepare_merge(worker_nodes, 0, pool);
     }
     auto worker_edges = concat_edges(graphs, pool);
     auto edges = finalize_edges(worker_edges, plan.node_hashes, pool);
