@@ -20,13 +20,13 @@ namespace {
 /**
  * @brief Metadata for one contiguous chunk of sorted worker nodes.
  */
-struct MergeChunk {
+struct NodeChunk {
     /**
-     * Start of the chunk in the sorted worker nodes.
+     * Start of this chunk in the sorted worker nodes.
      * Might be in the middle of a hash run.
      */
     std::size_t start = 0;
-    /** End of the chunk in the sorted worker nodes. */
+    /** End of this chunk in the sorted worker nodes. */
     std::size_t end = 0;
     /** Output offset into `Graph::nodes`. */
     std::size_t node_start = 0;
@@ -49,11 +49,28 @@ struct MergePlan {
     /** Unique hashes in ascending order (final node order). */
     NoInitArray<std::uint64_t> node_hashes;
     /** Merge metadata for each chunk. */
-    std::vector<MergeChunk> chunks;
+    std::vector<NodeChunk> chunks;
     /** Size of `Graph::nodes`. */
     std::size_t n_nodes = 0;
     /** Size of `Graph::kmers`. */
     std::size_t n_kmers = 0;
+};
+
+/**
+ * @brief Metadata for one contiguous chunk of sorted worker edges.
+ */
+struct EdgeChunk {
+    /** Start of this chunk in `worker_edges`. Might be in the middle of a run. */
+    std::size_t start = 0;
+    /**
+     * Number of valid compacted edges stored starting at `start`.
+     * Entries later in the chunk are stale after compaction.
+     */
+    std::size_t count = 0;
+    /** Output offset into the final edge array. */
+    std::size_t edge_start = 0;
+    /** True if the first compacted edge was merged into an earlier chunk. */
+    bool skip_first = false;
 };
 
 template <typename T, typename MemberPtr>
@@ -144,7 +161,7 @@ static MergePlan prepare_merge(
     pool.parallel_for_chunks(n_worker_nodes, [&](
         std::size_t start, std::size_t end, std::size_t chunk_id
     ) {
-        MergeChunk chunk;
+        NodeChunk chunk;
         chunk.start = start;
         chunk.end = end;
         if (n_workers != 0) {
@@ -395,7 +412,7 @@ static NoInitArray<Edge> finalize_edges(
         return {};
     }
 
-    // Convert the second endpoints to node indices
+    // Convert second endpoints to node indices
     lsd_radix_sort(worker_edges, &WorkerEdge::second, pool);
     pool.parallel_for_chunks(n_worker_edges, [&](
         std::size_t start, std::size_t end, std::size_t
@@ -418,38 +435,91 @@ static NoInitArray<Edge> finalize_edges(
         }
     });
 
-    // Convert the first endpoints to node indices, and aggregate weights
+    // Duplicate edges are contiguous after the second sort
     lsd_radix_sort(worker_edges, &WorkerEdge::first, pool);
-    std::size_t node_i = 0;
-    std::size_t write_i = 0;
-    for (auto& edge : worker_edges) {
-        while (node_i < n_nodes && node_hashes[node_i] < edge.first) {
-            ++node_i;
-        }
-        if (node_i == n_nodes || node_hashes[node_i] != edge.first) {
-            throw std::logic_error("Edge endpoint does not correspond to a node");
-        }
+    // Convert first endpoints and compact duplicate runs in each chunk, in parallel
+    // Runs crossing chunk boundaries are handled later
+    std::vector<EdgeChunk> chunks(std::min(pool.size(), n_worker_edges));
+    pool.parallel_for_chunks(n_worker_edges, [&](
+        std::size_t start, std::size_t end, std::size_t chunk_id
+    ) {
+        auto node_start = std::lower_bound(
+            node_hashes.begin(), node_hashes.end(), worker_edges[start].first
+        );
+        std::size_t node_i = static_cast<std::size_t>(node_start - node_hashes.begin());
+        // Compacted edges are written to the prefix of this chunk
+        std::size_t write_i = start;
+        for (std::size_t i = start; i < end; ++i) {
+            auto& worker_edge = worker_edges[i];
+            while (node_i < n_nodes && node_hashes[node_i] < worker_edge.first) {
+                ++node_i;
+            }
+            if (node_i == n_nodes || node_hashes[node_i] != worker_edge.first) {
+                throw std::logic_error("Edge endpoint does not correspond to a node");
+            }
 
-        const WorkerEdge converted{node_i, edge.second, edge.weight};
-        if (
-            write_i != 0 &&
-            worker_edges[write_i - 1].first == converted.first &&
-            worker_edges[write_i - 1].second == converted.second
-        ) {
-            worker_edges[write_i - 1].weight += converted.weight;
-        } else {
-            worker_edges[write_i++] = converted;
+            if (
+                write_i != start &&
+                worker_edges[write_i - 1].first == node_i &&
+                worker_edges[write_i - 1].second == worker_edge.second
+            ) {
+                worker_edges[write_i - 1].weight += worker_edge.weight;
+            } else {
+                worker_edges[write_i++] = WorkerEdge{
+                    node_i, worker_edge.second, worker_edge.weight
+                };
+            }
         }
-    }
+        auto& chunk = chunks[chunk_id];
+        chunk.start = start;
+        chunk.count = write_i - start;
+    });
     node_hashes.reset();
 
-    NoInitArray<Edge> edges(write_i);
-    pool.parallel_for(write_i, [&](std::size_t i) {
-        edges[i] = Edge{
-            static_cast<std::size_t>(worker_edges[i].first),
-            static_cast<std::size_t>(worker_edges[i].second),
-            worker_edges[i].weight
-        };
+    // Merge duplicate runs crossing chunk boundaries
+    // Now we only care about the first EdgeChunk::count edges of each chunk
+    // Entries after that are stale
+    std::size_t n_edges = 0;
+    std::size_t previous_i = 0;
+    bool have_previous = false;
+    for (auto& chunk : chunks) {
+        auto& first = worker_edges[chunk.start];
+        if (
+            have_previous &&
+            worker_edges[previous_i].first == first.first &&
+            worker_edges[previous_i].second == first.second
+        ) {
+            // If the first edge in this chunk is a duplicate,
+            // fold its weight into the last edge of an earlier chunk
+            worker_edges[previous_i].weight += first.weight;
+            chunk.skip_first = true;
+        }
+
+        chunk.edge_start = n_edges;
+        const std::size_t skip = chunk.skip_first;
+        n_edges += chunk.count - skip;
+
+        // If this chunk contains only a continuation of a duplicate run, keep
+        // previous_i at the earlier owner so the run can span many chunks.
+        if (chunk.count > skip) {
+            previous_i = chunk.start + chunk.count - 1;
+            have_previous = true;
+        }
+    }
+
+    NoInitArray<Edge> edges(n_edges);
+    pool.parallel_for(chunks.size(), [&](std::size_t chunk_id) {
+        const auto& chunk = chunks[chunk_id];
+        const std::size_t skip = chunk.skip_first;
+
+        for (std::size_t i = skip; i < chunk.count; ++i) {
+            const auto& edge = worker_edges[chunk.start + i];
+            edges[chunk.edge_start + i - skip] = Edge{
+                static_cast<std::size_t>(edge.first),
+                static_cast<std::size_t>(edge.second),
+                edge.weight
+            };
+        }
     });
     worker_edges.reset();
 
