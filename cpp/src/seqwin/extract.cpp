@@ -10,6 +10,7 @@
 
 #include <ankerl/unordered_dense.h>
 
+#include "seqwin/shared_internals.hpp"
 #include "utils/fasta_reader.hpp"
 #include "utils/logging.hpp"
 
@@ -68,6 +69,7 @@ std::optional<Signature> extract_worker(
     const Subgraph& subgraph,
     const NoInitArray<FilteredNode>& filtered_nodes,
     const Kmer* kmers,
+    std::size_t n_kmers,
     const Node* nodes,
     std::size_t n_nodes,
     const std::uint32_t* record_offsets,
@@ -93,7 +95,8 @@ std::optional<Signature> extract_worker(
             throw std::invalid_argument("filtered node index is out of bounds");
         }
         const auto& node = nodes[node_idx];
-        for (std::size_t i = node.start; i < node.stop; ++i) {
+        const auto [start, stop] = kmer_range(nodes, n_nodes, n_kmers, node_idx);
+        for (std::size_t i = start; i < stop; ++i) {
             sg_kmers.push_back({node.hash, kmers[i].record_idx, kmers[i].pos});
         }
     }
@@ -310,26 +313,24 @@ void fetch_signature_sequences(
     log_python(
         " - Fetching signature sequences (" + std::to_string(groups.size()) + " assemblies to be loaded)..."
     );
-    pool.parallel_for(groups.size(), [&](std::size_t begin, std::size_t end, std::size_t) {
-        for (std::size_t group_idx = begin; group_idx < end; ++group_idx) {
-            const auto& group = groups[group_idx];
-            const auto records = read_fasta(assembly_paths[group.assembly_idx]);
+    pool.parallel_for(groups.size(), [&](std::size_t group_idx) {
+        const auto& group = groups[group_idx];
+        const auto records = read_fasta(assembly_paths[group.assembly_idx]);
 
-            for (const auto signature_idx : group.signature_indices) {
-                auto& signature = signatures[signature_idx];
-                if (signature.location.record_idx >= records.size()) {
-                    throw std::runtime_error("signature record index is outside assembly FASTA");
-                }
-                const auto& sequence = records[signature.location.record_idx].sequence;
-                const auto start = std::min<std::size_t>(signature.location.start, sequence.size());
-                const auto stop = std::min<std::size_t>(signature.location.stop, sequence.size());
-                signature.sequence = sequence.substr(start, stop > start ? stop - start : 0);
-                std::transform(
-                    signature.sequence.begin(), signature.sequence.end(),
-                    signature.sequence.begin(),
-                    [](unsigned char base) { return static_cast<char>(std::toupper(base)); }
-                );
+        for (const auto signature_idx : group.signature_indices) {
+            auto& signature = signatures[signature_idx];
+            if (signature.location.record_idx >= records.size()) {
+                throw std::runtime_error("signature record index is outside assembly FASTA");
             }
+            const auto& sequence = records[signature.location.record_idx].sequence;
+            const auto start = std::min<std::size_t>(signature.location.start, sequence.size());
+            const auto stop = std::min<std::size_t>(signature.location.stop, sequence.size());
+            signature.sequence = sequence.substr(start, stop > start ? stop - start : 0);
+            std::transform(
+                signature.sequence.begin(), signature.sequence.end(),
+                signature.sequence.begin(),
+                [](unsigned char base) { return static_cast<char>(std::toupper(base)); }
+            );
         }
     });
 }
@@ -340,6 +341,7 @@ std::vector<Signature> extract_signatures(
     const std::vector<Subgraph>& subgraphs,
     const NoInitArray<FilteredNode>& filtered_nodes,
     const Kmer* kmers,
+    std::size_t n_kmers,
     const Node* nodes,
     std::size_t n_nodes,
     const std::uint32_t* record_offsets,
@@ -368,26 +370,25 @@ std::vector<Signature> extract_signatures(
     }
 
     std::vector<std::optional<Signature>> extracted(subgraphs.size());
-    pool.parallel_for(subgraphs.size(), [&](std::size_t begin, std::size_t end, std::size_t) {
-        for (std::size_t i = begin; i < end; ++i) {
-            extracted[i] = extract_worker(
-                i,
-                subgraphs[i],
-                filtered_nodes,
-                kmers,
-                nodes,
-                n_nodes,
-                record_offsets,
-                n_record_offsets,
-                is_targets,
-                n_assemblies,
-                kmerlen,
-                windowsize,
-                min_len,
-                consec_kmer_mul,
-                total_tar
-            );
-        }
+    pool.parallel_for(subgraphs.size(), [&](std::size_t subgraph_idx) {
+        extracted[subgraph_idx] = extract_worker(
+            subgraph_idx,
+            subgraphs[subgraph_idx],
+            filtered_nodes,
+            kmers,
+            n_kmers,
+            nodes,
+            n_nodes,
+            record_offsets,
+            n_record_offsets,
+            is_targets,
+            n_assemblies,
+            kmerlen,
+            windowsize,
+            min_len,
+            consec_kmer_mul,
+            total_tar
+        );
     });
 
     std::vector<Signature> signatures;

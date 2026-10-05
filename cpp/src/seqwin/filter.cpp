@@ -155,6 +155,7 @@ void calculate_thresholds(
 
 std::pair<FilteredGraph, std::vector<Signature>> filter(
     const Kmer* kmers,
+    std::size_t n_kmers,
     const Node* nodes,
     std::size_t n_nodes,
     const Edge* edges,
@@ -252,6 +253,7 @@ std::pair<FilteredGraph, std::vector<Signature>> filter(
         filtered.subgraphs,
         filtered.nodes,
         kmers,
+        n_kmers,
         nodes,
         n_nodes,
         record_offsets,

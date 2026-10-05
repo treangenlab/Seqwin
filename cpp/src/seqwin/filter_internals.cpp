@@ -38,7 +38,7 @@ TargetCounts build_target_counts(
     ThreadPool& pool
 ) {
     NoInitArray<Counter> counts(n_nodes);
-    pool.parallel_for(n_nodes, [&](std::size_t start, std::size_t end, std::size_t) {
+    pool.parallel_for_chunks(n_nodes, [&](std::size_t start, std::size_t end, std::size_t) {
         std::fill(
             counts.begin() + start,
             counts.begin() + end,
@@ -129,7 +129,9 @@ std::pair<double, double> expected_presence(
     const double total_neg_inv = 1.0 / total_neg;
 
     target_counts.visit(nodes, [&](const auto& n_tar_at) {
-        pool.parallel_for(n_nodes, [&](std::size_t start, std::size_t end, std::size_t worker_id) {
+        pool.parallel_for_chunks(n_nodes, [&](
+            std::size_t start, std::size_t end, std::size_t chunk_id
+        ) {
             NodeSums sums;
 
             for (std::size_t node_idx = start; node_idx < end; ++node_idx) {
@@ -152,7 +154,7 @@ std::pair<double, double> expected_presence(
                 sums.presence_tar += n_tar * total_tar_inv * n_tar;
                 sums.presence_neg += n_neg * total_neg_inv * n_tar;
             }
-            node_sums[worker_id] = sums;
+            node_sums[chunk_id] = sums;
         });
     });
     NodeSums totals;
@@ -200,14 +202,12 @@ void prune_graph(
 
     // Multiset of retained node indices after edge filtering
     NoInitArray<std::size_t> connected_multi(retained_count * 2);
-    pool.parallel_for(retained_count, [&](std::size_t start, std::size_t end, std::size_t) {
-        for (std::size_t i = start; i < end; ++i) {
-            if (edges[i].first >= n_nodes || edges[i].second >= n_nodes) {
-                throw std::invalid_argument("Edge endpoint does not correspond to a node");
-            }
-            connected_multi[i * 2] = edges[i].first;
-            connected_multi[i * 2 + 1] = edges[i].second;
+    pool.parallel_for(retained_count, [&](std::size_t i) {
+        if (edges[i].first >= n_nodes || edges[i].second >= n_nodes) {
+            throw std::invalid_argument("Edge endpoint does not correspond to a node");
         }
+        connected_multi[i * 2] = edges[i].first;
+        connected_multi[i * 2 + 1] = edges[i].second;
     });
     lsd_radix_sort(connected_multi, pool);
 
@@ -231,45 +231,41 @@ void prune_graph(
     const double total_neg_inv = 1.0 / total_neg;
 
     target_counts.visit(nodes, [&](const auto& n_tar_at) {
-        pool.parallel_for(connected.size(), [&](std::size_t start, std::size_t end, std::size_t) {
-            for (std::size_t i = start; i < end; ++i) {
-                const auto node_idx = connected[i];
-                const std::size_t n_tar = n_tar_at(node_idx);
-                if (n_tar > std::numeric_limits<std::uint32_t>::max()) {
-                    throw std::invalid_argument("Filtered node n_tar exceeds uint32 range");
-                }
-                const auto prevalence = nodes[node_idx].prevalence;
-                if (n_tar > prevalence) {
-                    throw std::invalid_argument("Filtered node n_tar exceeds prevalence");
-                }
-                const std::size_t n_neg = prevalence - n_tar;
-                if (n_neg > std::numeric_limits<std::uint32_t>::max()) {
-                    throw std::invalid_argument("Filtered node n_neg exceeds uint32 range");
-                }
-
-                const double frac_tar = n_tar * total_tar_inv;
-                const double frac_neg = n_neg * total_neg_inv;
-                filtered.nodes[i] = FilteredNode{
-                    node_idx,
-                    static_cast<std::uint32_t>(n_tar),
-                    static_cast<std::uint32_t>(n_neg),
-                    std::sqrt((1.0 - frac_tar) * (1.0 - frac_tar) + frac_neg * frac_neg)
-                };
+        pool.parallel_for(connected.size(), [&](std::size_t i) {
+            const auto node_idx = connected[i];
+            const std::size_t n_tar = n_tar_at(node_idx);
+            if (n_tar > std::numeric_limits<std::uint32_t>::max()) {
+                throw std::invalid_argument("Filtered node n_tar exceeds uint32 range");
             }
+            const auto prevalence = nodes[node_idx].prevalence;
+            if (n_tar > prevalence) {
+                throw std::invalid_argument("Filtered node n_tar exceeds prevalence");
+            }
+            const std::size_t n_neg = prevalence - n_tar;
+            if (n_neg > std::numeric_limits<std::uint32_t>::max()) {
+                throw std::invalid_argument("Filtered node n_neg exceeds uint32 range");
+            }
+
+            const double frac_tar = n_tar * total_tar_inv;
+            const double frac_neg = n_neg * total_neg_inv;
+            filtered.nodes[i] = FilteredNode{
+                node_idx,
+                static_cast<std::uint32_t>(n_tar),
+                static_cast<std::uint32_t>(n_neg),
+                std::sqrt((1.0 - frac_tar) * (1.0 - frac_tar) + frac_neg * frac_neg)
+            };
         });
     });
 
     // Update edge endpoints to indices of retained nodes
     filtered.edges = NoInitArray<Edge>(retained_count);
     const auto& node_indices_read = node_indices;
-    pool.parallel_for(retained_count, [&](std::size_t start, std::size_t end, std::size_t) {
-        for (std::size_t i = start; i < end; ++i) {
-            filtered.edges[i] = Edge{
-                node_indices_read.at(edges[i].first),
-                node_indices_read.at(edges[i].second),
-                edges[i].weight
-            };
-        }
+    pool.parallel_for(retained_count, [&](std::size_t i) {
+        filtered.edges[i] = Edge{
+            node_indices_read.at(edges[i].first),
+            node_indices_read.at(edges[i].second),
+            edges[i].weight
+        };
     });
 }
 

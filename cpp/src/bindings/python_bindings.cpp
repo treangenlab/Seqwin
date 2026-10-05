@@ -54,7 +54,7 @@ std::size_t require_1d_size(const Array& array, const char* name) {
 
 PYBIND11_MODULE(_native, m) {
     PYBIND11_NUMPY_DTYPE(seqwin::Kmer, pos, record_idx);
-    PYBIND11_NUMPY_DTYPE(seqwin::Node, hash, start, stop, prevalence);
+    PYBIND11_NUMPY_DTYPE(seqwin::Node, hash, start, prevalence);
     PYBIND11_NUMPY_DTYPE(seqwin::FilteredNode, idx, n_tar, n_neg, penalty);
     PYBIND11_NUMPY_DTYPE(seqwin::Edge, first, second, weight);
 
@@ -129,7 +129,7 @@ PYBIND11_MODULE(_native, m) {
             const auto* assembly_nodes_ptr = assembly_nodes.data();
             const auto* node_offsets_ptr = node_offsets.data();
 
-            require_1d_size(kmers, "kmers");
+            const auto n_kmers = require_1d_size(kmers, "kmers");
             const auto n_nodes = require_1d_size(nodes, "nodes");
             const auto n_edges = require_1d_size(edges, "edges");
             const auto n_record_offsets = require_1d_size(record_offsets, "record_offsets");
@@ -168,6 +168,7 @@ PYBIND11_MODULE(_native, m) {
                 py::gil_scoped_release release;
                 out = seqwin::filter(
                     kmers_ptr,
+                    n_kmers,
                     nodes_ptr,
                     n_nodes,
                     edges_ptr,

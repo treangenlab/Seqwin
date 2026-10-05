@@ -17,6 +17,7 @@
 #include <btllib/minimizer.hpp>
 
 #include "seqwin/build_internals.hpp"
+#include "seqwin/shared_internals.hpp"
 #include "utils/fasta_reader.hpp"
 #include "utils/logging.hpp"
 #include "utils/memory.hpp"
@@ -63,6 +64,7 @@ struct RawKmer {
     Kmer kmer;
 };
 
+/** Maps nodes to their k-mer occurrence counts. */
 using NodeMap = ankerl::unordered_dense::segmented_map<
     std::uint64_t,
     std::size_t,
@@ -118,7 +120,6 @@ WorkerGraph build_worker(
 
     WorkerGraph graph;
     graph.record_offsets.reserve(end_assembly - start_assembly + 1);
-    graph.record_offsets.push_back(0);
     graph.start_assembly = start_assembly;
     graph.end_assembly = end_assembly;
     NodeMap node_map;
@@ -130,9 +131,7 @@ WorkerGraph build_worker(
 
         std::uint32_t record_idx = graph.record_offsets.back();
         if (records.size() > std::numeric_limits<std::uint32_t>::max() - record_idx) {
-            throw std::runtime_error(
-                "Total number of FASTA records exceeds uint32 range"
-            );
+            throw std::runtime_error("Total number of FASTA records exceeds uint32 range");
         }
         for (std::size_t record_i = 0; record_i < records.size(); ++record_i) {
             auto& record = records[record_i];
@@ -190,14 +189,17 @@ WorkerGraph build_worker(
     EdgeMap{}.swap(edge_map);
 
     graph.n_nodes = node_map.size();
-    graph.nodes = NoInitArray<WorkerNode>(graph.n_nodes);
     std::size_t node_i = 0;
-    if (!low_memory) {
-        // Build WorkerGraph.kmers (grouped by hash)
+    if (low_memory) {
+        graph.nodes_lm = NoInitArray<WorkerNodeLM>(graph.n_nodes);
+        for (const auto& [hash, count] : node_map) {
+            graph.nodes_lm[node_i++] = WorkerNodeLM{hash, count, worker_id};
+        }
+    } else {
+        graph.nodes = NoInitArray<WorkerNode>(graph.n_nodes);
         graph.kmers = NoInitArray<Kmer>(graph.n_kmers);
 
-        // node_map values are counts while assigning node ranges,
-        // then cursors while scattering raw k-mers into those ranges
+        // node_map values are repurposed as output cursors into graph.kmers
         std::size_t cursor = 0;
         for (auto& [hash, node_val] : node_map) {
             const std::size_t count = node_val;
@@ -221,11 +223,6 @@ WorkerGraph build_worker(
             graph.kmers[node_it->second++] = rk.kmer;
         }
         std::vector<RawKmer>().swap(raw_kmers);
-    } else {
-        // In low-memory mode node_map values remain counts
-        for (const auto& [hash, count] : node_map) {
-            graph.nodes[node_i++] = WorkerNode{hash, 0, count, worker_id};
-        }
     }
     NodeMap{}.swap(node_map);
 
@@ -257,46 +254,44 @@ NoInitArray<Kmer> recompute_kmers(
     }
     NoInitArray<Kmer> kmers(total_kmers);
 
-    pool.parallel_for(graphs.size(), [&](std::size_t start, std::size_t end, std::size_t) {
-        for (std::size_t worker_id = start; worker_id < end; ++worker_id) {
-            const auto& graph = graphs[worker_id];
-            auto& hash_to_cursor = kmer_maps[worker_id];
-            for (
-                std::size_t assembly_idx = graph.start_assembly;
-                assembly_idx < graph.end_assembly;
-                ++assembly_idx
-            ) {
-                auto records = read_fasta(assembly_paths[assembly_idx]);
-                std::uint32_t record_idx = record_offsets[assembly_idx];
+    pool.parallel_for(graphs.size(), [&](std::size_t worker_id) {
+        const auto& graph = graphs[worker_id];
+        auto& hash_to_cursor = kmer_maps[worker_id];
+        for (
+            std::size_t assembly_idx = graph.start_assembly;
+            assembly_idx < graph.end_assembly;
+            ++assembly_idx
+        ) {
+            auto records = read_fasta(assembly_paths[assembly_idx]);
+            std::uint32_t record_idx = record_offsets[assembly_idx];
 
-                for (std::size_t record_i = 0; record_i < records.size(); ++record_i) {
-                    auto& record = records[record_i];
-                    if (record.sequence.size() > std::numeric_limits<std::uint32_t>::max()) {
-                        throw std::runtime_error(
-                            "Sequence length exceeds uint32 range for record " +
-                            record.id + " in assembly " + assembly_paths[assembly_idx]);
-                    }
-
-                    const auto mins = btllib::minimize_sequence(
-                        record.sequence,
-                        kmerlen,
-                        windowsize
-                    );
-                    for (const auto& m : mins) {
-                        auto cursor_it = hash_to_cursor.find(m.out_hash);
-                        if (cursor_it == hash_to_cursor.end()) {
-                            throw std::runtime_error(
-                                "Low-memory minimizer recomputation found an unknown minimizer hash"
-                            );
-                        }
-                        auto& cursor = cursor_it->second;
-                        kmers[cursor++] = Kmer{static_cast<std::uint32_t>(m.pos), record_idx};
-                    }
-                    ++record_idx;
+            for (std::size_t record_i = 0; record_i < records.size(); ++record_i) {
+                auto& record = records[record_i];
+                if (record.sequence.size() > std::numeric_limits<std::uint32_t>::max()) {
+                    throw std::runtime_error(
+                        "Sequence length exceeds uint32 range for record " +
+                        record.id + " in assembly " + assembly_paths[assembly_idx]);
                 }
+
+                const auto mins = btllib::minimize_sequence(
+                    record.sequence,
+                    kmerlen,
+                    windowsize
+                );
+                for (const auto& m : mins) {
+                    auto cursor_it = hash_to_cursor.find(m.out_hash);
+                    if (cursor_it == hash_to_cursor.end()) {
+                        throw std::runtime_error(
+                            "Low-memory minimizer recomputation found an unknown minimizer hash"
+                        );
+                    }
+                    auto& cursor = cursor_it->second;
+                    kmers[cursor++] = Kmer{static_cast<std::uint32_t>(m.pos), record_idx};
+                }
+                ++record_idx;
             }
-            KmerMap{}.swap(hash_to_cursor);
         }
+        KmerMap{}.swap(hash_to_cursor);
     });
 
     return kmers;
@@ -312,91 +307,87 @@ void build_assembly_nodes(Graph& graph, ThreadPool& pool) {
     if (graph.record_offsets.empty()) {
         throw std::logic_error("Graph record offsets must not be empty");
     }
-
     const std::size_t n_assemblies = graph.record_offsets.size() - 1;
     const std::size_t n_nodes = graph.nodes.size();
-    const std::size_t n_workers = std::min(pool.size(), n_nodes);
 
     // Map global record_idx to assembly_idx
     NoInitArray<std::uint32_t> record_to_assembly(graph.record_offsets.back());
-    pool.parallel_for(n_assemblies, [&](std::size_t start, std::size_t end, std::size_t) {
-        for (std::size_t assembly_idx = start; assembly_idx < end; ++assembly_idx) {
-            std::fill(
-                record_to_assembly.begin() + graph.record_offsets[assembly_idx],
-                record_to_assembly.begin() + graph.record_offsets[assembly_idx + 1],
-                static_cast<std::uint32_t>(assembly_idx)
-            );
-        }
-    });
-
-    // First pass: each worker counts the number of nodes included in each assembly
-    // This matrix is reused as disjoint output cursors in the second pass
-    NoInitArray<std::size_t> assembly_counts(n_workers * n_assemblies);
-    pool.parallel_for(assembly_counts.size(), [&](
-        std::size_t start, std::size_t end, std::size_t
-    ) {
+    pool.parallel_for(n_assemblies, [&](std::size_t assembly_idx) {
         std::fill(
-            assembly_counts.begin() + start,
-            assembly_counts.begin() + end,
-            0
+            record_to_assembly.begin() + graph.record_offsets[assembly_idx],
+            record_to_assembly.begin() + graph.record_offsets[assembly_idx + 1],
+            static_cast<std::uint32_t>(assembly_idx)
         );
     });
 
-    pool.parallel_for(n_nodes, [&](std::size_t start, std::size_t end, std::size_t worker_id) {
-        auto* worker_counts = assembly_counts.data() + worker_id * n_assemblies;
+    // Split graph.nodes into contiguous chunks and process them in parallel
+    const std::size_t n_chunks = std::min(pool.size(), n_nodes);
 
-        for (std::size_t node_i = start; node_i < end; ++node_i) {
-            auto& node = graph.nodes[node_i];
+    // First pass: each chunk counts its assigned nodes in each assembly
+    // This matrix is reused as disjoint output cursors in the second pass
+    std::vector<std::vector<std::size_t>> assembly_counts;
+    assembly_counts.resize(n_chunks);
+    pool.parallel_for_chunks(n_nodes, [&](
+        std::size_t start, std::size_t end, std::size_t chunk_id
+    ) {
+        std::vector<std::size_t> chunk_counts;
+        chunk_counts.resize(n_assemblies, 0);
+        for (std::size_t node_idx = start; node_idx < end; ++node_idx) {
+            const auto [kmer_start, kmer_end] = kmer_range(
+                graph.nodes.data(), n_nodes, graph.kmers.size(), node_idx
+            );
             std::uint32_t previous_assembly = std::numeric_limits<std::uint32_t>::max();
             std::size_t prevalence = 0;
 
-            for (std::size_t kmer_i = node.start; kmer_i < node.stop; ++kmer_i) {
-                const auto assembly_idx = record_to_assembly[graph.kmers[kmer_i].record_idx];
+            for (std::size_t i = kmer_start; i < kmer_end; ++i) {
+                const auto assembly_idx = record_to_assembly[graph.kmers[i].record_idx];
                 if (assembly_idx != previous_assembly) {
-                    ++worker_counts[assembly_idx];
+                    ++chunk_counts[assembly_idx];
                     ++prevalence;
                     previous_assembly = assembly_idx;
                 }
             }
-            node.prevalence = prevalence;
+            graph.nodes[node_idx].prevalence = prevalence;
         }
+        assembly_counts[chunk_id] = std::move(chunk_counts);
     });
 
     // Build node_offsets and convert assembly_counts to output cursors
-    graph.node_offsets.clear();
-    graph.node_offsets.reserve(n_assemblies + 1);
+    std::vector<std::size_t> node_offsets{0};
+    node_offsets.reserve(n_assemblies + 1);
+
     std::size_t global_offset = 0;
     for (std::size_t assembly_idx = 0; assembly_idx < n_assemblies; ++assembly_idx) {
-        graph.node_offsets.push_back(global_offset);
-
-        for (std::size_t worker_id = 0; worker_id < n_workers; ++worker_id) {
-            auto& value = assembly_counts[worker_id * n_assemblies + assembly_idx];
+        for (std::size_t chunk_id = 0; chunk_id < n_chunks; ++chunk_id) {
+            auto& value = assembly_counts[chunk_id][assembly_idx];
             const auto count = value;
             value = global_offset;
             global_offset += count;
         }
+        node_offsets.push_back(global_offset);
     }
-    graph.node_offsets.push_back(global_offset);
-    graph.assembly_nodes = NoInitArray<std::size_t>(global_offset);
 
-    // Second pass: each worker writes node indices into its reserved range in each assembly
-    // Worker ranges follow node-index order, so each assembly slice is strictly ascending
-    pool.parallel_for(n_nodes, [&](std::size_t start, std::size_t end, std::size_t worker_id) {
-        auto* worker_cursors = assembly_counts.data() + worker_id * n_assemblies;
+    // Second pass: each chunk writes node indices into its reserved range in each assembly
+    // Chunk ranges follow node-index order, so each assembly slice is strictly ascending
+    NoInitArray<std::size_t> assembly_nodes(global_offset);
+    pool.parallel_for(n_nodes, [&](std::size_t node_idx, std::size_t chunk_id) {
+        auto& chunk_cursors = assembly_counts[chunk_id];
+        const auto [kmer_start, kmer_end] = kmer_range(
+            graph.nodes.data(), n_nodes, graph.kmers.size(), node_idx
+        );
+        std::uint32_t previous_assembly = std::numeric_limits<std::uint32_t>::max();
 
-        for (std::size_t node_i = start; node_i < end; ++node_i) {
-            const auto& node = graph.nodes[node_i];
-            std::uint32_t previous_assembly = std::numeric_limits<std::uint32_t>::max();
-
-            for (std::size_t kmer_i = node.start; kmer_i < node.stop; ++kmer_i) {
-                const auto assembly_idx = record_to_assembly[graph.kmers[kmer_i].record_idx];
-                if (assembly_idx != previous_assembly) {
-                    graph.assembly_nodes[worker_cursors[assembly_idx]++] = node_i;
-                    previous_assembly = assembly_idx;
-                }
+        for (std::size_t i = kmer_start; i < kmer_end; ++i) {
+            const auto assembly_idx = record_to_assembly[graph.kmers[i].record_idx];
+            if (assembly_idx != previous_assembly) {
+                assembly_nodes[chunk_cursors[assembly_idx]++] = node_idx;
+                previous_assembly = assembly_idx;
             }
         }
     });
+
+    graph.assembly_nodes = std::move(assembly_nodes);
+    graph.node_offsets = std::move(node_offsets);
 }
 
 } // namespace
@@ -414,31 +405,29 @@ Graph build(
     }
 
     const auto n_assemblies = assembly_paths.size();
-    std::size_t n_workers = std::max<std::size_t>(1, n_cpu);
-    if (n_assemblies > 0) {
-        n_workers = std::min(n_workers, n_assemblies);
+    const std::size_t n_workers = std::min(
+        std::max<std::size_t>(1, n_cpu),
+        std::max<std::size_t>(1, n_assemblies)
+    );
+    if (n_workers > internal::WorkerNodeLM::max_workers) {
+        throw std::runtime_error("Number of workers exceeds worker-node range");
     }
 
-    internal::ThreadPool pool(n_workers); // Avoid spawning threads every time
+    internal::ThreadPool pool(n_workers);
     std::vector<internal::WorkerGraph> graphs(n_workers);
 
-    const std::size_t base = n_assemblies / n_workers;
-    const std::size_t rem = n_assemblies % n_workers;
-
-    pool.parallel_for(n_workers, [&](std::size_t start, std::size_t end, std::size_t) {
-        for (std::size_t worker_id = start; worker_id < end; ++worker_id) {
-            std::size_t start_assembly = worker_id * base + std::min(worker_id, rem);
-            std::size_t end_assembly = start_assembly + base + (worker_id < rem ? 1 : 0);
-            graphs[worker_id] = internal::build_worker(
-                assembly_paths,
-                kmerlen,
-                windowsize,
-                start_assembly,
-                end_assembly,
-                worker_id,
-                low_memory
-            );
-        }
+    pool.parallel_for_chunks(n_assemblies, [&](
+        std::size_t start_assembly, std::size_t end_assembly, std::size_t worker_id
+    ) {
+        graphs[worker_id] = internal::build_worker(
+            assembly_paths,
+            kmerlen,
+            windowsize,
+            start_assembly,
+            end_assembly,
+            worker_id,
+            low_memory
+        );
     });
     // Release retained allocator pages of destroyed worker maps
     internal::trim_heap();

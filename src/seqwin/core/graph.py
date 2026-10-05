@@ -34,7 +34,6 @@ KMER_DTYPE = np.dtype([
 NODE_DTYPE = np.dtype([
     ('hash', np.uint64),
     ('start', np.uintp),
-    ('stop', np.uintp),
     ('prevalence', np.uintp),
 ])
 
@@ -63,10 +62,13 @@ class Graph:
     - `nodes` are sorted by hash.
     - `edges` endpoints are indices into `nodes`; sorted by descending weight, then by ascending endpoints.
 
-    The `[start, stop)` range in each node identifies minimizers with this hash.
+    A node's `start` is the beginning of its minimizers in `kmers`. Its end is
+    the next node's `start`, or `len(kmers)` for the final node.
     ```python
-    >>> kmer_group = kmers[node['start']:node['stop']]
-    >>> group_hash = node['hash']
+    >>> start = nodes[node_idx]['start']
+    >>> end = nodes[node_idx + 1]['start'] if node_idx + 1 < len(nodes) else len(kmers)
+    >>> kmer_group = kmers[start:end]
+    >>> group_hash = nodes[node_idx]['hash']
     ```
 
     Use `record_offsets` to recover the original assembly and record index of each minimizer.
@@ -86,17 +88,13 @@ class Graph:
 
     Attributes:
         kmers (NDArray[np.void]): A 1-D NumPy structured array of minimizers from all assemblies.
-            Dtype: `KMER_DTYPE`
             - 'pos' (uint32): 0-based position of the minimizer within its FASTA record.
             - 'record_idx' (uint32): 0-based global index of the FASTA record.
         nodes (NDArray[np.void]): A 1-D NumPy structured array of minimizer nodes.
-            Dtype: `NODE_DTYPE`
             - 'hash' (uint64): Hash value of the minimizers represented by this node.
-            - 'start' (uintp): Start of the half-open range for this node's minimizer entries.
-            - 'stop' (uintp): End of the half-open range for this node's minimizer entries.
+            - 'start' (uintp): Start of this node's minimizer entries in `kmers`.
             - 'prevalence' (uintp): Number of assemblies containing this node's minimizer.
         edges (NDArray[np.void]): A 1-D NumPy structured array of weighted, undirected edges.
-            Dtype: `EDGE_DTYPE`
             - 'first' (uintp): Index of the smaller endpoint in `nodes`.
             - 'second' (uintp): Index of the larger endpoint in `nodes`.
             - 'weight' (uintp): Number of assemblies where the endpoints are adjacent.

@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <functional>
 #include <limits>
+#include <stdexcept>
 #include <type_traits>
 #include <utility>
 
@@ -12,6 +13,31 @@
 #include "utils/thread_pool.hpp"
 
 namespace seqwin::internal {
+
+/**
+ * @brief Return the half-open k-mer range for a node in `Graph`.
+ *
+ * Nodes and k-mers share hash order, so the end is the next node's `start`,
+ * or `n_kmers` for the final node.
+ */
+inline std::pair<std::size_t, std::size_t> kmer_range(
+    const Node* nodes,
+    std::size_t n_nodes,
+    std::size_t n_kmers,
+    std::size_t node_idx
+) {
+    if (node_idx >= n_nodes) {
+        throw std::invalid_argument("Node index is out of bounds");
+    }
+    const auto start = nodes[node_idx].start;
+    const auto stop = node_idx + 1 < n_nodes
+        ? nodes[node_idx + 1].start
+        : n_kmers;
+    if (start >= stop || stop > n_kmers) {
+        throw std::invalid_argument("Node k-mer range is invalid");
+    }
+    return {start, stop};
+}
 
 /**
  * @brief Stable parallel LSD radix sort over an unsigned 64-bit key.
@@ -63,32 +89,28 @@ void lsd_radix_sort(
     for (std::size_t shift = 0; shift < 64; shift += 16) {
         std::fill(counts.begin(), counts.end(), 0);
 
-        pool.parallel_for(n, [&](std::size_t start, std::size_t end, std::size_t worker_id) {
-            auto* local_counts = counts.data() + worker_id * bucket_count;
-            for (std::size_t i = start; i < end; ++i) {
-                const auto bucket = (std::invoke(key, static_cast<const T&>(src[i])) >> shift) & bucket_mask;
-                ++local_counts[static_cast<std::size_t>(bucket)];
-            }
+        pool.parallel_for(n, [&](std::size_t i, std::size_t chunk_id) {
+            auto* local_counts = counts.data() + chunk_id * bucket_count;
+            const auto bucket = (std::invoke(key, static_cast<const T&>(src[i])) >> shift) & bucket_mask;
+            ++local_counts[static_cast<std::size_t>(bucket)];
         });
 
         std::size_t current = 0;
         for (std::size_t bucket_i = 0; bucket_i < bucket_count; ++bucket_i) {
             const auto bucket = ascending ? bucket_i : bucket_count - bucket_i - 1;
-            for (std::size_t worker_id = 0; worker_id < pool.size(); ++worker_id) {
-                auto& value = counts[worker_id * bucket_count + bucket];
+            for (std::size_t chunk_id = 0; chunk_id < pool.size(); ++chunk_id) {
+                auto& value = counts[chunk_id * bucket_count + bucket];
                 const auto count = value;
                 value = current;
                 current += count;
             }
         }
 
-        pool.parallel_for(n, [&](std::size_t start, std::size_t end, std::size_t worker_id) {
-            auto* local_offsets = counts.data() + worker_id * bucket_count;
-            for (std::size_t i = start; i < end; ++i) {
-                const auto bucket = (std::invoke(key, static_cast<const T&>(src[i])) >> shift) & bucket_mask;
-                const auto pos = local_offsets[static_cast<std::size_t>(bucket)]++;
-                dst[pos] = src[i];
-            }
+        pool.parallel_for(n, [&](std::size_t i, std::size_t chunk_id) {
+            auto* local_offsets = counts.data() + chunk_id * bucket_count;
+            const auto bucket = (std::invoke(key, static_cast<const T&>(src[i])) >> shift) & bucket_mask;
+            const auto pos = local_offsets[static_cast<std::size_t>(bucket)]++;
+            dst[pos] = src[i];
         });
 
         std::swap(src, dst);

@@ -26,7 +26,7 @@ def _inputs():
     for node_hash, records in occurrences.items():
         start = len(kmers)
         kmers.extend((i, record) for i, record in enumerate(records))
-        nodes.append((node_hash, start, len(kmers), len(set(records))))
+        nodes.append((node_hash, start, len(set(records))))
     return (
         np.array(kmers, dtype=KMER_DTYPE),
         np.array(nodes, dtype=NODE_DTYPE),
@@ -59,7 +59,7 @@ def _filter_distinct_weights(edge_weight_th):
         dtype=KMER_DTYPE,
     )
     nodes = np.array(
-        [(node_hash, i * 2, i * 2 + 2, 2)
+        [(node_hash, i * 2, 2)
          for i, node_hash in enumerate((10, 20, 30, 40))],
         dtype=NODE_DTYPE,
     )
@@ -282,11 +282,37 @@ def test_native_results_pickle_round_trip():
         assert getattr(restored_location, name) == getattr(signature.location, name)
 
 
+def test_signature_extraction_uses_final_original_node_range():
+    (filtered, signatures), _ = _filter(
+        penalty_th=2.0, edge_w_th_mul=0, min_nodes_floor=1,
+    )
+
+    assert filtered.nodes['idx'][-1] == 3
+    assert any(3 in [filtered.nodes[i]['idx'] for i in subgraph]
+               for subgraph in filtered.subgraphs)
+    assert signatures
+
+
+@pytest.mark.parametrize('final_start_offset', (0, 1))
+def test_signature_extraction_rejects_invalid_final_node_range(final_start_offset):
+    kmers, nodes, edges, offsets, targets = _inputs()
+    nodes['start'][-1] = len(kmers) + final_start_offset
+    assembly_nodes = np.array([0, 1, 2, 3, 0, 1, 2, 2, 2], dtype=np.uintp)
+    node_offsets = np.array([0, 4, 7, 8, 9], dtype=np.uintp)
+
+    with pytest.raises(ValueError, match='Node k-mer range is invalid'):
+        _filter_native(
+            kmers, nodes, edges, offsets, assembly_nodes, node_offsets,
+            _paths(), targets, None, 5, 10, 2.0, 5, 0, None, .2, 0, 1,
+            None, 1.5, 1,
+        )
+
+
 
 def test_target_counts_include_non_target_only_nodes_and_exclude_isolated_nodes():
     kmers, original_nodes, _, offsets, targets = _inputs()
     extra_kmers = np.array([(0, 2), (1, 3)], dtype=KMER_DTYPE)
-    extra_nodes = np.array([(50, 9, 11, 2)], dtype=NODE_DTYPE)
+    extra_nodes = np.array([(50, 9, 2)], dtype=NODE_DTYPE)
     edges = np.array([(0, 1, 1), (1, 2, 1), (2, 4, 1)], dtype=EDGE_DTYPE)
     assembly_nodes = np.array([0, 1, 2, 3, 0, 1, 2, 2, 4, 2, 4], dtype=np.uintp)
     node_offsets = np.array([0, 4, 7, 9, 11], dtype=np.uintp)
