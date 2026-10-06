@@ -214,7 +214,7 @@ std::pair<FilteredGraph, std::vector<Signature>> filter(
     );
 
     internal::log_python(" - Filtering graph and calculating node penalty scores...");
-    internal::prune_graph(
+    auto graph_topology = internal::prune_graph(
         nodes,
         n_nodes,
         edges,
@@ -236,8 +236,8 @@ std::pair<FilteredGraph, std::vector<Signature>> filter(
     );
 
     internal::get_subgraphs(
+        graph_topology,
         filtered.nodes,
-        filtered.edges,
         filtered.penalty_th,
         filtered.min_nodes,
         filtered.max_nodes,
