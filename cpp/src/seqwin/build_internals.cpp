@@ -322,11 +322,7 @@ static std::pair<NoInitArray<Node>, KmerMaps> merge_low_memory(
     const std::vector<WorkerGraph>& graphs,
     ThreadPool& pool
 ) {
-    // Final k-mer output position for one worker-local node
-    struct KmerMapEntry {
-        std::uint64_t hash;
-        std::size_t out_start;
-    };
+    using MapEntries = KmerMap::value_container_type;
 
     const std::size_t n_worker_nodes = worker_nodes.size();
     const std::size_t n_chunks = plan.chunks.size();
@@ -337,27 +333,24 @@ static std::pair<NoInitArray<Node>, KmerMaps> merge_low_memory(
         return {NoInitArray<Node>{}, std::move(kmer_maps)};
     }
 
-    // KmerMap entries grouped by worker
-    NoInitArray<KmerMapEntry> map_entries(n_worker_nodes);
+    // Dense key/value arrays for each KmerMap
+    std::vector<MapEntries> map_entries(n_workers);
+    pool.parallel_for(n_workers, [&](std::size_t worker_id) {
+        MapEntries entries;
+        entries.resize(graphs[worker_id].n_nodes);
+        map_entries[worker_id] = std::move(entries);
+    });
 
-    // Each worker's contiguous range in map_entries
-    std::vector<std::size_t> worker_offsets(n_workers + 1, 0);
+    // Convert per-chunk worker counts to write cursors into map_entries
+    NoInitArray<std::size_t> entry_cursors(n_chunks * n_workers);
     for (std::size_t worker_id = 0; worker_id < n_workers; ++worker_id) {
-        worker_offsets[worker_id + 1] = worker_offsets[worker_id] + graphs[worker_id].n_nodes;
-    }
-    if (worker_offsets.back() != n_worker_nodes) {
-        throw std::logic_error("Worker-node count does not match worker graphs");
-    }
-    // Convert per-chunk counts to write cursors within each worker's range
-    NoInitArray<std::size_t> worker_cursors(n_chunks * n_workers);
-    for (std::size_t worker_id = 0; worker_id < n_workers; ++worker_id) {
-        std::size_t cursor = worker_offsets[worker_id];
+        std::size_t cursor = 0;
         for (std::size_t chunk_id = 0; chunk_id < n_chunks; ++chunk_id) {
-            worker_cursors[chunk_id * n_workers + worker_id] = cursor;
+            entry_cursors[chunk_id * n_workers + worker_id] = cursor;
             cursor += plan.chunks[chunk_id].worker_counts[worker_id];
         }
-        if (cursor != worker_offsets[worker_id + 1]) {
-            throw std::logic_error("Worker-node scatter count does not match worker range");
+        if (cursor != graphs[worker_id].n_nodes) {
+            throw std::logic_error("Worker-node scatter count does not match worker graph");
         }
     }
 
@@ -370,24 +363,18 @@ static std::pair<NoInitArray<Node>, KmerMaps> merge_low_memory(
             std::size_t kmer_cursor,
             std::size_t chunk_id
         ) {
-            auto& cursor = worker_cursors[chunk_id * n_workers + worker_node.worker_id()];
-            map_entries[cursor++] = KmerMapEntry{hash, kmer_cursor};
+            const auto worker_id = worker_node.worker_id();
+            auto& cursor = entry_cursors[chunk_id * n_workers + worker_id];
+            map_entries[worker_id][cursor++] = {hash, kmer_cursor};
         },
         pool
     );
     worker_nodes.reset();
 
-    pool.parallel_for(graphs.size(), [&](std::size_t worker_id) {
+    // Adopt the populated dense arrays and build bucket metadata
+    pool.parallel_for(n_workers, [&](std::size_t worker_id) {
         KmerMap map;
-        map.reserve(graphs[worker_id].n_nodes);
-        for (
-            std::size_t i = worker_offsets[worker_id];
-            i < worker_offsets[worker_id + 1];
-            ++i
-        ) {
-            const auto& entry = map_entries[i];
-            map.emplace(entry.hash, entry.out_start);
-        }
+        map.replace(std::move(map_entries[worker_id]));
         kmer_maps[worker_id] = std::move(map);
     });
     return {std::move(nodes), std::move(kmer_maps)};
