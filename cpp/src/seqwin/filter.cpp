@@ -227,8 +227,8 @@ std::pair<FilteredGraph, std::vector<Signature>> filter(
         pool
     );
     internal::log_python(
-        " - Removed " + std::to_string(n_edges - filtered.edges.size()) + " edges with weight<" +
-        format_value(filtered.edge_weight_th, 3) + ", " + std::to_string(filtered.edges.size()) + " edges left"
+        " - Removed " + std::to_string(n_edges - filtered.edges.size()) + " edges failing weight/target-support thresholds, " +
+        std::to_string(filtered.edges.size()) + " edges left"
     );
     internal::log_python(
         " - Removed " + std::to_string(n_nodes - filtered.nodes.size()) + " isolated nodes, " +

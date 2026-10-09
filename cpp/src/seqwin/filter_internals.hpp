@@ -154,8 +154,11 @@ std::pair<double, double> expected_presence(
 );
 
 /**
- * @brief Remove low-weight edges and isolated nodes, calculate penalty scores,
- * and construct CSR adjacency lists of the retained graph.
+ * @brief Remove edges failing weight or target-support thresholds, calculate
+ * penalty scores for retained nodes, and construct CSR adjacency lists.
+ *
+ * An edge is retained only if its weight is greater than `edge_weight_th` and
+ * at least one endpoint occurs in more than `edge_weight_th` target assemblies.
  *
  * Retained nodes and edges are stored directly in `filtered`.
  */

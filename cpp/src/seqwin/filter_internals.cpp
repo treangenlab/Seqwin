@@ -200,9 +200,9 @@ GraphTopology prune_graph(
 ) {
     // Find edges that pass the weight threshold
     const std::size_t th = edge_weight_th;
-    std::size_t retained_count = 0;
+    std::size_t n_candidates = 0;
     if (n_edges != 0) {
-        const auto* retained_end = std::lower_bound(
+        const auto* candidate_end = std::lower_bound(
             edges,
             edges + n_edges,
             th,
@@ -210,18 +210,32 @@ GraphTopology prune_graph(
                 return edge.weight > threshold;
             }
         );
-        retained_count = static_cast<std::size_t>(retained_end - edges);
+        n_candidates = static_cast<std::size_t>(candidate_end - edges);
     }
+
+    // Keep edges with sufficient target support at either endpoint
+    std::vector<std::size_t> retained_indices;
+    retained_indices.reserve(n_candidates);
+    target_counts.visit(nodes, [&](const auto& n_tar_at) {
+        for (std::size_t i = 0; i < n_candidates; ++i) {
+            const auto& edge = edges[i];
+            if (edge.first >= n_nodes || edge.second >= n_nodes) {
+                throw std::invalid_argument("Edge endpoint does not correspond to a node");
+            }
+            if (n_tar_at(edge.first) > th || n_tar_at(edge.second) > th) {
+                retained_indices.push_back(i);
+            }
+        }
+    });
+    const std::size_t n_retained = retained_indices.size();
 
     // Store each retained edge as two endpoint records
     // Used for building the CSR adjacency lists (offsets and neighbors)
-    NoInitArray<Endpoint> endpoints(retained_count * 2);
-    pool.parallel_for(retained_count, [&](std::size_t i) {
-        if (edges[i].first >= n_nodes || edges[i].second >= n_nodes) {
-            throw std::invalid_argument("Edge endpoint does not correspond to a node");
-        }
-        endpoints[i * 2] = Endpoint{edges[i].first, i * 2};
-        endpoints[i * 2 + 1] = Endpoint{edges[i].second, i * 2 + 1};
+    NoInitArray<Endpoint> endpoints(n_retained * 2);
+    pool.parallel_for(n_retained, [&](std::size_t i) {
+        const auto& edge = edges[retained_indices[i]];
+        endpoints[i * 2] = Endpoint{edge.first, i * 2};
+        endpoints[i * 2 + 1] = Endpoint{edge.second, i * 2 + 1};
     });
     lsd_radix_sort(endpoints, &Endpoint::node, pool);
 
@@ -276,13 +290,14 @@ GraphTopology prune_graph(
     });
 
     // Update edge endpoints to indices of retained nodes
-    filtered.edges = NoInitArray<Edge>(retained_count);
+    filtered.edges = NoInitArray<Edge>(n_retained);
     const auto& node_indices_read = node_indices;
-    pool.parallel_for(retained_count, [&](std::size_t i) {
+    pool.parallel_for(n_retained, [&](std::size_t i) {
+        const auto& edge = edges[retained_indices[i]];
         filtered.edges[i] = Edge{
-            node_indices_read.at(edges[i].first),
-            node_indices_read.at(edges[i].second),
-            edges[i].weight
+            node_indices_read.at(edge.first),
+            node_indices_read.at(edge.second),
+            edge.weight
         };
     });
 

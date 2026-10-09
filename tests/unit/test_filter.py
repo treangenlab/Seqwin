@@ -9,9 +9,9 @@ from seqwin.core import (
 from seqwin.core._native import _filter_native
 
 
-def _paths():
+def _paths(n_assemblies=4):
     paths = []
-    for i in range(4):
+    for i in range(n_assemblies):
         path = f'/tmp/seqwin-filter-{i}.fasta'
         with open(path, 'w') as fasta:
             fasta.write(f'>record-{i}\nACGTACGTACGT\n')
@@ -55,11 +55,11 @@ def _filter(*, penalty_th=0.3, jaccard=None, n_cpu=1, targets=None,
 
 def _filter_distinct_weights(edge_weight_th):
     kmers = np.array(
-        [(0, record) for _ in range(4) for record in (0, 1)],
+        [(0, record) for _ in range(4) for record in (0, 1, 2, 3)],
         dtype=KMER_DTYPE,
     )
     nodes = np.array(
-        [(node_hash, i * 2, 2)
+        [(node_hash, i * 4, 4)
          for i, node_hash in enumerate((10, 20, 30, 40))],
         dtype=NODE_DTYPE,
     )
@@ -67,14 +67,14 @@ def _filter_distinct_weights(edge_weight_th):
         [(0, 1, 5), (1, 2, 3), (2, 3, 2)],
         dtype=EDGE_DTYPE,
     )
-    record_offsets = np.array([0, 1, 2, 2, 2], dtype=np.uint32)
-    assembly_nodes = np.tile(np.arange(4, dtype=np.uintp), 2)
-    node_offsets = np.array([0, 4, 8, 8, 8], dtype=np.uintp)
-    targets = np.array([True, True, False, False], dtype=np.bool_)
-    edge_w_th_mul = np.nextafter(edge_weight_th / 1.4, np.inf)
+    record_offsets = np.array([0, 1, 2, 3, 4, 4], dtype=np.uint32)
+    assembly_nodes = np.tile(np.arange(4, dtype=np.uintp), 4)
+    node_offsets = np.array([0, 4, 8, 12, 16, 16], dtype=np.uintp)
+    targets = np.array([True, True, True, True, False], dtype=np.bool_)
+    edge_w_th_mul = np.nextafter(edge_weight_th / 2.8, np.inf)
     return _filter_native(
         kmers, nodes, edges, record_offsets, assembly_nodes, node_offsets,
-        _paths(), targets, None, 5, 10, .3, 5,
+        _paths(5), targets, None, 5, 10, .3, 5,
         0, None, .2, edge_w_th_mul, 1, None, 1.5, 1,
     )
 
@@ -206,6 +206,80 @@ def test_edge_pruning_handles_empty_edge_array():
             _paths(), targets,
             None, 5, 10, .3, 5, 0, None, .2, .3, 1, None, 1.5, 1,
         )
+
+
+def _filter_target_support(support, edge_data, total_tar, n_cpu):
+    # Low-support nodes also occur in every non-target assembly.
+    occurrences = [
+        tuple(range(count)) + tuple(range(total_tar, 5))
+        if count <= 1 else tuple(range(count))
+        for count in support
+    ]
+    kmers = []
+    nodes = []
+    for i, records in enumerate(occurrences):
+        nodes.append(((i + 1) * 10, len(kmers), len(records)))
+        kmers.extend((0, record) for record in records)
+    assembly_nodes = []
+    node_offsets = [0]
+    for record in range(5):
+        assembly_nodes.extend(
+            i for i, records in enumerate(occurrences) if record in records
+        )
+        node_offsets.append(len(assembly_nodes))
+    targets = np.arange(5) < total_tar
+    # The integer pruning threshold is 1; weight-1 edges must be rejected.
+    edge_w_th_mul = 1.5 / ((1.0 - .9) * total_tar)
+    return _filter_native(
+        np.array(kmers, dtype=KMER_DTYPE),
+        np.array(nodes, dtype=NODE_DTYPE),
+        np.array(edge_data, dtype=EDGE_DTYPE),
+        np.arange(6, dtype=np.uint32),
+        np.array(assembly_nodes, dtype=np.uintp),
+        np.array(node_offsets, dtype=np.uintp),
+        _paths(5), targets, None, 5, 10, .9, 5,
+        0, None, .2, edge_w_th_mul, 1, None, 1.5, n_cpu,
+    )
+
+
+@pytest.mark.parametrize('total_tar', (2, 3))
+@pytest.mark.parametrize('n_cpu', (1, 4))
+def test_edge_pruning_requires_target_support_and_preserves_order(total_tar, n_cpu):
+    filtered, _ = _filter_target_support(
+        [1, 1, 2, 1, 1, 2, 2, 2],
+        [(0, 1, 5), (2, 3, 4), (0, 1, 3), (4, 5, 3), (6, 7, 2), (2, 6, 1)],
+        total_tar, n_cpu,
+    )
+
+    assert filtered.edge_weight_th == pytest.approx(1.5)
+    # Neither endpoint qualifies at equality; first-only, second-only and both do.
+    np.testing.assert_array_equal(filtered.nodes['idx'], [2, 3, 4, 5, 6, 7])
+    np.testing.assert_array_equal(filtered.nodes['n_tar'], [2, 1, 1, 2, 2, 2])
+    assert filtered.edges.tolist() == [(0, 1, 4), (2, 3, 3), (4, 5, 2)]
+    assert filtered.subgraphs == [[0, 1], [3, 2], [4, 5]]
+
+
+@pytest.mark.parametrize('total_tar', (2, 3))
+@pytest.mark.parametrize('n_cpu', (1, 4))
+def test_edge_pruning_rejects_weight_candidates_without_target_support(total_tar, n_cpu):
+    with pytest.raises(RuntimeError, match='adjust|Try decrease'):
+        _filter_target_support([1, 1], [(0, 1, 4)], total_tar, n_cpu)
+
+
+@pytest.mark.parametrize('support', ([2, 1], [1, 2], [2, 2]))
+@pytest.mark.parametrize('total_tar', (2, 3))
+@pytest.mark.parametrize('n_cpu', (1, 4))
+def test_edge_pruning_retains_one_target_supported_edge(support, total_tar, n_cpu):
+    filtered, _ = _filter_target_support(support, [(0, 1, 4)], total_tar, n_cpu)
+    np.testing.assert_array_equal(filtered.nodes['idx'], [0, 1])
+    np.testing.assert_array_equal(filtered.nodes['n_tar'], support)
+    assert filtered.edges.tolist() == [(0, 1, 4)]
+
+
+@pytest.mark.parametrize('edge', ((0, 2, 4), (2, 0, 4)))
+def test_edge_pruning_validates_candidates_before_target_count_access(edge):
+    with pytest.raises(ValueError, match='Edge endpoint does not correspond to a node'):
+        _filter_target_support([1, 1], [edge], 2, 1)
 
 
 def test_edge_endpoints_are_remapped_after_isolated_node_removal():
