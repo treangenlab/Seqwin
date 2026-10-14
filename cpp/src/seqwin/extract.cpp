@@ -67,7 +67,6 @@ struct CanonicalCount {
 std::optional<Signature> extract_worker(
     std::size_t subgraph_idx,
     const Subgraph& subgraph,
-    const NoInitArray<FilteredNode>& filtered_nodes,
     const Kmer* kmers,
     std::size_t n_kmers,
     const Node* nodes,
@@ -86,13 +85,9 @@ std::optional<Signature> extract_worker(
     std::vector<FullKmer> sg_kmers; // K-mers of the current subgraph
     // Each node in a low-penalty subgraph should contain roughly total_tar k-mers
     sg_kmers.reserve(2 * total_tar * subgraph.size());
-    for (const auto filtered_node_idx : subgraph) {
-        if (filtered_node_idx >= filtered_nodes.size()) {
-            throw std::invalid_argument("subgraph node index is out of bounds");
-        }
-        const auto node_idx = filtered_nodes[filtered_node_idx].idx;
+    for (const auto node_idx : subgraph) {
         if (node_idx >= n_nodes) {
-            throw std::invalid_argument("filtered node index is out of bounds");
+            throw std::invalid_argument("subgraph node index is out of bounds");
         }
         const auto& node = nodes[node_idx];
         const auto [start, stop] = kmer_range(nodes, n_nodes, n_kmers, node_idx);
@@ -339,7 +334,6 @@ void fetch_signature_sequences(
 
 std::vector<Signature> extract_signatures(
     const std::vector<Subgraph>& subgraphs,
-    const NoInitArray<FilteredNode>& filtered_nodes,
     const Kmer* kmers,
     std::size_t n_kmers,
     const Node* nodes,
@@ -374,7 +368,6 @@ std::vector<Signature> extract_signatures(
         extracted[subgraph_idx] = extract_worker(
             subgraph_idx,
             subgraphs[subgraph_idx],
-            filtered_nodes,
             kmers,
             n_kmers,
             nodes,

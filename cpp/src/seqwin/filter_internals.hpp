@@ -62,7 +62,7 @@ private:
 };
 
 /**
- * @brief Undirected graph stored as CSR adjacency lists.
+ * @brief Undirected graph stored as CSR adjacency lists. Nodes are represented by compact indices.
  */
 class GraphTopology {
 public:
@@ -193,7 +193,6 @@ void get_subgraphs(
  */
 std::vector<Signature> extract_signatures(
     const std::vector<Subgraph>& subgraphs,
-    const NoInitArray<FilteredNode>& filtered_nodes,
     const Kmer* kmers,
     std::size_t n_kmers,
     const Node* nodes,

@@ -79,7 +79,7 @@ def _filter_distinct_weights(edge_weight_th):
     )
 
 
-def test_native_filter_preserves_ranges_and_remaps_edges():
+def test_native_filter_preserves_ranges_and_original_indices():
     (filtered, signatures), scored = _filter()
     nodes, edges, subgraphs = filtered.nodes, filtered.edges, filtered.subgraphs
 
@@ -99,10 +99,10 @@ def test_native_filter_preserves_ranges_and_remaps_edges():
     np.testing.assert_array_equal(nodes['n_neg'], [0, 0, 2, 0])
     np.testing.assert_allclose(nodes['penalty'], [0, 0, 1, .5])
     assert edges.tolist() == [(0, 1, 1), (1, 2, 1), (2, 3, 1)]
-    assert np.all(edges['first'] < len(nodes))
-    assert np.all(edges['second'] < len(nodes))
-    assert nodes[edges['first']]['idx'].tolist() == [0, 1, 2]
-    assert nodes[edges['second']]['idx'].tolist() == [1, 2, 3]
+    assert np.all(edges['first'] < len(scored))
+    assert np.all(edges['second'] < len(scored))
+    assert set(edges['first']) <= set(nodes['idx'])
+    assert set(edges['second']) <= set(nodes['idx'])
     assert subgraphs == [[0, 1]]
     assert len(signatures) == 1
     signature = signatures[0]
@@ -111,9 +111,8 @@ def test_native_filter_preserves_ranges_and_remaps_edges():
     assert signature.length == 5
     assert signature.n_rep == 2
     assert signature.rep_ratio == 1.0
-    assert all(node_i < len(nodes) for subgraph in subgraphs for node_i in subgraph)
-    np.testing.assert_array_equal(nodes[subgraphs[0]]['idx'], [0, 1])
-    assert set(nodes['idx']) - set(nodes[subgraphs[0]]['idx']) == {2, 3}
+    assert all(node_i < len(scored) for subgraph in subgraphs for node_i in subgraph)
+    assert set(nodes['idx']) - set(subgraphs[0]) == {2, 3}
 
 
 def test_automatic_threshold_from_minimizers_and_parallel_equivalence():
@@ -255,8 +254,8 @@ def test_edge_pruning_requires_target_support_and_preserves_order(total_tar, n_c
     # Neither endpoint qualifies at equality; first-only, second-only and both do.
     np.testing.assert_array_equal(filtered.nodes['idx'], [2, 3, 4, 5, 6, 7])
     np.testing.assert_array_equal(filtered.nodes['n_tar'], [2, 1, 1, 2, 2, 2])
-    assert filtered.edges.tolist() == [(0, 1, 4), (2, 3, 3), (4, 5, 2)]
-    assert filtered.subgraphs == [[0, 1], [3, 2], [4, 5]]
+    assert filtered.edges.tolist() == [(2, 3, 4), (4, 5, 3), (6, 7, 2)]
+    assert filtered.subgraphs == [[2, 3], [5, 4], [6, 7]]
 
 
 @pytest.mark.parametrize('total_tar', (2, 3))
@@ -282,22 +281,31 @@ def test_edge_pruning_validates_candidates_before_target_count_access(edge):
         _filter_target_support([1, 1], [edge], 2, 1)
 
 
-def test_edge_endpoints_are_remapped_after_isolated_node_removal():
+@pytest.mark.parametrize('n_cpu', (1, 4))
+def test_original_indices_are_preserved_after_isolated_node_removal(n_cpu):
     kmers, nodes, _, offsets, targets = _inputs()
     edges = np.array([(1, 2, 1)], dtype=EDGE_DTYPE)
     assembly_nodes = np.array([0, 1, 2, 3, 0, 1, 2, 2, 2], dtype=np.uintp)
     node_offsets = np.array([0, 4, 7, 8, 9], dtype=np.uintp)
     result = _filter_native(
         kmers, nodes, edges, offsets, assembly_nodes, node_offsets,
-        _paths(), targets, None, 5, 10, 1.0, 5, 0, None, .2, .3, 1, None, 1.5, 1,
+        _paths(), targets, None, 5, 10, 1.0, 5, 0, None, .2, .3, 1, None, 1.5, n_cpu,
     )
 
-    filtered, _ = result
+    filtered, signatures = result
     filtered_nodes, filtered_edges, subgraphs = filtered.nodes, filtered.edges, filtered.subgraphs
     np.testing.assert_array_equal(filtered_nodes['idx'], [1, 2])
-    assert filtered_edges.tolist() == [(0, 1, 1)]
-    assert subgraphs == [[0, 1]]
-    np.testing.assert_array_equal(filtered_nodes[subgraphs[0]]['idx'], [1, 2])
+    np.testing.assert_array_equal(filtered_edges, edges)
+    assert filtered_edges.tolist() == [(1, 2, 1)]
+    assert subgraphs == [[1, 2]]
+    assert len(signatures) == 1
+    assert signatures[0].sequence == 'ACGTA'
+    assert signatures[0].location.n_kmers == 2
+
+    restored = pickle.loads(pickle.dumps(filtered, protocol=5))
+    np.testing.assert_array_equal(restored.nodes, filtered_nodes)
+    np.testing.assert_array_equal(restored.edges, filtered_edges)
+    assert restored.subgraphs == subgraphs
 
 
 def test_subgraph_extraction_is_deterministic():
@@ -362,8 +370,7 @@ def test_signature_extraction_uses_final_original_node_range():
     )
 
     assert filtered.nodes['idx'][-1] == 3
-    assert any(3 in [filtered.nodes[i]['idx'] for i in subgraph]
-               for subgraph in filtered.subgraphs)
+    assert any(3 in subgraph for subgraph in filtered.subgraphs)
     assert signatures
 
 
@@ -410,4 +417,4 @@ def test_target_counts_include_non_target_only_nodes_and_exclude_isolated_nodes(
     np.testing.assert_array_equal(filtered.nodes['n_neg'], [0, 0, 2, 2])
     np.testing.assert_allclose(filtered.nodes['penalty'], [0, 0, 1, np.sqrt(2)])
     assert 3 not in filtered.nodes['idx']
-    assert filtered.edges.tolist() == [(0, 1, 1), (1, 2, 1), (2, 3, 1)]
+    assert filtered.edges.tolist() == [(0, 1, 1), (1, 2, 1), (2, 4, 1)]

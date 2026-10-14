@@ -251,7 +251,6 @@ std::pair<FilteredGraph, std::vector<Signature>> filter(
     internal::log_python(" - Finding a representative for each low-penalty subgraph...");
     auto signatures = internal::extract_signatures(
         filtered.subgraphs,
-        filtered.nodes,
         kmers,
         n_kmers,
         nodes,
