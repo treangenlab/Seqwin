@@ -303,14 +303,16 @@ void get_subgraphs(
 
     struct FrontierNode {
         double penalty;
-        std::size_t index;
+        std::size_t node;
     };
     const auto lower_priority = [](const FrontierNode& left, const FrontierNode& right) {
         if (left.penalty != right.penalty) {
             return left.penalty > right.penalty;
         }
-        return left.index > right.index;
+        return left.node > right.node;
     };
+    // Reuse heap storage across seeds
+    std::vector<FrontierNode> frontier;
 
     // Marks nodes accepted in any of the subgraphs
     std::vector<std::uint8_t> used(nodes.size(), 0);
@@ -329,14 +331,12 @@ void get_subgraphs(
         Subgraph subgraph{seed};
         seen[seed] = 1;
         double sum_penalty = nodes[seed].penalty;
-        std::priority_queue<
-            FrontierNode, std::vector<FrontierNode>, decltype(lower_priority)
-        > frontier(lower_priority);
 
         const auto add_neighbors = [&](std::size_t node) {
             for (const auto neighbor : graph.neighbors(node)) {
                 if (!used[neighbor] && !seen[neighbor]) {
-                    frontier.push({nodes[neighbor].penalty, neighbor});
+                    frontier.push_back({nodes[neighbor].penalty, neighbor});
+                    std::push_heap(frontier.begin(), frontier.end(), lower_priority);
                     seen[neighbor] = 1;
                 }
             }
@@ -344,29 +344,31 @@ void get_subgraphs(
         add_neighbors(seed);
 
         while (!frontier.empty() && subgraph.size() < max_nodes_value) {
-            const auto candidate = frontier.top();
-            frontier.pop();
+            std::pop_heap(frontier.begin(), frontier.end(), lower_priority);
+            const auto candidate = frontier.back();
+            frontier.pop_back();
+
             const double new_sum_penalty = sum_penalty + candidate.penalty;
             if (new_sum_penalty / (subgraph.size() + 1) <= penalty_th) {
-                subgraph.push_back(candidate.index);
+                subgraph.push_back(candidate.node);
                 sum_penalty = new_sum_penalty;
-                add_neighbors(candidate.index);
+                add_neighbors(candidate.node);
             } else {
                 // All remaining candidates have at least this penalty, so they
                 // cannot lower the subgraph average below the threshold.
-                seen[candidate.index] = 0;
+                seen[candidate.node] = 0;
                 break;
             }
         }
 
         // Clear node states for the next seed
-        while (!frontier.empty()) {
-            seen[frontier.top().index] = 0;
-            frontier.pop();
+        for (const auto& candidate : frontier) {
+            seen[candidate.node] = 0;
         }
         for (const auto node : subgraph) {
             seen[node] = 0;
         }
+        frontier.clear();
 
         // Output subgraphs using indices of the original node array
         if (subgraph.size() >= min_nodes) {
