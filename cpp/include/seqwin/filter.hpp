@@ -58,7 +58,7 @@ struct FilteredGraph {
     /** Nodes retained by edge filtering. */
     NoInitArray<FilteredNode> nodes;
     /** Edges passing weight and target-support thresholds. */
-    NoInitArray<Edge> edges;
+    std::vector<Edge> edges;
     /** Low-penalty subgraphs represented by indices of the original `Graph.nodes` array. */
     std::vector<Subgraph> subgraphs;
     /** Number of target assemblies. */

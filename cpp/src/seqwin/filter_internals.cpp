@@ -9,8 +9,6 @@
 #include <stdexcept>
 #include <vector>
 
-#include <ankerl/unordered_dense.h>
-
 #include "seqwin/filter.hpp"
 #include "seqwin/shared_internals.hpp"
 #include "utils/logging.hpp"
@@ -18,19 +16,6 @@
 
 namespace seqwin::internal {
 namespace {
-
-/**
- * @brief One endpoint occurrence of a retained edge.
- */
-struct Endpoint {
-    /** Original graph node represented by this endpoint. */
-    std::size_t node;
-    /**
-     * Index in the flattened edge array.
-     * The first endpoint has even index; the second endpoint has odd index.
-     */
-    std::size_t idx;
-};
 
 /**
  * @brief For each graph node, count its occurrences in target or non-target assemblies.
@@ -198,11 +183,22 @@ GraphTopology prune_graph(
     FilteredGraph& filtered,
     ThreadPool& pool
 ) {
+    // One endpoint occurrence of a retained edge
+    // Used for building the CSR adjacency lists (offsets and neighbors)
+    struct Endpoint {
+        // Original graph node represented by this endpoint
+        std::size_t node;
+        // Index in the flattened edge array
+        // The first endpoint has even index; the second endpoint has odd index
+        std::size_t idx;
+    };
+
     // Scan the prefix of edges (sorted by weight)
     // Keep edges with sufficient weight and target support
-    std::vector<std::size_t> retained_indices;
-    retained_indices.reserve(n_edges);
+    filtered.edges.clear();
     const std::size_t th = edge_weight_th;
+    // Store each retained edge as two endpoint records
+    std::vector<Endpoint> endpoints;
     target_counts.visit(nodes, [&](const auto& n_tar_at) {
         for (std::size_t i = 0; i < n_edges; ++i) {
             const auto& edge = edges[i];
@@ -213,53 +209,37 @@ GraphTopology prune_graph(
                 throw std::invalid_argument("Edge endpoint does not correspond to a node");
             }
             if (n_tar_at(edge.first) > th || n_tar_at(edge.second) > th) {
-                retained_indices.push_back(i);
+                const auto n_retained = filtered.edges.size();
+                filtered.edges.push_back(edge);
+                endpoints.push_back({edge.first, n_retained * 2});
+                endpoints.push_back({edge.second, n_retained * 2 + 1});
             }
         }
-    });
-    const std::size_t n_retained = retained_indices.size();
-
-    filtered.edges = NoInitArray<Edge>(n_retained);
-    // Store each retained edge as two endpoint records
-    // Used for building the CSR adjacency lists (offsets and neighbors)
-    NoInitArray<Endpoint> endpoints(n_retained * 2);
-    pool.parallel_for(n_retained, [&](std::size_t i) {
-        const auto& edge = edges[retained_indices[i]];
-        filtered.edges[i] = edge;
-        endpoints[i * 2] = Endpoint{edge.first, i * 2};
-        endpoints[i * 2 + 1] = Endpoint{edge.second, i * 2 + 1};
     });
     lsd_radix_sort(endpoints, &Endpoint::node, pool);
 
     // Offsets into the neighbors array
     std::vector<std::size_t> offsets;
     offsets.reserve(endpoints.size() + 1);
-    // Map the original node indices to indices of retained nodes
-    ankerl::unordered_dense::map<std::size_t, std::size_t> node_indices;
-    node_indices.reserve(endpoints.size());
     // Unique node indices in endpoints
     std::vector<std::size_t> connected;
     connected.reserve(endpoints.size());
+    // Map endpoint indices to indices of retained nodes
+    NoInitArray<std::size_t> node_indices(endpoints.size());
     for (std::size_t i = 0; i < endpoints.size(); ++i) {
         if (i == 0 || endpoints[i].node != endpoints[i - 1].node) {
             offsets.push_back(i);
-            node_indices.emplace(endpoints[i].node, connected.size());
             connected.push_back(endpoints[i].node);
         }
+        node_indices[endpoints[i].idx] = connected.size() - 1;
     }
     offsets.push_back(endpoints.size());
 
     // The sorted endpoints array is parallel to neighbors
-    // For each endpoint, recover the opposite endpoint with Endpoint::idx
+    // For each endpoint, recover the index of the opposite endpoint
     NoInitArray<std::size_t> neighbors(endpoints.size());
-    const auto& node_indices_read = node_indices;
     pool.parallel_for(endpoints.size(), [&](std::size_t i) {
-        const auto endpoint_idx = endpoints[i].idx;
-        const auto& edge = filtered.edges[endpoint_idx / 2];
-        const auto opposite = endpoint_idx % 2 == 0
-            ? edge.second
-            : edge.first;
-        neighbors[i] = node_indices_read.at(opposite);
+        neighbors[i] = node_indices[endpoints[i].idx ^ 1];
     });
 
     // Calculate the penalty of each retained node
