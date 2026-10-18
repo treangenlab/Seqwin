@@ -188,6 +188,7 @@ std::pair<FilteredGraph, std::vector<Signature>> filter(
 
     internal::log_python(" - Counting target node occurrences...");
     auto target_counts = internal::count_target_nodes(
+        nodes,
         n_nodes,
         assembly_nodes,
         n_assembly_nodes,

@@ -27,6 +27,7 @@ namespace {
  */
 template <typename Counter>
 TargetCounts build_target_counts(
+    const Node* nodes,
     std::size_t n_nodes,
     const std::size_t* assembly_nodes,
     const std::size_t* node_offsets,
@@ -55,12 +56,13 @@ TargetCounts build_target_counts(
             }
         }
     });
-    return TargetCounts(std::move(counts), count_targets);
+    return TargetCounts(std::move(counts), count_targets, nodes);
 }
 
 } // namespace
 
 TargetCounts count_target_nodes(
+    const Node* nodes,
     std::size_t n_nodes,
     const std::size_t* assembly_nodes,
     std::size_t n_assembly_nodes,
@@ -92,16 +94,16 @@ TargetCounts count_target_nodes(
     const std::size_t counted_assemblies = count_targets ? total_tar : total_neg;
     if (counted_assemblies <= std::numeric_limits<std::uint8_t>::max()) {
         return build_target_counts<std::uint8_t>(
-            n_nodes, assembly_nodes, node_offsets, is_targets, n_assemblies, count_targets, pool
+            nodes, n_nodes, assembly_nodes, node_offsets, is_targets, n_assemblies, count_targets, pool
         );
     }
     if (counted_assemblies <= std::numeric_limits<std::uint16_t>::max()) {
         return build_target_counts<std::uint16_t>(
-            n_nodes, assembly_nodes, node_offsets, is_targets, n_assemblies, count_targets, pool
+            nodes, n_nodes, assembly_nodes, node_offsets, is_targets, n_assemblies, count_targets, pool
         );
     }
     return build_target_counts<std::uint32_t>(
-        n_nodes, assembly_nodes, node_offsets, is_targets, n_assemblies, count_targets, pool
+        nodes, n_nodes, assembly_nodes, node_offsets, is_targets, n_assemblies, count_targets, pool
     );
 }
 
@@ -126,7 +128,7 @@ std::pair<double, double> expected_presence(
     const double total_tar_inv = 1.0 / total_tar;
     const double total_neg_inv = 1.0 / total_neg;
 
-    target_counts.visit(nodes, [&](const auto& n_tar_at) {
+    target_counts.with([&](const auto& n_tar_at) {
         pool.parallel_for_chunks(n_nodes, [&](
             std::size_t start, std::size_t end, std::size_t chunk_id
         ) {
@@ -199,7 +201,7 @@ GraphTopology prune_graph(
     const std::size_t th = edge_weight_th;
     // Store each retained edge as two endpoint records
     std::vector<Endpoint> endpoints;
-    target_counts.visit(nodes, [&](const auto& n_tar_at) {
+    target_counts.with([&](const auto& n_tar_at) {
         for (std::size_t i = 0; i < n_edges; ++i) {
             const auto& edge = edges[i];
             if (edge.weight <= th) {
@@ -247,7 +249,7 @@ GraphTopology prune_graph(
     const double total_tar_inv = 1.0 / total_tar;
     const double total_neg_inv = 1.0 / total_neg;
 
-    target_counts.visit(nodes, [&](const auto& n_tar_at) {
+    target_counts.with([&](const auto& n_tar_at) {
         pool.parallel_for(connected.size(), [&](std::size_t i) {
             const auto node_idx = connected[i];
             const std::size_t n_tar = n_tar_at(node_idx);

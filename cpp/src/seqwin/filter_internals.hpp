@@ -22,43 +22,58 @@ namespace seqwin::internal {
  */
 class TargetCounts {
 public:
-    TargetCounts(NoInitArray<std::uint8_t>&& counts, bool counts_targets)
+    TargetCounts(NoInitArray<std::uint8_t>&& counts, bool counts_targets, const Node* nodes)
         : counts_(std::move(counts))
         , counts_targets_(counts_targets)
+        , nodes_(nodes)
     {}
-    TargetCounts(NoInitArray<std::uint16_t>&& counts, bool counts_targets)
+    TargetCounts(NoInitArray<std::uint16_t>&& counts, bool counts_targets, const Node* nodes)
         : counts_(std::move(counts))
         , counts_targets_(counts_targets)
+        , nodes_(nodes)
     {}
-    TargetCounts(NoInitArray<std::uint32_t>&& counts, bool counts_targets)
+    TargetCounts(NoInitArray<std::uint32_t>&& counts, bool counts_targets, const Node* nodes)
         : counts_(std::move(counts))
         , counts_targets_(counts_targets)
+        , nodes_(nodes)
     {}
 
-    /** Dispatch once on the counter type, then invoke `fn` with an `n_tar` accessor. */
-    template <typename Fn> void visit(const Node* nodes, Fn&& fn) const
-    {
+    /**
+     * @brief Provide a function `fn` that needs access to node `n_tar`.
+     *
+     * The `n_tar` accessor is selected based on the counter type and stored assembly group.
+     * It is passed as the sole argument to `fn`.
+     */
+    template <typename Fn>
+    void with(Fn&& fn) const {
         std::visit(
             [&](const auto& counts) {
-                fn([&](std::size_t node_idx) -> std::size_t {
-                    const std::size_t stored = counts[node_idx];
-                    if (counts_targets_) {
-                        return stored;
-                    }
-                    if (stored > nodes[node_idx].prevalence) {
-                        throw std::invalid_argument("Node n_neg exceeds prevalence");
-                    }
-                    return nodes[node_idx].prevalence - stored;
-                });
+                if (counts_targets_) {
+                    fn([&](std::size_t node_idx) -> std::size_t {
+                        return counts[node_idx];
+                    });
+                } else {
+                    fn([&](std::size_t node_idx) -> std::size_t {
+                        const std::size_t n_neg = counts[node_idx];
+                        if (n_neg > nodes_[node_idx].prevalence) {
+                            throw std::invalid_argument("Node n_neg exceeds prevalence");
+                        }
+                        return nodes_[node_idx].prevalence - n_neg;
+                    });
+                }
             },
             counts_
         );
     }
 
 private:
-    std::variant<NoInitArray<std::uint8_t>, NoInitArray<std::uint16_t>, NoInitArray<std::uint32_t>>
-        counts_;
+    std::variant<
+        NoInitArray<std::uint8_t>,
+        NoInitArray<std::uint16_t>,
+        NoInitArray<std::uint32_t>
+    > counts_;
     bool counts_targets_;
+    const Node* nodes_;
 };
 
 /**
@@ -128,6 +143,7 @@ private:
  * @brief For each graph node, count its occurrences in target assemblies (`n_tar`).
  */
 TargetCounts count_target_nodes(
+    const Node* nodes,
     std::size_t n_nodes,
     const std::size_t* assembly_nodes,
     std::size_t n_assembly_nodes,
