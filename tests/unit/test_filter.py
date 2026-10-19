@@ -38,7 +38,7 @@ def _inputs():
 
 def _filter(*, penalty_th=0.3, jaccard=None, n_cpu=1, targets=None,
             penalty_th_cap=0.2, edge_w_th_mul=0.3, min_nodes_floor=1,
-            max_nodes_cap=None):
+            max_nodes_cap=None, **output_paths):
     kmers, nodes, edges, offsets, default_targets = _inputs()
     if targets is None:
         targets = default_targets
@@ -48,7 +48,7 @@ def _filter(*, penalty_th=0.3, jaccard=None, n_cpu=1, targets=None,
         kmers, nodes, edges, offsets, assembly_nodes, node_offsets,
         _paths(), targets, jaccard, 5, 10,
         penalty_th, 5, 0, None, penalty_th_cap, edge_w_th_mul, min_nodes_floor,
-        max_nodes_cap, 1.5, n_cpu,
+        max_nodes_cap, 1.5, n_cpu, **output_paths,
     )
     return result, nodes
 
@@ -107,7 +107,7 @@ def test_native_filter_preserves_ranges_and_original_indices():
     assert len(signatures) == 1
     signature = signatures[0]
     assert signature.subgraph_idx == 0
-    assert signature.sequence == 'ACGTA'
+    assert not hasattr(signature, 'sequence')
     assert signature.length == 5
     assert signature.n_rep == 2
     assert signature.rep_ratio == 1.0
@@ -135,7 +135,7 @@ def test_automatic_threshold_from_minimizers_and_parallel_equivalence():
         signature.subgraph_idx, signature.location.assembly_idx,
         signature.location.record_idx, signature.location.start,
         signature.location.stop, signature.location.n_kmers,
-        signature.location.n_repeats, signature.sequence,
+        signature.location.n_repeats,
         signature.length, signature.n_rep, signature.rep_ratio,
     )
     assert list(map(signature_fields, first[1])) == list(map(signature_fields, parallel[1]))
@@ -299,7 +299,7 @@ def test_original_indices_are_preserved_after_isolated_node_removal(n_cpu):
     assert filtered_edges.tolist() == [(1, 2, 1)]
     assert subgraphs == [[1, 2]]
     assert len(signatures) == 1
-    assert signatures[0].sequence == 'ACGTA'
+    assert signatures[0].length == 5
     assert signatures[0].location.n_kmers == 2
 
     restored = pickle.loads(pickle.dumps(filtered, protocol=5))
@@ -352,7 +352,7 @@ def test_native_results_pickle_round_trip():
     signature = signatures[0]
     restored_signature = pickle.loads(pickle.dumps(signature, protocol=5))
     assert restored_signature.subgraph_idx == signature.subgraph_idx
-    assert restored_signature.sequence == signature.sequence
+    assert not hasattr(restored_signature, 'sequence')
     assert restored_signature.length == signature.length
     assert restored_signature.n_rep == signature.n_rep
     assert restored_signature.rep_ratio == signature.rep_ratio

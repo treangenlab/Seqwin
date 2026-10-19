@@ -26,9 +26,9 @@ logger = logging.getLogger(__name__)
 from .core import Graph, FilteredGraph, Signature
 from .core._native import _filter_native
 from .assemblies import Assemblies, get_assemblies
-from .evaluation import SignatureMetrics, process_signatures
+from .evaluation import SignatureMetrics, eval_signatures_seqwin
 from .utils import print_time_delta, overwrite_warning, overwrite_error, mkdir, file_to_write
-from .config import Config, RunState, config_logger, HAS_MASH, WORKINGDIR
+from .config import Config, RunState, config_logger, HAS_MASH, HAS_BLAST, WORKINGDIR
 
 
 def _build_graph(assemblies: Assemblies, config: Config) -> Graph:
@@ -76,6 +76,11 @@ def _filter_graph(
         else:
             logger.error('Mash is not installed. Falling back to minimizer sketches.')
 
+    fasta_path = state.working_dir / WORKINGDIR.markers_fasta
+    csv_path = state.working_dir / WORKINGDIR.markers_csv
+    file_to_write(fasta_path, config.overwrite)
+    file_to_write(csv_path, config.overwrite)
+
     filtered, signatures = _filter_native(
         kmers=graph.kmers,
         nodes=graph.nodes,
@@ -98,6 +103,8 @@ def _filter_graph(
         max_nodes_cap=config.max_nodes_cap,
         consec_kmer_mul=config.consec_kmer_mul,
         n_cpu=config.n_cpu,
+        fasta_path=str(fasta_path),
+        csv_path=str(csv_path),
     )
 
     print_time_delta(time() - tik)
@@ -205,13 +212,31 @@ class Seqwin(object):
             logger.info(f'Raw minimizer graph is saved as {graph_path}')
 
         filtered, signatures = _filter_graph(graph, assemblies, config, state)
-        signatures, metrics = process_signatures(
-            signatures, filtered, assemblies, graph, config, state
-        )
-
         self.filtered = filtered
-        self.signatures = signatures
-        self.metrics = metrics
+        self.signatures = tuple(signatures)
+
+        if config.run_blast and HAS_BLAST:
+            logger.info('Evaluating candidate signatures with BLAST...')
+            blastdb = assemblies.makeblastdb(
+                prefix=working_dir / WORKINGDIR.blast_dir,
+                neg_only=config.blast_neg_only,
+                overwrite=overwrite,
+                n_cpu=config.n_cpu,
+            )
+            metrics = eval_signatures_seqwin(
+                working_dir / WORKINGDIR.markers_fasta,
+                working_dir / WORKINGDIR.markers_csv,
+                blastdb,
+                filtered.total_tar,
+                filtered.total_neg,
+                config.n_cpu,
+            )
+            state.blastdb = blastdb
+            self.metrics = tuple(metrics)
+        elif config.run_blast:
+            logger.error('NCBI BLAST+ is not installed. Signature evaluation is skipped.')
+        else:
+            logger.warning('Signature evaluation is turned off, skip running BLAST')
 
         if config.save_pickle:
             # save run instance

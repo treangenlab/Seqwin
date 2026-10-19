@@ -33,6 +33,8 @@ struct FilterConfig {
     std::optional<std::size_t> max_nodes_cap;
     double consec_kmer_mul;
     std::size_t n_cpu;
+    std::optional<std::string> fasta_path;
+    std::optional<std::string> csv_path;
 };
 
 /**

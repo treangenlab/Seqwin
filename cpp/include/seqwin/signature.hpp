@@ -1,7 +1,6 @@
 #pragma once
 
 #include <cstddef>
-#include <string>
 
 namespace seqwin {
 
@@ -42,8 +41,6 @@ struct Signature {
     std::size_t subgraph_idx;
     /** Location and metadata of the representative. */
     SubgraphLoc location;
-    /** Nucleotide sequence of the signature. */
-    std::string sequence;
     /** Length of the nucleotide sequence. */
     std::size_t length;
     /** Number of target assemblies containing the representative. */

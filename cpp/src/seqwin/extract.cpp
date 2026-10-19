@@ -3,6 +3,10 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <fstream>
+#include <iomanip>
+#include <limits>
+#include <locale>
 #include <stdexcept>
 #include <string>
 #include <tuple>
@@ -260,7 +264,6 @@ std::optional<Signature> extract_worker(
     return Signature{
         subgraph_idx,
         rep_run->location,
-        {}, // sequence
         length,
         rep_count.count,
         rep_count.count / static_cast<double>(total_tar)
@@ -268,13 +271,13 @@ std::optional<Signature> extract_worker(
 }
 
 /**
- * @brief Fetch signature nucleotide sequences from their assembly FASTA files.
- *
- * Sequences are added to `signatures` in place.
+ * @brief Fetch signature sequences and write FASTA and CSV.
  */
 void fetch_signature_sequences(
-    std::vector<Signature>& signatures,
+    const std::vector<Signature>& signatures,
     const std::vector<std::string>& assembly_paths,
+    const std::string& fasta_path,
+    const std::string& csv_path,
     ThreadPool& pool
 ) {
     if (signatures.empty()) {
@@ -308,26 +311,67 @@ void fetch_signature_sequences(
     log_python(
         " - Fetching signature sequences (" + std::to_string(groups.size()) + " assemblies to be loaded)..."
     );
+    std::vector<FastaRecord> fasta_records(signatures.size());
     pool.parallel_for(groups.size(), [&](std::size_t group_idx) {
         const auto& group = groups[group_idx];
         const auto records = read_fasta(assembly_paths[group.assembly_idx]);
 
         for (const auto signature_idx : group.signature_indices) {
-            auto& signature = signatures[signature_idx];
-            if (signature.location.record_idx >= records.size()) {
+            const auto& signature = signatures[signature_idx];
+            const auto& loc = signature.location;
+            if (loc.record_idx >= records.size()) {
                 throw std::runtime_error("signature record index is outside assembly FASTA");
             }
-            const auto& sequence = records[signature.location.record_idx].sequence;
-            const auto start = std::min<std::size_t>(signature.location.start, sequence.size());
-            const auto stop = std::min<std::size_t>(signature.location.stop, sequence.size());
-            signature.sequence = sequence.substr(start, stop > start ? stop - start : 0);
+            const auto& record = records[loc.record_idx];
+            if (loc.start > loc.stop || loc.stop > record.sequence.size()) {
+                throw std::runtime_error("signature sequence bounds are outside assembly FASTA");
+            }
+            auto& out = fasta_records[signature_idx];
+            out.id = std::to_string(loc.assembly_idx) + "-" + record.id + "-" +
+                     std::to_string(loc.start) + ":" + std::to_string(loc.stop);
+            out.sequence = record.sequence.substr(loc.start, loc.stop - loc.start);
             std::transform(
-                signature.sequence.begin(), signature.sequence.end(),
-                signature.sequence.begin(),
-                [](unsigned char base) { return static_cast<char>(std::toupper(base)); }
+                out.sequence.begin(),
+                out.sequence.end(),
+                out.sequence.begin(),
+                [](unsigned char base) {
+                    return static_cast<char>(std::toupper(base));
+                }
             );
         }
     });
+
+    std::ofstream fasta;
+    std::ofstream csv;
+    fasta.exceptions(std::ios::failbit | std::ios::badbit);
+    csv.exceptions(std::ios::failbit | std::ios::badbit);
+    fasta.open(fasta_path, std::ios::binary);
+    csv.open(csv_path, std::ios::binary);
+    csv.imbue(std::locale::classic());
+    csv << std::setprecision(std::numeric_limits<double>::max_digits10);
+    csv << "fasta_header,length,rep_ratio,n_kmers,n_repeats\n";
+    for (std::size_t i = 0; i < signatures.size(); ++i) {
+        const auto& sig = signatures[i];
+        const auto& rec = fasta_records[i];
+        fasta << '>' << rec.id << '\n' << rec.sequence << '\n';
+        // Quote CSV string values and double embedded quotes.
+        csv << '"';
+        for (char c : rec.id) {
+            if (c == '"') {
+                csv << '"';
+            }
+            csv << c;
+        }
+        csv << "\","
+            << sig.length << ','
+            << sig.rep_ratio << ','
+            << sig.location.n_kmers << ','
+            << sig.location.n_repeats << '\n';
+    }
+    fasta.close();
+    csv.close();
+    log_python(" - Signatures saved as " + fasta_path);
+    log_python(" - Metrics of signatures saved as " + csv_path);
 }
 
 } // namespace
@@ -347,6 +391,8 @@ std::vector<Signature> extract_signatures(
     std::size_t windowsize,
     std::size_t min_len,
     double consec_kmer_mul,
+    const std::optional<std::string>& fasta_path,
+    const std::optional<std::string>& csv_path,
     std::size_t total_tar,
     ThreadPool& pool
 ) {
@@ -393,7 +439,12 @@ std::vector<Signature> extract_signatures(
     }
     log_python(" - Found " + std::to_string(signatures.size()) + " candidate signatures");
 
-    fetch_signature_sequences(signatures, assembly_paths, pool);
+    if (signatures.empty()) {
+        throw std::invalid_argument("no valid signatures found in subgraphs");
+    }
+    if (fasta_path && csv_path) {
+        fetch_signature_sequences(signatures, assembly_paths, *fasta_path, *csv_path, pool);
+    }
     return signatures;
 }
 

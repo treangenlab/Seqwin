@@ -1,27 +1,24 @@
 from pathlib import Path
-from types import SimpleNamespace
 
-import numpy as np
 import pandas as pd
+import pytest
 
 import seqwin.evaluation as evaluation
-from seqwin.evaluation import SignatureMetrics, process_signatures
+from seqwin.config import BLASTCONFIG
+from seqwin.evaluation import SignatureMetrics, eval_signatures_seqwin
 
 
-class Location:
-    assembly_idx = 0
-    record_idx = 1
-    start = 2
-    stop = 8
-    n_kmers = 3
-    n_repeats = 1
+COLUMNS = ('fasta_header', 'length', 'rep_ratio', 'n_kmers', 'n_repeats')
 
 
-def _signature(index=0, sequence='ACGTAC'):
-    return SimpleNamespace(
-        subgraph_idx=index, location=Location(), sequence=sequence,
-        length=len(sequence), n_rep=1, rep_ratio=1.0
-    )
+def _files(tmp_path):
+    fasta = tmp_path / 'signatures.fasta'
+    csv = tmp_path / 'signatures.csv'
+    fasta.write_text('>second\nAAAA\n>first\nCCCC\n')
+    pd.DataFrame([
+        ('second', 4, .95, 3, 1), ('first', 4, .85, 2, 2),
+    ], columns=COLUMNS).to_csv(csv, index=False)
+    return fasta, csv
 
 
 def test_signature_metrics_stores_blast_separately():
@@ -29,51 +26,69 @@ def test_signature_metrics_stores_blast_separately():
     metric = SignatureMetrics(conservation=1.0, blast=blast)
     assert metric.blast is blast
     assert 'blast' not in evaluation._METRIC_NAMES
+    assert all(getattr(SignatureMetrics(), name) == 0.0 for name in evaluation._METRIC_NAMES)
 
 
-def test_private_process_signatures_writes_record_id_and_outputs(tmp_path: Path):
-    signature = _signature()
-    filtered = SimpleNamespace(total_tar=1, total_neg=1)
-    config = SimpleNamespace(
-        overwrite=False, run_blast=False, blast_neg_only=False, n_cpu=1
-    )
-    state = SimpleNamespace(working_dir=tmp_path, blastdb=None)
-    assemblies = SimpleNamespace()
+def test_file_evaluation_preserves_order_and_appends_metrics(monkeypatch, tmp_path):
+    fasta, csv = _files(tmp_path)
+    metrics = [SignatureMetrics(conservation=.1), SignatureMetrics(conservation=.8)]
 
-    graph = SimpleNamespace(
-        record_offsets=np.array([0, 2], dtype=np.uint32),
-        record_ids=np.array(['first', 'second'])
-    )
-    processed = process_signatures(
-        [signature], filtered, assemblies, graph, config, state
-    )
+    def evaluate(seqs, db, tar, neg, cpu):
+        assert (seqs, db, tar, neg, cpu) == (['AAAA', 'CCCC'], Path('db'), 2, 3, 1)
+        return metrics
 
-    signatures, metrics = processed
-    assert signatures == (signature,)
-    assert metrics == (evaluation.SignatureMetrics(),)
-    assert (tmp_path / 'signatures.fasta').read_text() == '>0-second-2:8\nACGTAC\n'
-    output = pd.read_csv(tmp_path / 'signatures.csv')
-    assert tuple(output.columns) == (
-        'fasta_header', 'length', *evaluation._METRIC_NAMES, 'rep_ratio', 'n_nodes'
-    )
-    assert output.loc[0, 'fasta_header'] == '0-second-2:8'
-    assert output.loc[0, 'length'] == 6
-    assert output.loc[0, 'rep_ratio'] == 1.0
-    assert output.loc[0, 'n_nodes'] == 3
+    monkeypatch.setattr(evaluation, 'eval_signatures', evaluate)
+    assert eval_signatures_seqwin(fasta, csv, Path('db'), 2, 3) == metrics
+    output = pd.read_csv(csv)
+    assert tuple(output.columns) == (*COLUMNS, *evaluation._METRIC_NAMES)
+    assert output.fasta_header.tolist() == ['second', 'first']
+    assert output.conservation.tolist() == [.1, .8]
 
 
-def test_evaluation_attaches_results_and_ranks(monkeypatch):
-    first = _signature(0, 'AAAA')
-    second = _signature(1, 'CCCC')
-    low = evaluation.SignatureMetrics(conservation=.1, divergence=.2)
-    high = evaluation.SignatureMetrics(conservation=.8, divergence=.1)
-    monkeypatch.setattr(evaluation, 'eval_signatures', lambda *args: [low, high])
+@pytest.mark.parametrize(('change', 'message'), [
+    ('count', 'counts'), ('header', 'header mismatch at index 0'),
+    ('length', 'length mismatch at index 0'),
+])
+def test_file_mismatches_fail_before_evaluation(monkeypatch, tmp_path, change, message):
+    fasta, csv = _files(tmp_path)
+    df = pd.read_csv(csv)
+    if change == 'count':
+        df = df.iloc[:1]
+    else:
+        df.loc[0, 'fasta_header' if change == 'header' else 'length'] = 'wrong' if change == 'header' else 5
+    df.to_csv(csv, index=False)
+    before = csv.read_bytes()
+    monkeypatch.setattr(evaluation, 'eval_signatures', lambda *args: pytest.fail('unexpected evaluation'))
+    with pytest.raises(ValueError, match=message):
+        eval_signatures_seqwin(fasta, csv, Path('db'), 1, 1)
+    assert csv.read_bytes() == before
 
-    signatures = [first, second]
-    ranked_signatures, ranked_metrics = evaluation._eval_signatures(
-        signatures, Path('all'), 1, 1, 1
-    )
 
-    assert ranked_signatures == [second, first]
-    assert ranked_metrics == [high, low]
-    assert signatures == [first, second]
+def test_failed_evaluation_preserves_csv(monkeypatch, tmp_path):
+    fasta, csv = _files(tmp_path)
+    before = csv.read_bytes()
+
+    def fail(*args):
+        raise RuntimeError('BLAST failed')
+
+    monkeypatch.setattr(evaluation, 'eval_signatures', fail)
+    with pytest.raises(RuntimeError, match='BLAST failed'):
+        eval_signatures_seqwin(fasta, csv, Path('db'), 1, 1)
+    assert csv.read_bytes() == before
+
+
+@pytest.mark.parametrize('n_cpu', (1, 2))
+def test_hits_keep_optimal_alignment_and_input_order(monkeypatch, n_cpu):
+    # Query 0 has no hits. Query 1 has two alignments in the same assembly.
+    hits = pd.DataFrame([
+        (1, BLASTCONFIG.header_sep.join(['0', next(k for k, v in BLASTCONFIG.str2bool.items() if v), 'record']), 10, 2, 1, 0),
+        (1, BLASTCONFIG.header_sep.join(['0', next(k for k, v in BLASTCONFIG.str2bool.items() if v), 'record']), 20, 4, 0, 0),
+    ], columns=['qseqid', 'sseqid', 'bitscore', 'nident', 'mismatch', 'gaps'])
+    monkeypatch.setattr(evaluation, 'blast', lambda *args, **kwargs: hits.copy())
+    metrics = evaluation.eval_signatures(['AAAA', 'CCCC'], Path(BLASTCONFIG.title_all), 1, 1, n_cpu)
+    assert metrics[0] == SignatureMetrics()
+    assert metrics[0].blast is None
+    assert metrics[1].conservation == 1.0
+    assert metrics[1].avg_repeats_tar == 2
+    assert metrics[1].avg_pident_tar == .75
+    assert metrics[1].blast.bitscore.tolist() == [20]

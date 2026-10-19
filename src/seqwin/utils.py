@@ -7,6 +7,7 @@ __author__ = 'Michael X. Wang'
 __license__ = 'GPL 3.0'
 
 import sys, gzip, shutil, logging, datetime, subprocess, shlex, multiprocessing
+from dataclasses import dataclass
 from pathlib import Path
 from time import time
 from enum import Enum
@@ -28,6 +29,12 @@ class StartMethod(str, Enum):
 _START_METHOD = (
     StartMethod.spawn if sys.platform == 'win32' else StartMethod.fork
 )
+
+
+@dataclass(frozen=True, slots=True)
+class FastaRecord:
+    id: str
+    sequence: str
 
 
 def print_time_delta(seconds: float) -> None:
@@ -321,42 +328,33 @@ def load_paths_txt(paths_txt: Path) -> list[Path]:
     return paths_list
 
 
-def load_fasta(path: Path) -> tuple[str, ...]:
-    """Parse an assembly file in FASTA format and return its sequences.
+def load_fasta(path: Path) -> list[FastaRecord]:
+    """Parse an assembly file in FASTA format and return its sequences in uppercase.
     Gzip files are supported (file name should end with .gz).
 
     Args:
         path (Path): Path to the FASTA file. If the file is gzipped, the extension should be .gz.
 
     Returns:
-        tuple[str, ...]: Sequences of FASTA records (upper case), in the same order as they appear in the file.
+        list[FastaRecord]: FASTA records in the same order as they appear in the file.
     """
-    # read file content
     if path.suffix == GZIP_EXT:
-        content = gzip.decompress(
-            path.read_bytes()
-        ).decode()
+        with gzip.open(path, 'rt', encoding='utf-8') as fasta:
+            content = fasta.read()
     else:
-        content = path.read_text()
+        content = path.read_text(encoding='utf-8')
 
-    if content[0] != '>':
+    if not content.startswith('>'):
         log_and_raise(ValueError, f"FASTA file must start with '>', in: {path}")
 
-    all_record: list[str] = list() # record id -> record sequence (upper case)
-    all_id = list()
+    records = list()
     for record in content.split('>')[1:]: # skip the first empty string
-        header_pos = record.find('\n')
-        record_id = record[:header_pos].split(' ')[0]
-        if header_pos == -1:
-            # in case record_id is too long
+        header, sep, sequence = record.partition('\n')
+        record_id = header.split(' ')[0]
+        if not sep:
             logger.warning(f' - {record_id[:30]} has no sequence, in: {path}')
-            seq = ''
-        else:
-            seq = record[header_pos:].replace('\n', '').upper()
-        all_record.append(seq)
-        all_id.append(record_id)
-
-    # check duplicate record ID
-    if len(all_id) != len(set(all_id)):
-        logger.warning(f' - Duplicate record ID(s) {get_dups(all_id)}, in: {path}')
-    return tuple(all_record)
+        records.append(FastaRecord(
+            record_id,
+            sequence.replace('\n', '').upper()
+        ))
+    return records
