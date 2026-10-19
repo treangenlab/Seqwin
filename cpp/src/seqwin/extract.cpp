@@ -370,8 +370,8 @@ void fetch_signature_sequences(
     }
     fasta.close();
     csv.close();
-    log_python(" - Signatures saved as " + fasta_path);
-    log_python(" - Metrics of signatures saved as " + csv_path);
+    log_python(" - Signature sequences saved as " + fasta_path);
+    log_python(" - Signature metadata saved as " + csv_path);
 }
 
 } // namespace
@@ -437,11 +437,11 @@ std::vector<Signature> extract_signatures(
             signatures.push_back(std::move(*signature));
         }
     }
-    log_python(" - Found " + std::to_string(signatures.size()) + " candidate signatures");
-
     if (signatures.empty()) {
         throw std::invalid_argument("no valid signatures found in subgraphs");
     }
+    log_python(" - Found " + std::to_string(signatures.size()) + " valid signatures");
+
     if (fasta_path && csv_path) {
         fetch_signature_sequences(signatures, assembly_paths, *fasta_path, *csv_path, pool);
     }

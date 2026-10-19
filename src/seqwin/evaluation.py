@@ -158,10 +158,10 @@ def eval_signatures(
     """
     if blastdb.name == BLASTCONFIG.title_neg_only:
         neg_only = True
-        logger.info('BLAST checking signatures against non-target assemblies (less sensitive but faster)...')
+        logger.info(' - BLAST checking signatures against non-target assemblies...')
     elif blastdb.name == BLASTCONFIG.title_all:
         neg_only = False
-        logger.info('BLAST checking signatures against all assemblies (more sensitive but slower)...')
+        logger.info(' - BLAST checking signatures against all assemblies...')
     else:
         log_and_raise(
             ValueError,
@@ -292,5 +292,5 @@ def eval_signatures_seqwin(
     finally:
         if temporary_path is not None:
             temporary_path.unlink(missing_ok=True)
-    logger.info(f'Metrics of candidate signatures saved as {csv_path}')
+    logger.info(f' - Signature metrics added to {csv_path}')
     return metrics

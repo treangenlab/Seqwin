@@ -209,14 +209,14 @@ class Seqwin(object):
             graph_path = working_dir / WORKINGDIR.graph
             mkdir(graph_path, overwrite=overwrite, verbose=overwrite)
             graph.save(graph_path)
-            logger.info(f'Raw minimizer graph is saved as {graph_path}')
+            logger.info(f'Raw minimizer graph saved as {graph_path}')
 
         filtered, signatures = _filter_graph(graph, assemblies, config, state)
         self.filtered = filtered
         self.signatures = tuple(signatures)
 
         if config.run_blast and HAS_BLAST:
-            logger.info('Evaluating candidate signatures with BLAST...')
+            logger.info('Evaluating signatures with BLAST...')
             blastdb = assemblies.makeblastdb(
                 prefix=working_dir / WORKINGDIR.blast_dir,
                 neg_only=config.blast_neg_only,
