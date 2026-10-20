@@ -188,6 +188,7 @@ std::pair<FilteredGraph, std::vector<Signature>> filter(
 
     internal::log_python(" - Counting target node occurrences...");
     auto target_counts = internal::count_target_nodes(
+        nodes,
         n_nodes,
         assembly_nodes,
         n_assembly_nodes,
@@ -214,7 +215,7 @@ std::pair<FilteredGraph, std::vector<Signature>> filter(
     );
 
     internal::log_python(" - Filtering graph and calculating node penalty scores...");
-    internal::prune_graph(
+    auto graph_topology = internal::prune_graph(
         nodes,
         n_nodes,
         edges,
@@ -227,8 +228,8 @@ std::pair<FilteredGraph, std::vector<Signature>> filter(
         pool
     );
     internal::log_python(
-        " - Removed " + std::to_string(n_edges - filtered.edges.size()) + " edges with weight<" +
-        format_value(filtered.edge_weight_th, 3) + ", " + std::to_string(filtered.edges.size()) + " edges left"
+        " - Removed " + std::to_string(n_edges - filtered.edges.size()) + " edges failing weight/target-support thresholds, " +
+        std::to_string(filtered.edges.size()) + " edges left"
     );
     internal::log_python(
         " - Removed " + std::to_string(n_nodes - filtered.nodes.size()) + " isolated nodes, " +
@@ -236,8 +237,8 @@ std::pair<FilteredGraph, std::vector<Signature>> filter(
     );
 
     internal::get_subgraphs(
+        graph_topology,
         filtered.nodes,
-        filtered.edges,
         filtered.penalty_th,
         filtered.min_nodes,
         filtered.max_nodes,
@@ -251,7 +252,6 @@ std::pair<FilteredGraph, std::vector<Signature>> filter(
     internal::log_python(" - Finding a representative for each low-penalty subgraph...");
     auto signatures = internal::extract_signatures(
         filtered.subgraphs,
-        filtered.nodes,
         kmers,
         n_kmers,
         nodes,

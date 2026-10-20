@@ -25,6 +25,8 @@ namespace seqwin {
 template <typename T>
 class NoInitArray {
 public:
+    using value_type = T;
+
     NoInitArray() noexcept = default;
 
     explicit NoInitArray(std::size_t size)

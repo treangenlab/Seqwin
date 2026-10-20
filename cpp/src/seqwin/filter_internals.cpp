@@ -9,8 +9,6 @@
 #include <stdexcept>
 #include <vector>
 
-#include <ankerl/unordered_dense.h>
-
 #include "seqwin/filter.hpp"
 #include "seqwin/shared_internals.hpp"
 #include "utils/logging.hpp"
@@ -29,6 +27,7 @@ namespace {
  */
 template <typename Counter>
 TargetCounts build_target_counts(
+    const Node* nodes,
     std::size_t n_nodes,
     const std::size_t* assembly_nodes,
     const std::size_t* node_offsets,
@@ -57,12 +56,13 @@ TargetCounts build_target_counts(
             }
         }
     });
-    return TargetCounts(std::move(counts), count_targets);
+    return TargetCounts(std::move(counts), count_targets, nodes);
 }
 
 } // namespace
 
 TargetCounts count_target_nodes(
+    const Node* nodes,
     std::size_t n_nodes,
     const std::size_t* assembly_nodes,
     std::size_t n_assembly_nodes,
@@ -94,16 +94,16 @@ TargetCounts count_target_nodes(
     const std::size_t counted_assemblies = count_targets ? total_tar : total_neg;
     if (counted_assemblies <= std::numeric_limits<std::uint8_t>::max()) {
         return build_target_counts<std::uint8_t>(
-            n_nodes, assembly_nodes, node_offsets, is_targets, n_assemblies, count_targets, pool
+            nodes, n_nodes, assembly_nodes, node_offsets, is_targets, n_assemblies, count_targets, pool
         );
     }
     if (counted_assemblies <= std::numeric_limits<std::uint16_t>::max()) {
         return build_target_counts<std::uint16_t>(
-            n_nodes, assembly_nodes, node_offsets, is_targets, n_assemblies, count_targets, pool
+            nodes, n_nodes, assembly_nodes, node_offsets, is_targets, n_assemblies, count_targets, pool
         );
     }
     return build_target_counts<std::uint32_t>(
-        n_nodes, assembly_nodes, node_offsets, is_targets, n_assemblies, count_targets, pool
+        nodes, n_nodes, assembly_nodes, node_offsets, is_targets, n_assemblies, count_targets, pool
     );
 }
 
@@ -128,7 +128,7 @@ std::pair<double, double> expected_presence(
     const double total_tar_inv = 1.0 / total_tar;
     const double total_neg_inv = 1.0 / total_neg;
 
-    target_counts.visit(nodes, [&](const auto& n_tar_at) {
+    target_counts.with([&](const auto& n_tar_at) {
         pool.parallel_for_chunks(n_nodes, [&](
             std::size_t start, std::size_t end, std::size_t chunk_id
         ) {
@@ -173,7 +173,7 @@ std::pair<double, double> expected_presence(
     };
 }
 
-void prune_graph(
+GraphTopology prune_graph(
     const Node* nodes,
     std::size_t n_nodes,
     const Edge* edges,
@@ -185,52 +185,71 @@ void prune_graph(
     FilteredGraph& filtered,
     ThreadPool& pool
 ) {
-    // Find edges that pass the weight threshold
+    // One endpoint occurrence of a retained edge
+    // Used for building the CSR adjacency lists (offsets and neighbors)
+    struct Endpoint {
+        // Original graph node represented by this endpoint
+        std::size_t node;
+        // Index in the flattened edge array
+        // The first endpoint has even index; the second endpoint has odd index
+        std::size_t idx;
+    };
+
+    // Scan the prefix of edges (sorted by weight)
+    // Keep edges with sufficient weight and target support
+    filtered.edges.clear();
     const std::size_t th = edge_weight_th;
-    std::size_t retained_count = 0;
-    if (n_edges != 0) {
-        const auto* retained_end = std::lower_bound(
-            edges,
-            edges + n_edges,
-            th,
-            [](const Edge& edge, std::size_t threshold) {
-                return edge.weight > threshold;
+    // Store each retained edge as two endpoint records
+    std::vector<Endpoint> endpoints;
+    target_counts.with([&](const auto& n_tar_at) {
+        for (std::size_t i = 0; i < n_edges; ++i) {
+            const auto& edge = edges[i];
+            if (edge.weight <= th) {
+                break;
             }
-        );
-        retained_count = static_cast<std::size_t>(retained_end - edges);
-    }
-
-    // Multiset of retained node indices after edge filtering
-    NoInitArray<std::size_t> connected_multi(retained_count * 2);
-    pool.parallel_for(retained_count, [&](std::size_t i) {
-        if (edges[i].first >= n_nodes || edges[i].second >= n_nodes) {
-            throw std::invalid_argument("Edge endpoint does not correspond to a node");
+            if (edge.first >= n_nodes || edge.second >= n_nodes) {
+                throw std::invalid_argument("Edge endpoint does not correspond to a node");
+            }
+            if (n_tar_at(edge.first) > th || n_tar_at(edge.second) > th) {
+                const auto n_retained = filtered.edges.size();
+                filtered.edges.push_back(edge);
+                endpoints.push_back({edge.first, n_retained * 2});
+                endpoints.push_back({edge.second, n_retained * 2 + 1});
+            }
         }
-        connected_multi[i * 2] = edges[i].first;
-        connected_multi[i * 2 + 1] = edges[i].second;
     });
-    lsd_radix_sort(connected_multi, pool);
+    lsd_radix_sort(endpoints, &Endpoint::node, pool);
 
-    // Find unique node indices in the sorted multiset
+    // Offsets into the neighbors array
+    std::vector<std::size_t> offsets;
+    offsets.reserve(endpoints.size() + 1);
+    // Unique node indices in endpoints
     std::vector<std::size_t> connected;
-    connected.reserve(connected_multi.size());
-    // Map the original node indices to indices of retained nodes
-    ankerl::unordered_dense::map<std::size_t, std::size_t> node_indices;
-    node_indices.reserve(connected_multi.size());
-    for (std::size_t i = 0; i < connected_multi.size(); ++i) {
-        if (i == 0 || connected_multi[i] != connected_multi[i - 1]) {
-            node_indices.emplace(connected_multi[i], connected.size());
-            connected.push_back(connected_multi[i]);
+    connected.reserve(endpoints.size());
+    // Map endpoint indices to indices of retained nodes
+    NoInitArray<std::size_t> node_indices(endpoints.size());
+    for (std::size_t i = 0; i < endpoints.size(); ++i) {
+        if (i == 0 || endpoints[i].node != endpoints[i - 1].node) {
+            offsets.push_back(i);
+            connected.push_back(endpoints[i].node);
         }
+        node_indices[endpoints[i].idx] = connected.size() - 1;
     }
-    connected_multi.reset();
+    offsets.push_back(endpoints.size());
+
+    // The sorted endpoints array is parallel to neighbors
+    // For each endpoint, recover the index of the opposite endpoint
+    NoInitArray<std::size_t> neighbors(endpoints.size());
+    pool.parallel_for(endpoints.size(), [&](std::size_t i) {
+        neighbors[i] = node_indices[endpoints[i].idx ^ 1];
+    });
 
     // Calculate the penalty of each retained node
     filtered.nodes = NoInitArray<FilteredNode>(connected.size());
     const double total_tar_inv = 1.0 / total_tar;
     const double total_neg_inv = 1.0 / total_neg;
 
-    target_counts.visit(nodes, [&](const auto& n_tar_at) {
+    target_counts.with([&](const auto& n_tar_at) {
         pool.parallel_for(connected.size(), [&](std::size_t i) {
             const auto node_idx = connected[i];
             const std::size_t n_tar = n_tar_at(node_idx);
@@ -257,29 +276,21 @@ void prune_graph(
         });
     });
 
-    // Update edge endpoints to indices of retained nodes
-    filtered.edges = NoInitArray<Edge>(retained_count);
-    const auto& node_indices_read = node_indices;
-    pool.parallel_for(retained_count, [&](std::size_t i) {
-        filtered.edges[i] = Edge{
-            node_indices_read.at(edges[i].first),
-            node_indices_read.at(edges[i].second),
-            edges[i].weight
-        };
-    });
+    return GraphTopology(
+        std::move(offsets),
+        std::move(neighbors)
+    );
 }
 
 void get_subgraphs(
+    const GraphTopology& graph,
     const NoInitArray<FilteredNode>& nodes,
-    const NoInitArray<Edge>& edges,
     double penalty_th,
     std::size_t min_nodes,
     std::optional<std::size_t> max_nodes,
     FilteredGraph& filtered
 ) {
-    // Graph nodes are represented by indices, instead of hashes
-    const GraphTopology graph(nodes.size(), edges);
-
+    // GraphTopology represents nodes by indices into the retained nodes
     std::vector<std::size_t> seeds;
     seeds.reserve(nodes.size());
     for (std::size_t node = 0; node < nodes.size(); ++node) {
@@ -294,14 +305,16 @@ void get_subgraphs(
 
     struct FrontierNode {
         double penalty;
-        std::size_t index;
+        std::size_t node;
     };
     const auto lower_priority = [](const FrontierNode& left, const FrontierNode& right) {
         if (left.penalty != right.penalty) {
             return left.penalty > right.penalty;
         }
-        return left.index > right.index;
+        return left.node > right.node;
     };
+    // Reuse heap storage across seeds
+    std::vector<FrontierNode> frontier;
 
     // Marks nodes accepted in any of the subgraphs
     std::vector<std::uint8_t> used(nodes.size(), 0);
@@ -320,14 +333,12 @@ void get_subgraphs(
         Subgraph subgraph{seed};
         seen[seed] = 1;
         double sum_penalty = nodes[seed].penalty;
-        std::priority_queue<
-            FrontierNode, std::vector<FrontierNode>, decltype(lower_priority)
-        > frontier(lower_priority);
 
         const auto add_neighbors = [&](std::size_t node) {
             for (const auto neighbor : graph.neighbors(node)) {
                 if (!used[neighbor] && !seen[neighbor]) {
-                    frontier.push({nodes[neighbor].penalty, neighbor});
+                    frontier.push_back({nodes[neighbor].penalty, neighbor});
+                    std::push_heap(frontier.begin(), frontier.end(), lower_priority);
                     seen[neighbor] = 1;
                 }
             }
@@ -335,33 +346,37 @@ void get_subgraphs(
         add_neighbors(seed);
 
         while (!frontier.empty() && subgraph.size() < max_nodes_value) {
-            const auto candidate = frontier.top();
-            frontier.pop();
+            std::pop_heap(frontier.begin(), frontier.end(), lower_priority);
+            const auto candidate = frontier.back();
+            frontier.pop_back();
+
             const double new_sum_penalty = sum_penalty + candidate.penalty;
             if (new_sum_penalty / (subgraph.size() + 1) <= penalty_th) {
-                subgraph.push_back(candidate.index);
+                subgraph.push_back(candidate.node);
                 sum_penalty = new_sum_penalty;
-                add_neighbors(candidate.index);
+                add_neighbors(candidate.node);
             } else {
                 // All remaining candidates have at least this penalty, so they
                 // cannot lower the subgraph average below the threshold.
-                seen[candidate.index] = 0;
+                seen[candidate.node] = 0;
                 break;
             }
         }
 
         // Clear node states for the next seed
-        while (!frontier.empty()) {
-            seen[frontier.top().index] = 0;
-            frontier.pop();
+        for (const auto& candidate : frontier) {
+            seen[candidate.node] = 0;
         }
         for (const auto node : subgraph) {
             seen[node] = 0;
         }
+        frontier.clear();
 
+        // Output subgraphs using indices of the original node array
         if (subgraph.size() >= min_nodes) {
-            for (const auto node : subgraph) {
+            for (auto& node : subgraph) {
                 used[node] = 1;
+                node = nodes[node].idx;
             }
             filtered.subgraphs.push_back(std::move(subgraph));
         }

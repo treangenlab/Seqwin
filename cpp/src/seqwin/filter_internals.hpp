@@ -22,106 +22,128 @@ namespace seqwin::internal {
  */
 class TargetCounts {
 public:
-    TargetCounts(NoInitArray<std::uint8_t>&& counts, bool counts_targets)
+    TargetCounts(NoInitArray<std::uint8_t>&& counts, bool counts_targets, const Node* nodes)
         : counts_(std::move(counts))
         , counts_targets_(counts_targets)
+        , nodes_(nodes)
     {}
-    TargetCounts(NoInitArray<std::uint16_t>&& counts, bool counts_targets)
+    TargetCounts(NoInitArray<std::uint16_t>&& counts, bool counts_targets, const Node* nodes)
         : counts_(std::move(counts))
         , counts_targets_(counts_targets)
+        , nodes_(nodes)
     {}
-    TargetCounts(NoInitArray<std::uint32_t>&& counts, bool counts_targets)
+    TargetCounts(NoInitArray<std::uint32_t>&& counts, bool counts_targets, const Node* nodes)
         : counts_(std::move(counts))
         , counts_targets_(counts_targets)
+        , nodes_(nodes)
     {}
 
-    /** Dispatch once on the counter type, then invoke `fn` with an `n_tar` accessor. */
-    template <typename Fn> void visit(const Node* nodes, Fn&& fn) const
-    {
+    /**
+     * @brief Provide a function `fn` that needs access to node `n_tar`.
+     *
+     * The `n_tar` accessor is selected based on the counter type and stored assembly group.
+     * It is passed as the sole argument to `fn`.
+     */
+    template <typename Fn>
+    void with(Fn&& fn) const {
         std::visit(
             [&](const auto& counts) {
-                fn([&](std::size_t node_idx) -> std::size_t {
-                    const std::size_t stored = counts[node_idx];
-                    if (counts_targets_) {
-                        return stored;
-                    }
-                    if (stored > nodes[node_idx].prevalence) {
-                        throw std::invalid_argument("Node n_neg exceeds prevalence");
-                    }
-                    return nodes[node_idx].prevalence - stored;
-                });
+                if (counts_targets_) {
+                    fn([&](std::size_t node_idx) -> std::size_t {
+                        return counts[node_idx];
+                    });
+                } else {
+                    fn([&](std::size_t node_idx) -> std::size_t {
+                        const std::size_t n_neg = counts[node_idx];
+                        if (n_neg > nodes_[node_idx].prevalence) {
+                            throw std::invalid_argument("Node n_neg exceeds prevalence");
+                        }
+                        return nodes_[node_idx].prevalence - n_neg;
+                    });
+                }
             },
             counts_
         );
     }
 
 private:
-    std::variant<NoInitArray<std::uint8_t>, NoInitArray<std::uint16_t>, NoInitArray<std::uint32_t>>
-        counts_;
+    std::variant<
+        NoInitArray<std::uint8_t>,
+        NoInitArray<std::uint16_t>,
+        NoInitArray<std::uint32_t>
+    > counts_;
     bool counts_targets_;
+    const Node* nodes_;
 };
 
 /**
- * @brief Undirected graph stored as contiguous adjacency lists.
+ * @brief Undirected graph stored as CSR adjacency lists. Nodes are represented by compact indices.
  */
 class GraphTopology {
 public:
     class NeighborRange {
     public:
-        using Iterator = std::vector<std::size_t>::const_iterator;
+        using Iterator = const std::size_t*;
 
         NeighborRange(Iterator begin, Iterator end)
             : begin_(begin)
             , end_(end)
         {}
 
-        Iterator begin() const { return begin_; }
-        Iterator end() const { return end_; }
+        Iterator begin() const noexcept { return begin_; }
+        Iterator end() const noexcept { return end_; }
 
     private:
         Iterator begin_;
         Iterator end_;
     };
 
-    GraphTopology(std::size_t n_nodes, const NoInitArray<Edge>& edges)
-        : offsets_(n_nodes + 1, 0)
+    GraphTopology(
+        std::vector<std::size_t>&& offsets,
+        NoInitArray<std::size_t>&& neighbors
+    )
+        : offsets_(std::move(offsets))
+        , neighbors_(std::move(neighbors))
     {
-        for (const auto& edge : edges) {
-            if (edge.first >= n_nodes || edge.second >= n_nodes) {
-                throw std::invalid_argument("Edge endpoint does not correspond to a node");
-            }
-            ++offsets_[edge.first + 1];
-            ++offsets_[edge.second + 1];
+        if (offsets_.empty()) {
+            throw std::invalid_argument("Graph topology offsets must not be empty");
         }
+        if (offsets_.front() != 0) {
+            throw std::invalid_argument("Graph topology offsets must start with 0");
+        }
+        if (offsets_.back() != neighbors_.size()) {
+            throw std::invalid_argument(
+                "Final graph topology offset must equal the number of neighbors"
+            );
+        }
+    }
 
-        for (std::size_t i = 1; i < offsets_.size(); ++i) {
-            offsets_[i] += offsets_[i - 1];
-        }
-        neighbors_.resize(offsets_.back());
-        auto cursors = offsets_;
-        for (const auto& edge : edges) {
-            neighbors_[cursors[edge.first]++] = edge.second;
-            neighbors_[cursors[edge.second]++] = edge.first;
-        }
+    std::size_t size() const noexcept
+    {
+        return offsets_.size() - 1;
     }
 
     NeighborRange neighbors(std::size_t node_index) const
     {
+        if (neighbors_.empty()) {
+            return {nullptr, nullptr};
+        }
         return {
-            neighbors_.cbegin() + offsets_[node_index],
-            neighbors_.cbegin() + offsets_[node_index + 1]
+            neighbors_.data() + offsets_[node_index],
+            neighbors_.data() + offsets_[node_index + 1]
         };
     }
 
 private:
     std::vector<std::size_t> offsets_;
-    std::vector<std::size_t> neighbors_;
+    NoInitArray<std::size_t> neighbors_;
 };
 
 /**
  * @brief For each graph node, count its occurrences in target assemblies (`n_tar`).
  */
 TargetCounts count_target_nodes(
+    const Node* nodes,
     std::size_t n_nodes,
     const std::size_t* assembly_nodes,
     std::size_t n_assembly_nodes,
@@ -148,10 +170,15 @@ std::pair<double, double> expected_presence(
 );
 
 /**
- * @brief Remove low-weight edges and isolated nodes, and calculate penalty scores
- * of retained nodes. Retained nodes and edges are stored directly in `filtered`.
+ * @brief Remove edges failing weight or target-support thresholds, calculate
+ * penalty scores for retained nodes, and construct CSR adjacency lists.
+ *
+ * An edge is retained only if its weight is greater than `edge_weight_th` and
+ * at least one endpoint occurs in more than `edge_weight_th` target assemblies.
+ *
+ * Retained nodes and edges are stored directly in `filtered`.
  */
-void prune_graph(
+GraphTopology prune_graph(
     const Node* nodes,
     std::size_t n_nodes,
     const Edge* edges,
@@ -169,8 +196,8 @@ void prune_graph(
  * Generated subgraphs are stored directly in `filtered`.
  */
 void get_subgraphs(
+    const GraphTopology& graph,
     const NoInitArray<FilteredNode>& nodes,
-    const NoInitArray<Edge>& edges,
     double penalty_th,
     std::size_t min_nodes,
     std::optional<std::size_t> max_nodes,
@@ -182,7 +209,6 @@ void get_subgraphs(
  */
 std::vector<Signature> extract_signatures(
     const std::vector<Subgraph>& subgraphs,
-    const NoInitArray<FilteredNode>& filtered_nodes,
     const Kmer* kmers,
     std::size_t n_kmers,
     const Node* nodes,

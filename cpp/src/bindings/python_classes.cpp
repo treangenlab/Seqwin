@@ -47,8 +47,10 @@ bool is_little_endian() {
     return *reinterpret_cast<const std::uint8_t*>(&value) == 1;
 }
 
-template <typename T>
-py::bytes array_to_bytes(const seqwin::NoInitArray<T>& array) {
+template <typename Container>
+py::bytes array_to_bytes(const Container& array) {
+    using T = typename Container::value_type;
+    static_assert(std::is_trivially_copyable_v<T>);
     if (!is_little_endian()) {
         throw std::runtime_error("Seqwin pickle format requires a little-endian platform");
     }
@@ -62,8 +64,10 @@ py::bytes array_to_bytes(const seqwin::NoInitArray<T>& array) {
     );
 }
 
-template <typename T>
-seqwin::NoInitArray<T> bytes_to_array(const py::bytes& value, const char* name) {
+template <typename Container>
+Container bytes_to_array(const py::bytes& value, const char* name) {
+    using T = typename Container::value_type;
+    static_assert(std::is_trivially_copyable_v<T>);
     if (!is_little_endian()) {
         throw std::runtime_error("Seqwin pickle format requires a little-endian platform");
     }
@@ -74,7 +78,7 @@ seqwin::NoInitArray<T> bytes_to_array(const py::bytes& value, const char* name) 
             " byte length is not a multiple of the record size"
         );
     }
-    seqwin::NoInitArray<T> result(bytes.size() / sizeof(T));
+    Container result(bytes.size() / sizeof(T));
     if (!bytes.empty()) {
         std::memcpy(result.data(), bytes.data(), bytes.size());
     }
@@ -136,8 +140,8 @@ void bind_python_classes(py::module_& module) {
                     throw std::runtime_error("Invalid FilteredGraph pickle state or version");
                 }
                 return FilteredGraph{
-                    bytes_to_array<FilteredNode>(state[1].cast<py::bytes>(), "nodes"),
-                    bytes_to_array<Edge>(state[2].cast<py::bytes>(), "edges"),
+                    bytes_to_array<NoInitArray<FilteredNode>>(state[1].cast<py::bytes>(), "nodes"),
+                    bytes_to_array<std::vector<Edge>>(state[2].cast<py::bytes>(), "edges"),
                     state[3].cast<std::vector<Subgraph>>(),
                     state[4].cast<std::size_t>(),
                     state[5].cast<std::size_t>(),

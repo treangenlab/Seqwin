@@ -13,7 +13,7 @@
 namespace seqwin {
 
 /**
- * @brief Represented by indices into `FilteredGraph.nodes`.
+ * @brief Represented by indices into the original `Graph.nodes` array.
  */
 using Subgraph = std::vector<std::size_t>;
 
@@ -57,9 +57,9 @@ struct FilteredNode {
 struct FilteredGraph {
     /** Nodes retained by edge filtering. */
     NoInitArray<FilteredNode> nodes;
-    /** Edges passed the weight threshold. Endpoints are indices into the retained nodes. */
-    NoInitArray<Edge> edges;
-    /** Low-penalty subgraphs represented by indices of retained nodes. */
+    /** Edges passing weight and target-support thresholds. */
+    std::vector<Edge> edges;
+    /** Low-penalty subgraphs represented by indices of the original `Graph.nodes` array. */
     std::vector<Subgraph> subgraphs;
     /** Number of target assemblies. */
     std::size_t total_tar;

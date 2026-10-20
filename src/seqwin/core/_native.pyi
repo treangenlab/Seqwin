@@ -24,8 +24,8 @@ class FilteredGraph:
             - 'n_tar' (uint32): Number of target assemblies containing this node's minimizer.
             - 'n_neg' (uint32): Number of non-target assemblies containing this node's minimizer.
             - 'penalty' (float64): Node penalty score.
-        edges (NDArray[np.void]): Edges passed the weight threshold. Endpoints are indices into the retained nodes.
-        subgraphs (list[list[int]]): Low-penalty subgraphs represented by indices of retained nodes.
+        edges (NDArray[np.void]): Edges passing weight and target-support thresholds.
+        subgraphs (list[list[int]]): Low-penalty subgraphs represented by indices of the original `Graph.nodes` array.
         total_tar (int): Number of target assemblies.
         total_neg (int): Number of non-target assemblies.
         e_absence_tar (float | None): Expected k-mer absence in target assemblies.
