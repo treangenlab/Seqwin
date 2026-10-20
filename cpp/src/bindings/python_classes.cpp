@@ -194,30 +194,24 @@ void bind_python_classes(py::module_& module) {
     py::class_<Signature>(module, "Signature")
         .def_readonly("subgraph_idx", &Signature::subgraph_idx)
         .def_readonly("location", &Signature::location)
-        .def_readonly("length", &Signature::length)
-        .def_readonly("n_rep", &Signature::n_rep)
-        .def_readonly("rep_ratio", &Signature::rep_ratio)
+        .def_readonly("n_tar", &Signature::n_tar)
         .def(py::pickle(
             [](const Signature& value) {
                 return py::make_tuple(
                     pickle_version,
                     value.subgraph_idx,
                     value.location,
-                    value.length,
-                    value.n_rep,
-                    value.rep_ratio
+                    value.n_tar
                 );
             },
             [](const py::tuple& state) {
-                if (state.size() != 6 || state[0].cast<int>() != pickle_version) {
+                if (state.size() != 4 || state[0].cast<int>() != pickle_version) {
                     throw std::runtime_error("Invalid Signature pickle state or version");
                 }
                 return Signature{
                     state[1].cast<std::size_t>(),
                     state[2].cast<SubgraphLoc>(),
-                    state[3].cast<std::size_t>(),
-                    state[4].cast<std::size_t>(),
-                    state[5].cast<double>()
+                    state[3].cast<std::size_t>()
                 };
             }
         ))

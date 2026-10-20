@@ -1,8 +1,14 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
+#include <string_view>
 
 namespace seqwin {
+
+inline constexpr std::array<std::string_view, 5> METADATA_NAMES = {
+    "fasta_header", "length", "f_tar", "n_kmers", "n_repeats"
+};
 
 /**
  * @brief Location and minimizer metadata for a subgraph found in an assembly.
@@ -41,12 +47,8 @@ struct Signature {
     std::size_t subgraph_idx;
     /** Location and metadata of the representative. */
     SubgraphLoc location;
-    /** Length of the nucleotide sequence. */
-    std::size_t length;
     /** Number of target assemblies containing the representative. */
-    std::size_t n_rep;
-    /** Fraction of target assemblies containing the representative. */
-    double rep_ratio;
+    std::size_t n_tar;
 };
 
 } // namespace seqwin

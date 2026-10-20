@@ -9,6 +9,7 @@
 #include <locale>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <utility>
 
@@ -20,6 +21,8 @@
 
 namespace seqwin::internal {
 namespace {
+
+constexpr std::size_t fasta_width = 80;
 
 struct FullKmer {
     std::uint64_t hash;
@@ -62,6 +65,21 @@ struct CanonicalCount {
     std::size_t reverse_count = 0;
     std::size_t first_seen = 0;
 };
+
+void write_csv_field(std::ostream& out, std::string_view value) {
+    if (value.find_first_of(",\"\r\n") == std::string_view::npos) {
+        out << value;
+        return;
+    }
+    out << '"';
+    for (const char c : value) {
+        if (c == '"') {
+            out << '"';
+        }
+        out << c;
+    }
+    out << '"';
+}
 
 /**
  * @brief Extract a signature from one low-penalty subgraph.
@@ -264,9 +282,7 @@ std::optional<Signature> extract_worker(
     return Signature{
         subgraph_idx,
         rep_run->location,
-        length,
-        rep_count.count,
-        rep_count.count / static_cast<double>(total_tar)
+        rep_count.count
     };
 }
 
@@ -278,6 +294,7 @@ void fetch_signature_sequences(
     const std::vector<std::string>& assembly_paths,
     const std::string& fasta_path,
     const std::string& csv_path,
+    std::size_t total_tar,
     ThreadPool& pool
 ) {
     if (signatures.empty()) {
@@ -343,28 +360,31 @@ void fetch_signature_sequences(
 
     std::ofstream fasta;
     std::ofstream csv;
+    const double total_tar_inv = 1.0 / total_tar;
     fasta.exceptions(std::ios::failbit | std::ios::badbit);
     csv.exceptions(std::ios::failbit | std::ios::badbit);
     fasta.open(fasta_path, std::ios::binary);
     csv.open(csv_path, std::ios::binary);
     csv.imbue(std::locale::classic());
     csv << std::setprecision(std::numeric_limits<double>::max_digits10);
-    csv << "fasta_header,length,rep_ratio,n_kmers,n_repeats\n";
+    for (std::size_t i = 0; i < METADATA_NAMES.size(); ++i) {
+        if (i > 0) {
+            csv << ',';
+        }
+        write_csv_field(csv, METADATA_NAMES[i]);
+    }
+    csv << '\n';
     for (std::size_t i = 0; i < signatures.size(); ++i) {
         const auto& sig = signatures[i];
         const auto& rec = fasta_records[i];
-        fasta << '>' << rec.id << '\n' << rec.sequence << '\n';
-        // Quote CSV string values and double embedded quotes.
-        csv << '"';
-        for (char c : rec.id) {
-            if (c == '"') {
-                csv << '"';
-            }
-            csv << c;
+        fasta << '>' << rec.id << '\n';
+        for (std::size_t pos = 0; pos < rec.sequence.size(); pos += fasta_width) {
+            fasta << rec.sequence.substr(pos, fasta_width) << '\n';
         }
-        csv << "\","
-            << sig.length << ','
-            << sig.rep_ratio << ','
+        write_csv_field(csv, rec.id);
+        csv << ','
+            << sig.location.stop - sig.location.start << ','
+            << sig.n_tar * total_tar_inv << ','
             << sig.location.n_kmers << ','
             << sig.location.n_repeats << '\n';
     }
@@ -443,7 +463,7 @@ std::vector<Signature> extract_signatures(
     log_python(" - Found " + std::to_string(signatures.size()) + " valid signatures");
 
     if (fasta_path && csv_path) {
-        fetch_signature_sequences(signatures, assembly_paths, *fasta_path, *csv_path, pool);
+        fetch_signature_sequences(signatures, assembly_paths, *fasta_path, *csv_path, total_tar, pool);
     }
     return signatures;
 }

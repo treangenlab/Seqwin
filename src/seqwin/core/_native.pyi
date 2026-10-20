@@ -13,6 +13,8 @@ from collections.abc import Sequence
 import numpy as np
 from numpy.typing import NDArray
 
+_METADATA_NAMES: tuple[str, ...]
+
 class FilteredGraph:
     """Includes filtered graph arrays, low-penalty subgraphs, and calculated values.
 
@@ -99,20 +101,14 @@ class Signature:
     Attributes:
         subgraph_idx (int): Index of the low-penalty subgraph that produced the signature.
         location (SubgraphLoc): Location and metadata of the representative.
-        length (int): Length of the nucleotide sequence.
-        n_rep (int): Number of target assemblies containing the representative.
-        rep_ratio (float): Fraction of target assemblies containing the representative.
+        n_tar (int): Number of target assemblies containing the representative.
     """
     @property
     def subgraph_idx(self) -> int: ...
     @property
     def location(self) -> SubgraphLoc: ...
     @property
-    def length(self) -> int: ...
-    @property
-    def n_rep(self) -> int: ...
-    @property
-    def rep_ratio(self) -> float: ...
+    def n_tar(self) -> int: ...
 
 def _build_native(
     assembly_paths: Sequence[str],

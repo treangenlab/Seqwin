@@ -17,7 +17,7 @@ Functions:
 __author__ = 'Michael X. Wang'
 __license__ = 'GPL 3.0'
 
-import logging
+import csv, logging
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from time import time
@@ -26,6 +26,7 @@ from dataclasses import dataclass, field, fields, replace
 
 import pandas as pd
 
+from .core._native import _METADATA_NAMES
 from .ncbi import blast
 from .utils import print_time_delta, log_and_raise, load_fasta, mp_wrapper
 from .config import BLASTCONFIG
@@ -260,16 +261,19 @@ def eval_signatures_seqwin(
     The CSV is replaced only after evaluation and serialization succeed.
     """
     records = load_fasta(fasta_path)
-    df = pd.read_csv(csv_path, dtype={'fasta_header': str}, keep_default_na=False)
-    columns = ('fasta_header', 'length', 'rep_ratio', 'n_kmers', 'n_repeats')
-    if tuple(df.columns) != columns:
-        raise ValueError('Expected the five mandatory signature CSV columns')
-    if len(records) != len(df):
+    with csv_path.open(encoding='utf-8', newline='') as source:
+        reader = csv.reader(source)
+        if tuple(next(reader, ())) != _METADATA_NAMES:
+            raise ValueError('Expected the five mandatory signature CSV columns')
+        rows = list(reader)
+    if len(records) != len(rows):
         raise ValueError('FASTA and CSV signature counts do not match')
-    for i, record in enumerate(records):
-        if record.id != df.iloc[i]['fasta_header']:
+    for i, (record, row) in enumerate(zip(records, rows, strict=True)):
+        if len(row) != len(_METADATA_NAMES):
+            raise ValueError('Expected the five mandatory signature CSV columns')
+        if record.id != row[0]:
             raise ValueError(f'FASTA/CSV header mismatch at index {i}')
-        if len(record.sequence) != df.iloc[i]['length']:
+        if len(record.sequence) != int(row[1]):
             raise ValueError(f'FASTA/CSV length mismatch at index {i}')
 
     metrics = eval_signatures(
@@ -278,8 +282,6 @@ def eval_signatures_seqwin(
     )
     if len(metrics) != len(records):
         raise ValueError('Evaluation and signature counts do not match')
-    for name in _METRIC_NAMES:
-        df[name] = list(getattr(m, name) for m in metrics)
 
     temporary_path = None
     try:
@@ -287,7 +289,13 @@ def eval_signatures_seqwin(
             mode='w', dir=csv_path.parent, encoding='utf-8', newline='', delete=False
         ) as temporary:
             temporary_path = Path(temporary.name)
-            df.to_csv(temporary, index=False, lineterminator='\n')
+            writer = csv.writer(temporary, quoting=csv.QUOTE_MINIMAL, lineterminator='\n')
+            writer.writerow((*_METADATA_NAMES, *_METRIC_NAMES))
+            for row, metric in zip(rows, metrics, strict=True):
+                writer.writerow((
+                    *row,
+                    *(getattr(metric, name) for name in _METRIC_NAMES),
+                ))
         temporary_path.replace(csv_path)
     finally:
         if temporary_path is not None:

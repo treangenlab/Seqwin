@@ -49,6 +49,7 @@ def test_signature_output_and_evaluation_lifecycle(
     monkeypatch, tmp_path, targets_txt, non_targets_txt, run_blast, has_blast,
 ):
     import pandas as pd
+    from seqwin.core._native import _METADATA_NAMES
     from seqwin.assemblies import Assemblies
     from seqwin.entry import load
     from seqwin.evaluation import SignatureMetrics, _METRIC_NAMES
@@ -73,13 +74,13 @@ def test_signature_output_and_evaluation_lifecycle(
         windowsize=10, min_len=17, max_len=200, n_cpu=1, save_pickle=True,
     ))
     output = pd.read_csv(seq.state.working_dir / 'signatures.csv')
-    mandatory = ('fasta_header', 'length', 'rep_ratio', 'n_kmers', 'n_repeats')
+    mandatory = _METADATA_NAMES
+    assert not hasattr(seq.state, 'blastdb')
     assert isinstance(seq.signatures, tuple)
     if run_blast and has_blast:
         assert tuple(output.columns) == (*mandatory, *_METRIC_NAMES)
         assert isinstance(seq.metrics, tuple)
         assert len(seq.metrics) == len(seq.signatures)
-        assert seq.state.blastdb == tmp_path / 'all'
         assert calls == [dict(
             prefix=seq.state.working_dir / 'blastdb', neg_only=False,
             overwrite=False, n_cpu=1,
@@ -87,9 +88,8 @@ def test_signature_output_and_evaluation_lifecycle(
     else:
         assert tuple(output.columns) == mandatory
         assert seq.metrics is None
-        assert seq.state.blastdb is None
         assert not calls
     from seqwin.config import WORKINGDIR
     restored = load(seq.state.working_dir / WORKINGDIR.results)
     assert restored.metrics == seq.metrics
-    assert [s.length for s in restored.signatures] == [s.length for s in seq.signatures]
+    assert [s.n_tar for s in restored.signatures] == [s.n_tar for s in seq.signatures]

@@ -62,6 +62,12 @@ PYBIND11_MODULE(_native, m) {
 
     seqwin::bindings::bind_python_classes(m);
 
+    py::tuple names(seqwin::METADATA_NAMES.size());
+    for (std::size_t i = 0; i < seqwin::METADATA_NAMES.size(); ++i) {
+        names[i] = py::str(std::string(seqwin::METADATA_NAMES[i]));
+    }
+    m.attr("_METADATA_NAMES") = std::move(names);
+
     m.def("_build_native",
         [](const std::vector<std::string>& assembly_paths,
            std::size_t kmerlen,

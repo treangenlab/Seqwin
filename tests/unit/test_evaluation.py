@@ -1,3 +1,4 @@
+import csv
 from pathlib import Path
 
 import pandas as pd
@@ -5,10 +6,11 @@ import pytest
 
 import seqwin.evaluation as evaluation
 from seqwin.config import BLASTCONFIG
+from seqwin.core._native import _METADATA_NAMES
 from seqwin.evaluation import SignatureMetrics, eval_signatures_seqwin
 
 
-COLUMNS = ('fasta_header', 'length', 'rep_ratio', 'n_kmers', 'n_repeats')
+COLUMNS = _METADATA_NAMES
 
 
 def _files(tmp_path):
@@ -92,3 +94,21 @@ def test_hits_keep_optimal_alignment_and_input_order(monkeypatch, n_cpu):
     assert metrics[1].avg_repeats_tar == 2
     assert metrics[1].avg_pident_tar == .75
     assert metrics[1].blast.bitscore.tolist() == [20]
+
+
+def test_csv_rewrite_preserves_metadata_strings_and_escaping(monkeypatch, tmp_path):
+    fasta, path = _files(tmp_path)
+    header = 'record,with"quotes'
+    fasta.write_text(f'>{header}\nAAAA\n')
+    row = [header, '04', '0.33333333333333331', '03', '01']
+    with path.open('w', newline='') as output:
+        writer = csv.writer(output, lineterminator='\n')
+        writer.writerow(COLUMNS)
+        writer.writerow(row)
+    monkeypatch.setattr(evaluation, 'eval_signatures', lambda *args: [SignatureMetrics()])
+    eval_signatures_seqwin(fasta, path, Path('db'), 1, 1)
+    with path.open(newline='') as source:
+        rows = list(csv.reader(source))
+    assert rows[1][:5] == row
+    assert path.read_text().startswith(','.join(COLUMNS) + ',')
+    assert '"record,with""quotes",04,0.33333333333333331,03,01,' in path.read_text()
