@@ -6,6 +6,15 @@
 
 namespace seqwin {
 
+/**
+ * @brief Columns in the signature metadata CSV.
+ *
+ * @li fasta_header: `<SubgraphLoc::assembly_idx>-<record.id>-<SubgraphLoc::start>:<SubgraphLoc::stop>`
+ * @li length: `SubgraphLoc::stop - SubgraphLoc::start`
+ * @li f_tar: `Signature::n_tar / total_tar`
+ * @li n_kmers: `SubgraphLoc::n_kmers`
+ * @li n_repeats: `SubgraphLoc::n_repeats`
+ */
 inline constexpr std::array<std::string_view, 5> METADATA_NAMES = {
     "fasta_header", "length", "f_tar", "n_kmers", "n_repeats"
 };
