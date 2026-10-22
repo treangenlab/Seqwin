@@ -39,10 +39,10 @@ public:
     {}
 
     /**
-     * @brief Provide a function `fn` that needs access to node `n_tar`.
+     * @brief Accept a function `fn` that needs access to node `n_tar`.
      *
-     * The `n_tar` accessor is selected based on the counter type and stored assembly group.
-     * It is passed as the sole argument to `fn`.
+     * The caller provides `fn`, which takes the `n_tar` accessor as its sole argument.
+     * The accessor is selected once based on the counter type and stored assembly group.
      */
     template <typename Fn>
     void with(Fn&& fn) const {
@@ -222,6 +222,8 @@ std::vector<Signature> extract_signatures(
     std::size_t windowsize,
     std::size_t min_len,
     double consec_kmer_mul,
+    const std::optional<std::string>& fasta_path,
+    const std::optional<std::string>& csv_path,
     std::size_t total_tar,
     ThreadPool& pool
 );

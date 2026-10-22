@@ -1,9 +1,23 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
-#include <string>
+#include <string_view>
 
 namespace seqwin {
+
+/**
+ * @brief Columns in the signature metadata CSV.
+ *
+ * @li fasta_header: `<SubgraphLoc::assembly_idx>-<record.id>-<SubgraphLoc::start>:<SubgraphLoc::stop>`
+ * @li length: `SubgraphLoc::stop - SubgraphLoc::start`
+ * @li f_tar: `Signature::n_tar / total_tar`
+ * @li n_kmers: `SubgraphLoc::n_kmers`
+ * @li n_repeats: `SubgraphLoc::n_repeats`
+ */
+inline constexpr std::array<std::string_view, 5> METADATA_NAMES = {
+    "fasta_header", "length", "f_tar", "n_kmers", "n_repeats"
+};
 
 /**
  * @brief Location and minimizer metadata for a subgraph found in an assembly.
@@ -42,14 +56,8 @@ struct Signature {
     std::size_t subgraph_idx;
     /** Location and metadata of the representative. */
     SubgraphLoc location;
-    /** Nucleotide sequence of the signature. */
-    std::string sequence;
-    /** Length of the nucleotide sequence. */
-    std::size_t length;
     /** Number of target assemblies containing the representative. */
-    std::size_t n_rep;
-    /** Fraction of target assemblies containing the representative. */
-    double rep_ratio;
+    std::size_t n_tar;
 };
 
 } // namespace seqwin

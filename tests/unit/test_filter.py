@@ -1,3 +1,4 @@
+import csv
 import pickle
 
 import numpy as np
@@ -6,7 +7,7 @@ import pytest
 from seqwin.core import (
     EDGE_DTYPE, KMER_DTYPE, NODE_DTYPE, FilteredGraph, Signature
 )
-from seqwin.core._native import _filter_native
+from seqwin.core._native import _METADATA_NAMES, _filter_native
 
 
 def _paths(n_assemblies=4):
@@ -38,7 +39,7 @@ def _inputs():
 
 def _filter(*, penalty_th=0.3, jaccard=None, n_cpu=1, targets=None,
             penalty_th_cap=0.2, edge_w_th_mul=0.3, min_nodes_floor=1,
-            max_nodes_cap=None):
+            max_nodes_cap=None, **output_paths):
     kmers, nodes, edges, offsets, default_targets = _inputs()
     if targets is None:
         targets = default_targets
@@ -48,7 +49,7 @@ def _filter(*, penalty_th=0.3, jaccard=None, n_cpu=1, targets=None,
         kmers, nodes, edges, offsets, assembly_nodes, node_offsets,
         _paths(), targets, jaccard, 5, 10,
         penalty_th, 5, 0, None, penalty_th_cap, edge_w_th_mul, min_nodes_floor,
-        max_nodes_cap, 1.5, n_cpu,
+        max_nodes_cap, 1.5, n_cpu, **output_paths,
     )
     return result, nodes
 
@@ -107,10 +108,9 @@ def test_native_filter_preserves_ranges_and_original_indices():
     assert len(signatures) == 1
     signature = signatures[0]
     assert signature.subgraph_idx == 0
-    assert signature.sequence == 'ACGTA'
-    assert signature.length == 5
-    assert signature.n_rep == 2
-    assert signature.rep_ratio == 1.0
+    assert not hasattr(signature, 'sequence')
+    assert signature.location.stop - signature.location.start == 5
+    assert signature.n_tar == 2
     assert all(node_i < len(scored) for subgraph in subgraphs for node_i in subgraph)
     assert set(nodes['idx']) - set(subgraphs[0]) == {2, 3}
 
@@ -135,8 +135,8 @@ def test_automatic_threshold_from_minimizers_and_parallel_equivalence():
         signature.subgraph_idx, signature.location.assembly_idx,
         signature.location.record_idx, signature.location.start,
         signature.location.stop, signature.location.n_kmers,
-        signature.location.n_repeats, signature.sequence,
-        signature.length, signature.n_rep, signature.rep_ratio,
+        signature.location.n_repeats,
+        signature.n_tar,
     )
     assert list(map(signature_fields, first[1])) == list(map(signature_fields, parallel[1]))
 
@@ -299,7 +299,7 @@ def test_original_indices_are_preserved_after_isolated_node_removal(n_cpu):
     assert filtered_edges.tolist() == [(1, 2, 1)]
     assert subgraphs == [[1, 2]]
     assert len(signatures) == 1
-    assert signatures[0].sequence == 'ACGTA'
+    assert signatures[0].location.stop - signatures[0].location.start == 5
     assert signatures[0].location.n_kmers == 2
 
     restored = pickle.loads(pickle.dumps(filtered, protocol=5))
@@ -350,12 +350,12 @@ def test_native_results_pickle_round_trip():
     assert edges.tolist() == [(0, 1, 1), (1, 2, 1), (2, 3, 1)]
 
     signature = signatures[0]
+    assert len(signature.__getstate__()) == 4
+    assert signature.__getstate__()[3] == signature.n_tar
     restored_signature = pickle.loads(pickle.dumps(signature, protocol=5))
     assert restored_signature.subgraph_idx == signature.subgraph_idx
-    assert restored_signature.sequence == signature.sequence
-    assert restored_signature.length == signature.length
-    assert restored_signature.n_rep == signature.n_rep
-    assert restored_signature.rep_ratio == signature.rep_ratio
+    assert not hasattr(restored_signature, 'sequence')
+    assert restored_signature.n_tar == signature.n_tar
     for name in ('assembly_idx', 'record_idx', 'start', 'stop', 'n_kmers', 'n_repeats'):
         assert getattr(restored_signature.location, name) == getattr(signature.location, name)
 
@@ -389,7 +389,6 @@ def test_signature_extraction_rejects_invalid_final_node_range(final_start_offse
         )
 
 
-
 def test_target_counts_include_non_target_only_nodes_and_exclude_isolated_nodes():
     kmers, original_nodes, _, offsets, targets = _inputs()
     extra_kmers = np.array([(0, 2), (1, 3)], dtype=KMER_DTYPE)
@@ -418,3 +417,30 @@ def test_target_counts_include_non_target_only_nodes_and_exclude_isolated_nodes(
     np.testing.assert_allclose(filtered.nodes['penalty'], [0, 0, 1, np.sqrt(2)])
     assert 3 not in filtered.nodes['idx']
     assert filtered.edges.tolist() == [(0, 1, 1), (1, 2, 1), (2, 4, 1)]
+
+
+@pytest.mark.parametrize('record_id', ('ordinary', 'record,with"quotes'))
+def test_native_csv_escaping_and_fasta_wrapping(tmp_path, record_id):
+    kmers, nodes, edges, offsets, targets = _inputs()
+    paths = []
+    for i in range(4):
+        path = tmp_path / f'{i}.fasta'
+        path.write_text(f'>{record_id}\n' + 'acgt' * 50 + '\n')
+        paths.append(str(path))
+    fasta_path = tmp_path / 'signatures.fasta'
+    csv_path = tmp_path / 'signatures.csv'
+    _filter_native(
+        kmers, nodes, edges, offsets,
+        np.array([0, 1, 2, 3, 0, 1, 2, 2, 2], dtype=np.uintp),
+        np.array([0, 4, 7, 8, 9], dtype=np.uintp),
+        paths, targets, None, 100, 10, .3, 5, 0, None, .2, .3, 1, None, 1.5, 1,
+        fasta_path=str(fasta_path), csv_path=str(csv_path),
+    )
+    header = f'0-{record_id}-0:100'
+    assert fasta_path.read_text().splitlines() == ['>' + header, 'ACGT' * 20, 'ACGT' * 5]
+    with csv_path.open(newline='') as source:
+        rows = list(csv.reader(source))
+    assert rows == [list(_METADATA_NAMES), [header, '100', '1', '2', '1']]
+    assert csv_path.read_text().splitlines()[0] == ','.join(_METADATA_NAMES)
+    expected = header if record_id == 'ordinary' else '"' + header.replace('"', '""') + '"'
+    assert csv_path.read_text().splitlines()[1] == expected + ',100,1,2,1'

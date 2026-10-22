@@ -13,7 +13,7 @@
 namespace seqwin {
 
 /**
- * @brief Represented by indices into the original `Graph.nodes` array.
+ * @brief Represented by indices into the original `Graph::nodes` array.
  */
 using Subgraph = std::vector<std::size_t>;
 
@@ -33,13 +33,15 @@ struct FilterConfig {
     std::optional<std::size_t> max_nodes_cap;
     double consec_kmer_mul;
     std::size_t n_cpu;
+    std::optional<std::string> fasta_path;
+    std::optional<std::string> csv_path;
 };
 
 /**
  * @brief Graph node retained by edge filtering.
  */
 struct FilteredNode {
-    /** Index into the original `Graph.nodes` array. */
+    /** Index into the original `Graph::nodes` array. */
     std::size_t idx;
     /** Number of target assemblies containing this node's minimizer. */
     std::uint32_t n_tar;
@@ -59,7 +61,7 @@ struct FilteredGraph {
     NoInitArray<FilteredNode> nodes;
     /** Edges passing weight and target-support thresholds. */
     std::vector<Edge> edges;
-    /** Low-penalty subgraphs represented by indices of the original `Graph.nodes` array. */
+    /** Low-penalty subgraphs represented by indices of the original `Graph::nodes` array. */
     std::vector<Subgraph> subgraphs;
     /** Number of target assemblies. */
     std::size_t total_tar;

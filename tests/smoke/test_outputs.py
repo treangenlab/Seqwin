@@ -1,3 +1,4 @@
+import csv
 from pathlib import Path
 
 import numpy as np
@@ -6,6 +7,7 @@ from typer.testing import CliRunner
 
 from seqwin import cli
 from seqwin.config import WORKINGDIR
+from seqwin.core._native import _METADATA_NAMES
 from seqwin.utils import read_text
 
 runner = CliRunner()
@@ -84,6 +86,12 @@ def test_txt_mode_matches_expected(tmp_path: Path, targets_txt: Path, non_target
     )
 
     assert read_text(out_dir / WORKINGDIR.markers_fasta) == expected_fasta
+    csv_path = out_dir / WORKINGDIR.markers_csv
+    with csv_path.open(newline='') as source:
+        rows = list(csv.reader(source))
+    assert tuple(rows[0]) == _METADATA_NAMES
+    assert len(rows) - 1 == expected_fasta.count('>')
+    assert csv_path.read_text().splitlines()[0] == ','.join(_METADATA_NAMES)
 
 
 def test_dir_mode_matches_expected(tmp_path: Path, targets_dir: Path, non_targets_dir: Path, expected_fasta: str) -> None:

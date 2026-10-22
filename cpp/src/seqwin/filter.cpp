@@ -174,6 +174,9 @@ std::pair<FilteredGraph, std::vector<Signature>> filter(
     std::size_t jaccard_cols,
     const FilterConfig& config
 ) {
+    if (config.fasta_path.has_value() != config.csv_path.has_value()) {
+        throw std::invalid_argument("Both fasta_path and csv_path are required for signature output");
+    }
     internal::ThreadPool pool(std::max<std::size_t>(1, config.n_cpu));
 
     FilteredGraph filtered;
@@ -265,6 +268,8 @@ std::pair<FilteredGraph, std::vector<Signature>> filter(
         config.windowsize,
         config.min_len,
         config.consec_kmer_mul,
+        config.fasta_path,
+        config.csv_path,
         filtered.total_tar,
         pool
     );

@@ -2,7 +2,7 @@
 Evaluation
 ==========
 
-Evaluate and write output signatures to files.
+Evaluate signature sequences with BLAST and calculate their metrics.
 
 Classes:
 --------
@@ -11,25 +11,25 @@ Classes:
 Functions:
 ----------
 - eval_signatures
-- process_signatures
+- eval_signatures_seqwin
 """
 
 __author__ = 'Michael X. Wang'
 __license__ = 'GPL 3.0'
 
-import logging
+import csv, logging
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 from time import time
 from itertools import repeat
-from dataclasses import dataclass, field, fields, asdict, replace
+from dataclasses import dataclass, field, fields, replace
 
 import pandas as pd
 
-from .core import Graph, FilteredGraph, Signature
-from .assemblies import Assemblies
+from .core._native import _METADATA_NAMES
 from .ncbi import blast
-from .utils import print_time_delta, log_and_raise, file_to_write, mp_wrapper
-from .config import Config, RunState, HAS_BLAST, WORKINGDIR, BLASTCONFIG
+from .utils import print_time_delta, log_and_raise, load_fasta, mp_wrapper
+from .config import BLASTCONFIG
 
 logger = logging.getLogger(__name__)
 
@@ -38,37 +38,31 @@ logger = logging.getLogger(__name__)
 class SignatureMetrics:
     """
     Metrics of a signature, calculated from its BLAST alignments against target / non-target assemblies.
-    Metrics default to None if BLAST is not run.
+    Metrics default to zero when no BLAST hits are found.
 
     Attributes:
-        conservation (float | None): Average fraction of identical bases between the signature and target assemblies.
-        f_tar_hits (float | None): Fraction of target assemblies with a BLAST hit.
-        divergence (float | None): Average fraction of mismatches and gaps between the signature and non-target assemblies.
-        f_neg_hits (float | None): Fraction of non-target assemblies with a BLAST hit.
-        avg_repeats_tar (float | None): Average number of repeats of this signature in target assemblies.
-        avg_pident_tar (float | None): Average percentage of identical bases of all repeats in target assemblies.
-        avg_repeats_neg (float | None): Average number of repeats of this signature in non-target assemblies.
-        avg_pident_neg (float | None): Average percentage of identical bases of all repeats in non-target assemblies.
+        conservation (float): Average fraction of identical bases between the signature and target assemblies.
+        f_tar_hits (float): Fraction of target assemblies with a BLAST hit.
+        divergence (float): Average fraction of mismatches and gaps between the signature and non-target assemblies.
+        f_neg_hits (float): Fraction of non-target assemblies with a BLAST hit.
+        avg_repeats_tar (float): Average number of repeats of this signature in target assemblies.
+        avg_pident_tar (float): Average percentage of identical bases of all repeats in target assemblies.
+        avg_repeats_neg (float): Average number of repeats of this signature in non-target assemblies.
+        avg_pident_neg (float): Average percentage of identical bases of all repeats in non-target assemblies.
         blast (pd.DataFrame | None): BLAST alignments used to calculate the scalar metrics.
     """
-    conservation: float | None = None
-    f_tar_hits: float | None = None
-    divergence: float | None = None
-    f_neg_hits: float | None = None
-    avg_repeats_tar: float | None = None
-    avg_pident_tar: float | None = None
-    avg_repeats_neg: float | None = None
-    avg_pident_neg: float | None = None
-    blast: pd.DataFrame | None = field(
-        default=None,
-        compare=False,
-        repr=False,
-    )
+    conservation: float = 0.0
+    f_tar_hits: float = 0.0
+    divergence: float = 0.0
+    f_neg_hits: float = 0.0
+    avg_repeats_tar: float = 0.0
+    avg_pident_tar: float = 0.0
+    avg_repeats_neg: float = 0.0
+    avg_pident_neg: float = 0.0
+    blast: pd.DataFrame | None = field(default=None, repr=False, compare=False)
 
 # Scalar metrics (excluding 'blast')
 _METRIC_NAMES = tuple(f.name for f in fields(SignatureMetrics) if f.name != 'blast')
-# Baseline metrics if signature has no BLAST hit
-_BASELINE_METRICS = SignatureMetrics(**{f: .0 for f in _METRIC_NAMES})
 
 
 def _get_avg_ident(blast_out: pd.DataFrame, query_len: int, n: int) -> float:
@@ -125,9 +119,9 @@ def _get_metrics(
         SignatureMetrics: Signature metrics.
     """
     if blast_out is None: # no blast hit in any assembly
-        return _BASELINE_METRICS
+        return SignatureMetrics()
 
-    metrics = asdict(_BASELINE_METRICS)
+    metrics = {} # SignatureMetrics is frozen
 
     # calculate sensitivity
     df_tar = blast_out[blast_out['is_target'] == True]
@@ -165,10 +159,10 @@ def eval_signatures(
     """
     if blastdb.name == BLASTCONFIG.title_neg_only:
         neg_only = True
-        logger.info('BLAST checking signatures against non-target assemblies (less sensitive but faster)...')
+        logger.info(' - BLAST checking signatures against non-target assemblies...')
     elif blastdb.name == BLASTCONFIG.title_all:
         neg_only = False
-        logger.info('BLAST checking signatures against all assemblies (more sensitive but slower)...')
+        logger.info(' - BLAST checking signatures against all assemblies...')
     else:
         log_and_raise(
             ValueError,
@@ -253,104 +247,58 @@ def eval_signatures(
     return metrics
 
 
-def _eval_signatures(
-    signatures: list[Signature],
+def eval_signatures_seqwin(
+    fasta_path: Path,
+    csv_path: Path,
     blastdb: Path,
     total_tar: int,
     total_neg: int,
-    n_cpu: int,
-) -> tuple[
-    list[Signature],
-    list[SignatureMetrics],
-]:
-    """Evaluate signatures with BLAST and rank them by conservation and divergence.
+    n_cpu: int = 1,
+) -> list[SignatureMetrics]:
+    """Evaluate Seqwin FASTA signatures and append scalar metrics to their CSV.
+
+    FASTA records and CSV rows must match in count, header, length, and order.
+    The CSV is replaced only after evaluation and serialization succeed.
     """
+    records = load_fasta(fasta_path)
+    with csv_path.open(encoding='utf-8', newline='') as source:
+        reader = csv.reader(source)
+        if tuple(next(reader, ())) != _METADATA_NAMES:
+            raise ValueError('Expected the five mandatory signature CSV columns')
+        rows = list(reader)
+    if len(records) != len(rows):
+        raise ValueError('FASTA and CSV signature counts do not match')
+    for i, (record, row) in enumerate(zip(records, rows, strict=True)):
+        if len(row) != len(_METADATA_NAMES):
+            raise ValueError('Expected the five mandatory signature CSV columns')
+        if record.id != row[0]:
+            raise ValueError(f'FASTA/CSV header mismatch at index {i}')
+        if len(record.sequence) != int(row[1]):
+            raise ValueError(f'FASTA/CSV length mismatch at index {i}')
+
     metrics = eval_signatures(
-        list(s.sequence for s in signatures),
-        blastdb, total_tar, total_neg, n_cpu
+        list(record.sequence for record in records),
+        blastdb, total_tar, total_neg, n_cpu,
     )
-    ranked = sorted(
-        zip(signatures, metrics, strict=True),
-        key=lambda pair: pair[1].conservation + pair[1].divergence,
-        reverse=True,
-    )
-    return list(pair[0] for pair in ranked), list(pair[1] for pair in ranked)
+    if len(metrics) != len(records):
+        raise ValueError('Evaluation and signature counts do not match')
 
-
-def process_signatures(
-    signatures: list[Signature],
-    filtered: FilteredGraph,
-    assemblies: Assemblies,
-    graph: Graph,
-    config: Config,
-    state: RunState,
-) -> tuple[
-    tuple[Signature, ...],
-    tuple[SignatureMetrics, ...],
-]:
-    """Evaluate extracted signatures and save them to FASTA and CSV.
-    """
-    total_tar = filtered.total_tar
-    total_neg = filtered.total_neg
-
-    record_offsets = graph.record_offsets
-    record_ids = graph.record_ids
-
-    overwrite = config.overwrite
-    run_blast = config.run_blast
-    blast_neg_only = config.blast_neg_only
-    n_cpu = config.n_cpu
-
-    working_dir = state.working_dir
-
-    if run_blast and HAS_BLAST:
-        logger.info('Evaluating candidate signatures with BLAST...')
-        blastdb = assemblies.makeblastdb(
-            prefix=working_dir / WORKINGDIR.blast_dir,
-            neg_only=blast_neg_only,
-            overwrite=overwrite,
-            n_cpu=n_cpu,
-        )
-        signatures, metrics = _eval_signatures(
-            signatures, blastdb, total_tar, total_neg, n_cpu
-        )
-    else:
-        if run_blast:
-            logger.error('BLAST+ is not installed. Signature evaluation is skipped.')
-        else:
-            logger.warning('Signature evaluation is turned off, skip running BLAST')
-        blastdb = None
-        metrics = list(SignatureMetrics() for _ in signatures)
-
-    # save to fasta
-    markers_fasta = working_dir / WORKINGDIR.markers_fasta
-    file_to_write(markers_fasta, overwrite)
-    fasta = list()
-    csv = list()
-    for s, m in zip(signatures, metrics, strict=True):
-        loc = s.location
-        assembly_idx = loc.assembly_idx
-        record_id = record_ids[record_offsets[assembly_idx] + loc.record_idx]
-        header = f'{assembly_idx}-{record_id}-{loc.start}:{loc.stop}'
-        fasta.append(f'>{header}\n{s.sequence}\n')
-        csv.append((
-            header,
-            s.length,
-            *(getattr(m, name) for name in _METRIC_NAMES),
-            s.rep_ratio,
-            loc.n_kmers,
-        ))
-    markers_fasta.write_text(''.join(fasta), encoding='utf-8', newline='\n')
-    logger.info(f'Candidate signatures saved as {markers_fasta}')
-
-    # save to csv
-    markers_csv = working_dir / WORKINGDIR.markers_csv
-    file_to_write(markers_csv, overwrite)
-    pd.DataFrame(
-        csv,
-        columns=('fasta_header', 'length', *_METRIC_NAMES, 'rep_ratio', 'n_nodes')
-    ).to_csv(markers_csv, index=False, encoding='utf-8', lineterminator='\n')
-    logger.info(f'Metrics of candidate signatures saved as {markers_csv}')
-
-    state.blastdb = blastdb
-    return tuple(signatures), tuple(metrics)
+    temporary_path = None
+    try:
+        with NamedTemporaryFile(
+            mode='w', dir=csv_path.parent, encoding='utf-8', newline='', delete=False
+        ) as temporary:
+            temporary_path = Path(temporary.name)
+            writer = csv.writer(temporary, quoting=csv.QUOTE_MINIMAL, lineterminator='\n')
+            writer.writerow((*_METADATA_NAMES, *_METRIC_NAMES))
+            for row, metric in zip(rows, metrics, strict=True):
+                writer.writerow((
+                    *row,
+                    *(getattr(metric, name) for name in _METRIC_NAMES),
+                ))
+        temporary_path.replace(csv_path)
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+    logger.info(f' - Signature metrics added to {csv_path}')
+    return metrics

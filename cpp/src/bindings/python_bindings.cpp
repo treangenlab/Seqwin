@@ -62,6 +62,12 @@ PYBIND11_MODULE(_native, m) {
 
     seqwin::bindings::bind_python_classes(m);
 
+    py::tuple names(seqwin::METADATA_NAMES.size());
+    for (std::size_t i = 0; i < seqwin::METADATA_NAMES.size(); ++i) {
+        names[i] = py::str(std::string(seqwin::METADATA_NAMES[i]));
+    }
+    m.attr("_METADATA_NAMES") = std::move(names);
+
     m.def("_build_native",
         [](const std::vector<std::string>& assembly_paths,
            std::size_t kmerlen,
@@ -119,7 +125,9 @@ PYBIND11_MODULE(_native, m) {
            std::size_t min_nodes_floor,
            std::optional<std::size_t> max_nodes_cap,
            double consec_kmer_mul,
-           std::size_t n_cpu
+           std::size_t n_cpu,
+           const std::optional<std::string>& fasta_path,
+           const std::optional<std::string>& csv_path
         ) {
             const auto* kmers_ptr = kmers.data();
             const auto* nodes_ptr = nodes.data();
@@ -160,7 +168,9 @@ PYBIND11_MODULE(_native, m) {
                 min_nodes_floor,
                 max_nodes_cap,
                 consec_kmer_mul,
-                n_cpu
+                n_cpu,
+                fasta_path,
+                csv_path
             };
 
             std::pair<seqwin::FilteredGraph, std::vector<seqwin::Signature>> out;
@@ -211,7 +221,9 @@ PYBIND11_MODULE(_native, m) {
         py::arg("min_nodes_floor"),
         py::arg("max_nodes_cap"),
         py::arg("consec_kmer_mul"),
-        py::arg("n_cpu")
+        py::arg("n_cpu") = 1,
+        py::arg("fasta_path") = py::none(),
+        py::arg("csv_path") = py::none()
     );
 
 }
