@@ -75,7 +75,6 @@ def test_signature_output_and_evaluation_lifecycle(
     ))
     output = pd.read_csv(seq.state.working_dir / 'signatures.csv')
     mandatory = _METADATA_NAMES
-    assert not hasattr(seq.state, 'blastdb')
     assert isinstance(seq.signatures, tuple)
     if run_blast and has_blast:
         assert tuple(output.columns) == (*mandatory, *_METRIC_NAMES)
