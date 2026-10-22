@@ -100,7 +100,7 @@ PYBIND11_MODULE(_native, m) {
         py::arg("assembly_paths"),
         py::arg("kmerlen"),
         py::arg("windowsize"),
-        py::arg("n_cpu") = 1,
+        py::arg("n_cpu") = 4,
         py::arg("low_memory") = false
     );
 

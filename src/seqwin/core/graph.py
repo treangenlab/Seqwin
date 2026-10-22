@@ -127,8 +127,8 @@ class Graph:
         assembly_paths: Sequence[str | Path],
         kmerlen: int,
         windowsize: int,
+        n_cpu: int = 4,
         low_memory: bool = False,
-        n_cpu: int = 1,
     ) -> None:
         """Build a minimizer graph.
 
@@ -136,8 +136,8 @@ class Graph:
             assembly_paths (Sequence[str | Path]): Paths to input assemblies in FASTA format (plain or gzipped).
             kmerlen (int): K-mer length for minimizer sketch.
             windowsize (int): Window size for minimizer sketch.
+            n_cpu (int, optional): Number of worker threads to use. [4]
             low_memory (bool, optional): Recompute minimizers in a second pass to reduce peak memory. [False]
-            n_cpu (int, optional): Number of worker threads to use. [1]
         """
         (
             self.kmers,
