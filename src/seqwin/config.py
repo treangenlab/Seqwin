@@ -212,7 +212,6 @@ class Config(BaseModel):
         return self
 
     model_config = {
-        # similar to @dataclass(slots=True, frozen=True)
         'frozen': True,
         'slots': True,
         'validate_default': True,
@@ -227,11 +226,9 @@ class RunState:
     Attributes:
         working_dir (Path): Working directory, defined by prefix and title.
         jaccard (NDArray[np.float64] | None): Pairwise assembly Jaccard matrix.
-        blastdb (Path | None): Path to the BLAST database inside the working directory.
     """
     working_dir: Path
     jaccard: NDArray[np.float64] | None = None
-    blastdb: Path | None = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -247,8 +244,8 @@ class WorkingDir:
         mash (str): Mash sketch of all assemblies (.msh will be added by Mash). ['sketches']
         blast_dir (str): Directory for the BLAST database. ['blastdb']
         blast_log (str): Console output of the makeblastdb command, inside `blast_dir`. ['makeblastdb.log']
-        markers_fasta (str): Sequences and coordinates of candidate signatures. ['signatures.fasta']
-        markers_csv (str): Metrics of candidate signatures. ['signatures.csv']
+        signatures_fasta (str): Sequences and coordinates of candidate signatures. ['signatures.fasta']
+        signatures_csv (str): Metrics of candidate signatures. ['signatures.csv']
         results (str): The `Seqwin` instance (`core.py`) saved as pickle. ['results.seqwin']
     """
     log: str = 'seqwin.log'
@@ -259,8 +256,8 @@ class WorkingDir:
     mash: str = 'sketches'
     blast_dir: str = 'blastdb'
     blast_log: str = 'makeblastdb.log'
-    markers_fasta: str = 'signatures.fasta'
-    markers_csv: str = 'signatures.csv'
+    signatures_fasta: str = 'signatures.fasta'
+    signatures_csv: str = 'signatures.csv'
     results: str = 'results.seqwin'
 
 

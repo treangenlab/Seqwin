@@ -76,8 +76,8 @@ def _filter_graph(
         else:
             logger.error('Mash is not installed. Falling back to minimizer sketches.')
 
-    fasta_path = state.working_dir / WORKINGDIR.markers_fasta
-    csv_path = state.working_dir / WORKINGDIR.markers_csv
+    fasta_path = state.working_dir / WORKINGDIR.signatures_fasta
+    csv_path = state.working_dir / WORKINGDIR.signatures_csv
     file_to_write(fasta_path, config.overwrite)
     file_to_write(csv_path, config.overwrite)
 
@@ -180,21 +180,15 @@ class Seqwin(object):
         config_path.write_text(config.model_dump_json(indent=4))
         logger.info(f'Run configurations saved as {config_path}')
 
-        # initiate run states
-        state = RunState(working_dir=working_dir)
-
-        # load assemblies
-        assemblies = get_assemblies(config, state)
-
         self.config = config
-        self.state = state
-        self.assemblies = assemblies
+        self.state = RunState(working_dir=working_dir)
+        self.assemblies = get_assemblies(config, self.state)
         self.filtered = None
         self.signatures = None
         self.metrics = None
 
     def run(self) -> None:
-        """Build and filter the k-mer graph, then extract candidate markers.
+        """Build and filter the k-mer graph, then extract candidate signatures.
         """
         config = self.config
         state = self.state
@@ -224,14 +218,13 @@ class Seqwin(object):
                 n_cpu=config.n_cpu,
             )
             metrics = eval_signatures_seqwin(
-                working_dir / WORKINGDIR.markers_fasta,
-                working_dir / WORKINGDIR.markers_csv,
+                working_dir / WORKINGDIR.signatures_fasta,
+                working_dir / WORKINGDIR.signatures_csv,
                 blastdb,
                 filtered.total_tar,
                 filtered.total_neg,
                 config.n_cpu,
             )
-            state.blastdb = blastdb
             self.metrics = tuple(metrics)
         elif config.run_blast:
             logger.error('NCBI BLAST+ is not installed. Signature evaluation is skipped.')
@@ -239,7 +232,6 @@ class Seqwin(object):
             logger.warning('Signature evaluation is turned off, skip running BLAST')
 
         if config.save_pickle:
-            # save run instance
             results_path = working_dir / WORKINGDIR.results
             file_to_write(results_path, overwrite)
             results_path.write_bytes(pickle.dumps(self, protocol=5))

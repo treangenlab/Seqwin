@@ -85,8 +85,8 @@ def test_txt_mode_matches_expected(tmp_path: Path, targets_txt: Path, non_target
         *_shared_config,
     )
 
-    assert read_text(out_dir / WORKINGDIR.markers_fasta) == expected_fasta
-    csv_path = out_dir / WORKINGDIR.markers_csv
+    assert read_text(out_dir / WORKINGDIR.signatures_fasta) == expected_fasta
+    csv_path = out_dir / WORKINGDIR.signatures_csv
     with csv_path.open(newline='') as source:
         rows = list(csv.reader(source))
     assert tuple(rows[0]) == _METADATA_NAMES
@@ -104,7 +104,7 @@ def test_dir_mode_matches_expected(tmp_path: Path, targets_dir: Path, non_target
         *_shared_config,
     )
 
-    assert read_text(out_dir / WORKINGDIR.markers_fasta) == expected_fasta
+    assert read_text(out_dir / WORKINGDIR.signatures_fasta) == expected_fasta
 
 
 def test_multithreading_matches_expected(tmp_path: Path, targets_txt: Path, non_targets_txt: Path, expected_fasta: str) -> None:
@@ -117,7 +117,7 @@ def test_multithreading_matches_expected(tmp_path: Path, targets_txt: Path, non_
         *_shared_config,
     )
 
-    assert read_text(out_dir / WORKINGDIR.markers_fasta) == expected_fasta
+    assert read_text(out_dir / WORKINGDIR.signatures_fasta) == expected_fasta
 
 
 @pytest.mark.parametrize(
