@@ -101,13 +101,13 @@ struct Kmer {
 /**
  * @brief Minimizer graph node for one unique minimizer hash.
  *
- * `start` is the beginning of this node's entries in `Graph.kmers`. The end
- * is the next node's `start`, or `Graph.kmers.size()` for the final node.
+ * `start` is the beginning of this node's entries in `Graph::kmers`. The end
+ * is the next node's `start`, or `Graph::kmers.size()` for the final node.
  */
 struct Node {
     /** Hash value of the minimizers represented by this node. */
     std::uint64_t hash;
-    /** Start of this node's minimizer entries in `Graph.kmers`. */
+    /** Start of this node's minimizer entries in `Graph::kmers`. */
     std::size_t start;
     /** Number of assemblies containing this node's minimizer. */
     std::size_t prevalence;
@@ -115,7 +115,7 @@ struct Node {
 
 /**
  * @brief Undirected weighted edge between two graph nodes.
- * Endpoints are indices into the graph's node array `Graph.nodes`.
+ * Endpoints are indices into the graph's node array `Graph::nodes`.
  */
 struct Edge {
     /** Index of the smaller endpoint in the graph's node array. */
