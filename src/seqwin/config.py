@@ -246,7 +246,7 @@ class WorkingDir:
         blast_log (str): Console output of the makeblastdb command, inside `blast_dir`. ['makeblastdb.log']
         signatures_fasta (str): Sequences and coordinates of candidate signatures. ['signatures.fasta']
         signatures_csv (str): Metrics of candidate signatures. ['signatures.csv']
-        results (str): The `Seqwin` instance (`core.py`) saved as pickle. ['results.seqwin']
+        results (str): The `Seqwin` instance (`entry.py`) saved as pickle. ['results.seqwin']
     """
     log: str = 'seqwin.log'
     config: str = 'config.json'
