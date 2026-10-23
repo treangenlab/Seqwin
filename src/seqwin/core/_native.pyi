@@ -13,6 +13,7 @@ from collections.abc import Sequence
 import numpy as np
 from numpy.typing import NDArray
 
+# Columns in the signature metadata CSV.
 _METADATA_NAMES: tuple[str, ...]
 
 class FilteredGraph:
@@ -114,7 +115,7 @@ def _build_native(
     assembly_paths: Sequence[str],
     kmerlen: int,
     windowsize: int,
-    n_cpu: int = 1,
+    n_cpu: int = 4,
     low_memory: bool = False,
 ) -> tuple[
     NDArray[np.void],

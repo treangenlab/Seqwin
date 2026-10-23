@@ -81,7 +81,7 @@ private:
 /**
  * @brief Worker-local minimizer graph node used in standard mode.
  *
- * `start` and `count()` define a range in `WorkerGraph.kmers`.
+ * `start` and `count()` define a range in `WorkerGraph::kmers`.
  */
 struct WorkerNode : WorkerNodeLM {
     WorkerNode() noexcept = default;
@@ -96,7 +96,7 @@ struct WorkerNode : WorkerNodeLM {
           start(start_)
     {}
 
-    /** Start of entries in `WorkerGraph.kmers` for this node. */
+    /** Start of entries in `WorkerGraph::kmers` for this node. */
     std::size_t start;
 };
 
@@ -164,10 +164,10 @@ using KmerMap = ankerl::unordered_dense::map<
 >;
 
 /**
- * @brief Per-worker maps from a minimizer hash to its start position in `Graph.kmers`.
+ * @brief Per-worker maps from a minimizer hash to its start position in `Graph::kmers`.
  *
- * Each worker/hash pair owns a disjoint segment inside `Graph.kmers`.
- * When building `Graph.kmers` in the low memory mode, these starts are mutated as cursors.
+ * Each worker/hash pair owns a disjoint segment inside `Graph::kmers`.
+ * When building `Graph::kmers` in the low memory mode, these starts are mutated as cursors.
  */
 using KmerMaps = std::vector<KmerMap>;
 

@@ -51,12 +51,12 @@ class Graph:
     ```python
     >>> from seqwin.core import Graph
     >>> graph = Graph(
-    >>>     assembly_paths = ...,
-    >>>     kmerlen = 21,
-    >>>     windowsize = 200,
-    >>>     n_cpu = 4,
-    >>>     low_memory = False
-    >>> )
+    ...     assembly_paths = ['asm1.fasta', 'asm2.fasta'],
+    ...     kmerlen = 21,
+    ...     windowsize = 200,
+    ...     n_cpu = 4,
+    ...     low_memory = False
+    ... )
     ```
     - `kmers` stores minimizer occurrences in all assemblies, grouped and sorted by hash.
     - `nodes` are sorted by hash.
@@ -65,6 +65,8 @@ class Graph:
     A node's `start` is the beginning of its minimizers in `kmers`. Its end is
     the next node's `start`, or `len(kmers)` for the final node.
     ```python
+    >>> nodes, kmers = graph.nodes, graph.kmers
+    >>> node_idx = 0
     >>> start = nodes[node_idx]['start']
     >>> end = nodes[node_idx + 1]['start'] if node_idx + 1 < len(nodes) else len(kmers)
     >>> kmer_group = kmers[start:end]
@@ -74,11 +76,12 @@ class Graph:
     Use `record_offsets` to recover the original assembly and record index of each minimizer.
     ```python
     >>> import numpy as np
+    >>> record_offsets = graph.record_offsets
     >>> assembly_idx = np.searchsorted(
-    >>>     record_offsets,
-    >>>     kmers['record_idx'],
-    >>>     side='right',
-    >>> ) - 1
+    ...     record_offsets,
+    ...     kmers['record_idx'],
+    ...     side='right',
+    ... ) - 1
     >>> record_idx = kmers['record_idx'] - record_offsets[assembly_idx]
     ```
 
@@ -127,8 +130,8 @@ class Graph:
         assembly_paths: Sequence[str | Path],
         kmerlen: int,
         windowsize: int,
+        n_cpu: int = 4,
         low_memory: bool = False,
-        n_cpu: int = 1,
     ) -> None:
         """Build a minimizer graph.
 
@@ -136,8 +139,8 @@ class Graph:
             assembly_paths (Sequence[str | Path]): Paths to input assemblies in FASTA format (plain or gzipped).
             kmerlen (int): K-mer length for minimizer sketch.
             windowsize (int): Window size for minimizer sketch.
+            n_cpu (int, optional): Number of worker threads to use. [4]
             low_memory (bool, optional): Recompute minimizers in a second pass to reduce peak memory. [False]
-            n_cpu (int, optional): Number of worker threads to use. [1]
         """
         (
             self.kmers,

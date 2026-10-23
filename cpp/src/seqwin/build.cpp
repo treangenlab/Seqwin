@@ -233,7 +233,7 @@ WorkerGraph build_worker(
  * @brief Recomputes final `kmers` for a merged graph in low-memory mode.
  *
  * Replays each worker's assemblies, recomputes minimizers, and writes them directly
- * into their final `Graph.kmers` positions using the per-worker k-mer maps.
+ * into their final `Graph::kmers` positions using the per-worker k-mer maps.
  */
 NoInitArray<Kmer> recompute_kmers(
     const std::vector<std::string>& assembly_paths,
@@ -298,10 +298,10 @@ NoInitArray<Kmer> recompute_kmers(
 }
 
 /**
- * @brief Build the assembly-to-node index and calculate `Node.prevalence`.
+ * @brief Build the assembly-to-node index and calculate `Node::prevalence`.
  *
  * The resulting node indices are unique and strictly ascending within each
- * assembly, with assembly ranges described by `Graph.node_offsets`.
+ * assembly, with assembly ranges described by `Graph::node_offsets`.
  */
 void build_assembly_nodes(Graph& graph, ThreadPool& pool) {
     if (graph.record_offsets.empty()) {
