@@ -24,8 +24,8 @@ namespace {
 
 constexpr std::size_t fasta_width = 80;
 
-struct FullKmer {
-    std::uint64_t hash;
+struct SubgraphKmer {
+    std::size_t node_idx;
     std::uint32_t record_idx;
     std::uint32_t pos;
 };
@@ -38,17 +38,17 @@ struct ConsecutiveKmers {
     SubgraphLoc location;
     /** Whether the containing assembly belongs to the target set. */
     bool is_target;
-    /** K-mer hashes in positional order. */
-    std::vector<std::uint64_t> kmers;
+    /** Node indices sorted by k-mer position. */
+    std::vector<std::size_t> node_indices;
 };
 
 /** Hash a vector of k-mer hashes using an FNV-1a-style combining scheme. */
 struct VectorHash {
-    std::uint64_t operator()(const std::vector<std::uint64_t>& values) const noexcept
+    std::uint64_t operator()(const std::vector<std::size_t>& values) const noexcept
     {
         std::uint64_t hash = UINT64_C(0xcbf29ce484222325);
         for (const auto value : values) {
-            hash ^= ankerl::unordered_dense::hash<std::uint64_t>{}(value);
+            hash ^= ankerl::unordered_dense::hash<std::size_t>{}(value);
             hash *= UINT64_C(0x100000001b3);
         }
         return hash;
@@ -104,20 +104,19 @@ std::optional<Signature> extract_worker(
     std::size_t total_tar
 ) {
     // Collect and position-sort all k-mers included in the subgraph
-    std::vector<FullKmer> sg_kmers; // K-mers of the current subgraph
+    std::vector<SubgraphKmer> sg_kmers; // K-mers of the current subgraph
     // Each node in a low-penalty subgraph should contain roughly total_tar k-mers
     sg_kmers.reserve(2 * total_tar * subgraph.size());
     for (const auto node_idx : subgraph) {
         if (node_idx >= n_nodes) {
             throw std::invalid_argument("subgraph node index is out of bounds");
         }
-        const auto& node = nodes[node_idx];
         const auto [start, stop] = kmer_range(nodes, n_nodes, n_kmers, node_idx);
         for (std::size_t i = start; i < stop; ++i) {
-            sg_kmers.push_back({node.hash, kmers[i].record_idx, kmers[i].pos});
+            sg_kmers.push_back({node_idx, kmers[i].record_idx, kmers[i].pos});
         }
     }
-    std::stable_sort(sg_kmers.begin(), sg_kmers.end(), [](const auto& a, const auto& b) {
+    std::sort(sg_kmers.begin(), sg_kmers.end(), [](const auto& a, const auto& b) {
         if (a.record_idx != b.record_idx) {
             return a.record_idx < b.record_idx;
         } else {
@@ -182,11 +181,11 @@ std::optional<Signature> extract_worker(
                 n_repeats
             },
             is_targets[assembly_idx],
-            {} // kmers
+            {}
         };
-        best_run.kmers.reserve(best_run_size);
+        best_run.node_indices.reserve(best_run_size);
         for (std::size_t i = best_begin; i < best_end; ++i) {
-            best_run.kmers.push_back(sg_kmers[i].hash);
+            best_run.node_indices.push_back(sg_kmers[i].node_idx);
         }
         all_runs.push_back(std::move(best_run));
     }
@@ -194,7 +193,7 @@ std::optional<Signature> extract_worker(
     // K-mer runs in different assemblies may have the same k-mer order (regardless of orientation)
     // Count the number of target assemblies for each unique canonical k-mer order
     ankerl::unordered_dense::map<
-        std::vector<std::uint64_t>,
+        std::vector<std::size_t>,
         CanonicalCount,
         VectorHash
     > canonical_counts;
@@ -206,18 +205,18 @@ std::optional<Signature> extract_worker(
         }
 
         const bool is_forward = std::lexicographical_compare(
-            run.kmers.begin(), run.kmers.end(),
-            run.kmers.rbegin(), run.kmers.rend()
+            run.node_indices.begin(), run.node_indices.end(),
+            run.node_indices.rbegin(), run.node_indices.rend()
         );
         decltype(canonical_counts)::iterator it;
         bool inserted;
         if (is_forward) {
             std::tie(it, inserted) = canonical_counts.try_emplace(
-                run.kmers,
+                run.node_indices,
                 CanonicalCount{0, 0, 0, first_seen}
             );
         } else {
-            std::vector<std::uint64_t> reverse(run.kmers.rbegin(), run.kmers.rend());
+            std::vector<std::size_t> reverse(run.node_indices.rbegin(), run.node_indices.rend());
             std::tie(it, inserted) = canonical_counts.try_emplace(
                 std::move(reverse),
                 CanonicalCount{0, 0, 0, first_seen}
@@ -259,17 +258,17 @@ std::optional<Signature> extract_worker(
         return std::nullopt;
     }
     // Reject representatives with duplicate k-mers
-    ankerl::unordered_dense::set<std::uint64_t> unique_hashes;
-    unique_hashes.reserve(rep.size());
-    for (const auto hash : rep) {
-        if (!unique_hashes.insert(hash).second) {
+    ankerl::unordered_dense::set<std::size_t> unique_indices;
+    unique_indices.reserve(rep.size());
+    for (const auto node_idx : rep) {
+        if (!unique_indices.insert(node_idx).second) {
             return std::nullopt;
         }
     }
 
     // Find the first target assembly containing the representative
     const auto rep_run = std::find_if(all_runs.begin(), all_runs.end(), [&](const auto& run) {
-        return run.is_target && run.kmers == rep;
+        return run.is_target && run.node_indices == rep;
     });
     if (rep_run == all_runs.end()) {
         throw std::logic_error("representative signature location not found");
