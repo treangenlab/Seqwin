@@ -3,7 +3,7 @@ import csv
 import numpy as np
 import pytest
 
-from seqwin.core import EDGE_DTYPE, KMER_DTYPE, NODE_DTYPE
+from seqwin.core import EDGE_DTYPE, KMER_DTYPE
 from seqwin.core._native import _METADATA_NAMES, _filter_native
 
 from _filter_helpers import _filter, _inputs, _paths
@@ -13,7 +13,7 @@ def _extract_signature(tmp_path, *, target_records, edge_data):
     """One record per target assembly, followed by a non-target with no nodes."""
     records = [*target_records, []]
     hashes = sorted({node_hash for record in records for node_hash, _ in record})
-    kmers, nodes, assembly_nodes = [], [], []
+    kmers, offsets, prevalence, assembly_nodes = [], [], [], []
     node_offsets = [0]
     for node_hash in hashes:
         occurrences = [
@@ -21,8 +21,8 @@ def _extract_signature(tmp_path, *, target_records, edge_data):
             for record_idx, record in enumerate(records)
             for value, pos in record if value == node_hash
         ]
-        prevalence = len({record_idx for _, record_idx in occurrences})
-        nodes.append((node_hash, len(kmers), prevalence))
+        prevalence.append(len({record_idx for _, record_idx in occurrences}))
+        offsets.append(len(kmers))
         kmers.extend(occurrences)
     for record in records:
         present = {node_hash for node_hash, _ in record}
@@ -30,7 +30,8 @@ def _extract_signature(tmp_path, *, target_records, edge_data):
         node_offsets.append(len(assembly_nodes))
     _, signatures = _filter_native(
         kmers=np.array(kmers, dtype=KMER_DTYPE),
-        nodes=np.array(nodes, dtype=NODE_DTYPE),
+        offsets=np.array([*offsets, len(kmers)], dtype=np.uintp),
+        prevalence=np.array(prevalence, dtype=np.uint32),
         edges=np.array(edge_data, dtype=EDGE_DTYPE),
         record_offsets=np.arange(len(records) + 1, dtype=np.uint32),
         assembly_nodes=np.array(assembly_nodes, dtype=np.uintp),
@@ -105,14 +106,14 @@ def test_signature_extraction_uses_final_original_node_range(tmp_path):
 
 @pytest.mark.parametrize('final_start_offset', (0, 1))
 def test_signature_extraction_rejects_invalid_final_node_range(tmp_path, final_start_offset):
-    kmers, nodes, edges, offsets, targets = _inputs()
-    nodes['start'][-1] = len(kmers) + final_start_offset
+    kmers, offsets, prevalence, edges, record_offsets, targets = _inputs()
+    offsets[-2] = len(kmers) + final_start_offset
     assembly_nodes = np.array([0, 1, 2, 3, 0, 1, 2, 2, 2], dtype=np.uintp)
     node_offsets = np.array([0, 4, 7, 8, 9], dtype=np.uintp)
 
     with pytest.raises(ValueError, match='Node k-mer range is invalid'):
         _filter_native(
-            kmers, nodes, edges, offsets, assembly_nodes, node_offsets,
+            kmers, offsets, prevalence, edges, record_offsets, assembly_nodes, node_offsets,
             _paths(tmp_path), targets, None, 5, 10, 2.0, 5, 0, None, .2, 0, 1,
             None, 1.5, 1,
         )
@@ -120,7 +121,7 @@ def test_signature_extraction_rejects_invalid_final_node_range(tmp_path, final_s
 
 @pytest.mark.parametrize('record_id', ('ordinary', 'record,with"quotes'))
 def test_native_csv_escaping_and_fasta_wrapping(tmp_path, record_id):
-    kmers, nodes, edges, offsets, targets = _inputs()
+    kmers, offsets, prevalence, edges, record_offsets, targets = _inputs()
     paths = []
     for i in range(4):
         path = tmp_path / f'{i}.fasta'
@@ -129,7 +130,7 @@ def test_native_csv_escaping_and_fasta_wrapping(tmp_path, record_id):
     fasta_path = tmp_path / 'signatures.fasta'
     csv_path = tmp_path / 'signatures.csv'
     _filter_native(
-        kmers, nodes, edges, offsets,
+        kmers, offsets, prevalence, edges, record_offsets,
         np.array([0, 1, 2, 3, 0, 1, 2, 2, 2], dtype=np.uintp),
         np.array([0, 4, 7, 8, 9], dtype=np.uintp),
         paths, targets, None, 100, 10, .3, 5, 0, None, .2, .3, 1, None, 1.5, 1,

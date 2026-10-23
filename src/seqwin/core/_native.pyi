@@ -23,12 +23,12 @@ class FilteredGraph:
 
     Attributes:
         nodes (NDArray[np.void]): Nodes retained by edge filtering.
-            - 'idx' (uintp): Index into the original `Graph.nodes` array.
+            - 'idx' (uintp): Node index in the original graph.
             - 'n_tar' (uint32): Number of target assemblies containing this node's minimizer.
             - 'n_neg' (uint32): Number of non-target assemblies containing this node's minimizer.
             - 'penalty' (float64): Node penalty score.
         edges (NDArray[np.void]): Edges passing weight and target-support thresholds.
-        subgraphs (list[list[int]]): Low-penalty subgraphs represented by indices of the original `Graph.nodes` array.
+        subgraphs (list[list[int]]): Low-penalty subgraphs represented by nodes indices of the original graph.
         total_tar (int): Number of target assemblies.
         total_neg (int): Number of non-target assemblies.
         e_absence_tar (float | None): Expected k-mer absence in target assemblies.

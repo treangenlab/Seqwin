@@ -99,28 +99,27 @@ struct Kmer {
 };
 
 /**
- * @brief Minimizer graph node for one unique minimizer hash.
- *
- * `start` is the beginning of this node's entries in `Graph::kmers`. The end
- * is the next node's `start`, or `Graph::kmers.size()` for the final node.
+ * @brief Node arrays for the final minimizer graph.
  */
-struct Node {
-    /** Hash value of the minimizers represented by this node. */
-    std::uint64_t hash;
-    /** Start of this node's minimizer entries in `Graph::kmers`. */
-    std::size_t start;
-    /** Number of assemblies containing this node's minimizer. */
-    std::size_t prevalence;
+struct Nodes {
+    NoInitArray<Kmer> kmers;
+    NoInitArray<std::size_t> offsets;
+    NoInitArray<std::uint32_t> prevalence;
+    NoInitArray<std::uint64_t> hashes;
+
+    std::size_t size() const noexcept {
+        return hashes.size();
+    }
 };
 
 /**
  * @brief Undirected weighted edge between two graph nodes.
- * Endpoints are indices into the graph's node array `Graph::nodes`.
+ * Endpoints are indices into `Graph::nodes`.
  */
 struct Edge {
-    /** Index of the smaller endpoint in the graph's node array. */
+    /** Index of the smaller endpoint in the graph. */
     std::size_t first;
-    /** Index of the larger endpoint in the graph's node array. */
+    /** Index of the larger endpoint in the graph. */
     std::size_t second;
     /** Number of assemblies where the endpoints are adjacent. */
     std::size_t weight;
@@ -134,13 +133,7 @@ struct Edge {
  * with move assignment or move construction.
  */
 struct Graph {
-    /**
-     * Minimizer occurrences in all assemblies, grouped and sorted by hash.
-     * `record_idx` is nondecreasing within each node range.
-     */
-    NoInitArray<Kmer> kmers;
-    /** Sorted by hash. */
-    NoInitArray<Node> nodes;
+    Nodes nodes;
     /** Indexed into `nodes`; sorted by descending weight, then ascending endpoints. */
     NoInitArray<Edge> edges;
     /** Cumulative global FASTA record offsets by assembly. */

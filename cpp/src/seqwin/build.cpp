@@ -298,7 +298,7 @@ NoInitArray<Kmer> recompute_kmers(
 }
 
 /**
- * @brief Build the assembly-to-node index and calculate `Node::prevalence`.
+ * @brief Build the assembly-to-node index and calculate `Nodes::prevalence`.
  *
  * The resulting node indices are unique and strictly ascending within each
  * assembly, with assembly ranges described by `Graph::node_offsets`.
@@ -309,6 +309,7 @@ void build_assembly_nodes(Graph& graph, ThreadPool& pool) {
     }
     const std::size_t n_assemblies = graph.record_offsets.size() - 1;
     const std::size_t n_nodes = graph.nodes.size();
+    graph.nodes.prevalence = NoInitArray<std::uint32_t>(n_nodes);
 
     // Map global record_idx to assembly_idx
     NoInitArray<std::uint32_t> record_to_assembly(graph.record_offsets.back());
@@ -333,21 +334,20 @@ void build_assembly_nodes(Graph& graph, ThreadPool& pool) {
         std::vector<std::size_t> chunk_counts;
         chunk_counts.resize(n_assemblies, 0);
         for (std::size_t node_idx = start; node_idx < end; ++node_idx) {
-            const auto [kmer_start, kmer_end] = kmer_range(
-                graph.nodes.data(), n_nodes, graph.kmers.size(), node_idx
-            );
+            const auto kmer_start = graph.nodes.offsets[node_idx];
+            const auto kmer_end = graph.nodes.offsets[node_idx + 1];
             std::uint32_t previous_assembly = std::numeric_limits<std::uint32_t>::max();
-            std::size_t prevalence = 0;
+            std::uint32_t prevalence = 0;
 
             for (std::size_t i = kmer_start; i < kmer_end; ++i) {
-                const auto assembly_idx = record_to_assembly[graph.kmers[i].record_idx];
+                const auto assembly_idx = record_to_assembly[graph.nodes.kmers[i].record_idx];
                 if (assembly_idx != previous_assembly) {
                     ++chunk_counts[assembly_idx];
                     ++prevalence;
                     previous_assembly = assembly_idx;
                 }
             }
-            graph.nodes[node_idx].prevalence = prevalence;
+            graph.nodes.prevalence[node_idx] = prevalence;
         }
         assembly_counts[chunk_id] = std::move(chunk_counts);
     });
@@ -372,13 +372,12 @@ void build_assembly_nodes(Graph& graph, ThreadPool& pool) {
     NoInitArray<std::size_t> assembly_nodes(global_offset);
     pool.parallel_for(n_nodes, [&](std::size_t node_idx, std::size_t chunk_id) {
         auto& chunk_cursors = assembly_counts[chunk_id];
-        const auto [kmer_start, kmer_end] = kmer_range(
-            graph.nodes.data(), n_nodes, graph.kmers.size(), node_idx
-        );
+        const auto kmer_start = graph.nodes.offsets[node_idx];
+        const auto kmer_end = graph.nodes.offsets[node_idx + 1];
         std::uint32_t previous_assembly = std::numeric_limits<std::uint32_t>::max();
 
         for (std::size_t i = kmer_start; i < kmer_end; ++i) {
-            const auto assembly_idx = record_to_assembly[graph.kmers[i].record_idx];
+            const auto assembly_idx = record_to_assembly[graph.nodes.kmers[i].record_idx];
             if (assembly_idx != previous_assembly) {
                 assembly_nodes[chunk_cursors[assembly_idx]++] = node_idx;
                 previous_assembly = assembly_idx;
@@ -442,7 +441,7 @@ Graph build(
 
     if (low_memory) {
         internal::log_python(" - Recomputing minimizers for low-memory mode...");
-        graph.kmers = internal::recompute_kmers(
+        graph.nodes.kmers = internal::recompute_kmers(
             assembly_paths,
             kmerlen,
             windowsize,

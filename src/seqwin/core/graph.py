@@ -11,7 +11,6 @@ Classes:
 Attributes:
 -----------
 - KMER_DTYPE (np.dtype)
-- NODE_DTYPE (np.dtype)
 - EDGE_DTYPE (np.dtype)
 """
 
@@ -29,12 +28,6 @@ from ._native import _build_native
 KMER_DTYPE = np.dtype([
     ('pos', np.uint32),
     ('record_idx', np.uint32),
-])
-
-NODE_DTYPE = np.dtype([
-    ('hash', np.uint64),
-    ('start', np.uintp),
-    ('prevalence', np.uintp),
 ])
 
 EDGE_DTYPE = np.dtype([
@@ -59,18 +52,18 @@ class Graph:
     ... )
     ```
     - `kmers` stores minimizer occurrences in all assemblies, grouped and sorted by hash.
-    - `nodes` are sorted by hash.
-    - `edges` endpoints are indices into `nodes`; sorted by descending weight, then by ascending endpoints.
+    - `hashes` stores unique minimizer hashes in strictly increasing order.
+    - `prevalence` stores the number of assemblies containing each node.
+    - `edges` endpoints are node indices; sorted by descending weight, then by ascending endpoints.
 
-    A node's `start` is the beginning of its minimizers in `kmers`. Its end is
-    the next node's `start`, or `len(kmers)` for the final node.
+    Node i's k-mers occupy `kmers[offsets[i]:offsets[i + 1]]`.
+    `offsets` has one more element than `hashes`, starts at zero, ends at
+    `len(kmers)`, and is strictly increasing. Empty graphs have `offsets == [0]`.
     ```python
-    >>> nodes, kmers = graph.nodes, graph.kmers
+    >>> kmers = graph.kmers
     >>> node_idx = 0
-    >>> start = nodes[node_idx]['start']
-    >>> end = nodes[node_idx + 1]['start'] if node_idx + 1 < len(nodes) else len(kmers)
-    >>> kmer_group = kmers[start:end]
-    >>> group_hash = nodes[node_idx]['hash']
+    >>> kmer_group = kmers[graph.offsets[node_idx]:graph.offsets[node_idx + 1]]
+    >>> group_hash = graph.hashes[node_idx]
     ```
 
     Use `record_offsets` to recover the original assembly and record index of each minimizer.
@@ -93,13 +86,12 @@ class Graph:
         kmers (NDArray[np.void]): A 1-D NumPy structured array of minimizers from all assemblies.
             - 'pos' (uint32): 0-based position of the minimizer within its FASTA record.
             - 'record_idx' (uint32): 0-based global index of the FASTA record.
-        nodes (NDArray[np.void]): A 1-D NumPy structured array of minimizer nodes.
-            - 'hash' (uint64): Hash value of the minimizers represented by this node.
-            - 'start' (uintp): Start of this node's minimizer entries in `kmers`.
-            - 'prevalence' (uintp): Number of assemblies containing this node's minimizer.
+        offsets (NDArray[np.uintp]): Cumulative offsets into `kmers` by node, including the final sentinel.
+        prevalence (NDArray[np.uint32]): Number of assemblies containing each node.
+        hashes (NDArray[np.uint64]): Unique minimizer hashes in ascending order.
         edges (NDArray[np.void]): A 1-D NumPy structured array of weighted, undirected edges.
-            - 'first' (uintp): Index of the smaller endpoint in `nodes`.
-            - 'second' (uintp): Index of the larger endpoint in `nodes`.
+            - 'first' (uintp): Index of the smaller endpoint in the graph.
+            - 'second' (uintp): Index of the larger endpoint in the graph.
             - 'weight' (uintp): Number of assemblies where the endpoints are adjacent.
         record_offsets (NDArray[np.uint32]): Cumulative global FASTA record offsets by assembly.
         record_ids (NDArray[np.str\_]): FASTA record IDs in global record order.
@@ -110,7 +102,9 @@ class Graph:
 
     __slots__ = (
         'kmers',
-        'nodes',
+        'offsets',
+        'prevalence',
+        'hashes',
         'edges',
         'record_offsets',
         'record_ids',
@@ -118,7 +112,9 @@ class Graph:
         'node_offsets',
     )
     kmers: NDArray[np.void]
-    nodes: NDArray[np.void]
+    offsets: NDArray[np.uintp]
+    prevalence: NDArray[np.uint32]
+    hashes: NDArray[np.uint64]
     edges: NDArray[np.void]
     record_offsets: NDArray[np.uint32]
     record_ids: NDArray[np.str_]
@@ -144,7 +140,9 @@ class Graph:
         """
         (
             self.kmers,
-            self.nodes,
+            self.offsets,
+            self.prevalence,
+            self.hashes,
             self.edges,
             self.record_offsets,
             record_ids,
@@ -185,7 +183,9 @@ class Graph:
 
         modes = {
             'kmers': 'r',
-            'nodes': 'r',
+            'offsets': 'r',
+            'prevalence': 'r',
+            'hashes': 'r',
             'edges': 'r',
             'record_offsets': 'r',
             'record_ids': 'r',
@@ -203,7 +203,9 @@ class Graph:
         }
         expected_dtypes = {
             'kmers': KMER_DTYPE,
-            'nodes': NODE_DTYPE,
+            'offsets': np.dtype(np.uintp),
+            'prevalence': np.dtype(np.uint32),
+            'hashes': np.dtype(np.uint64),
             'edges': EDGE_DTYPE,
             'record_offsets': np.dtype(np.uint32),
             'assembly_nodes': np.dtype(np.uintp),
@@ -217,6 +219,15 @@ class Graph:
         for name, dtype in expected_dtypes.items():
             if arrays[name].dtype != dtype:
                 raise ValueError(f'Graph array {name!r} has dtype {arrays[name].dtype}, expected {dtype}')
+
+        n_nodes = len(arrays['hashes'])
+        if len(arrays['prevalence']) != n_nodes:
+            raise ValueError("Graph arrays 'prevalence' and 'hashes' must have equal lengths")
+        offsets = arrays['offsets']
+        if len(offsets) != n_nodes + 1:
+            raise ValueError("Graph array 'offsets' length must equal n_nodes + 1")
+        if offsets[0] != 0 or offsets[-1] != len(arrays['kmers']):
+            raise ValueError("Graph array 'offsets' must start at zero and end at len(kmers)")
 
         if arrays['record_offsets'].size == 0:
             raise ValueError("Graph array 'record_offsets' must not be empty")

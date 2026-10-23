@@ -91,7 +91,7 @@ std::optional<Signature> extract_worker(
     const Subgraph& subgraph,
     const Kmer* kmers,
     std::size_t n_kmers,
-    const Node* nodes,
+    const std::size_t* offsets,
     std::size_t n_nodes,
     const std::uint32_t* record_offsets,
     std::size_t n_record_offsets,
@@ -111,7 +111,11 @@ std::optional<Signature> extract_worker(
         if (node_idx >= n_nodes) {
             throw std::invalid_argument("subgraph node index is out of bounds");
         }
-        const auto [start, stop] = kmer_range(nodes, n_nodes, n_kmers, node_idx);
+        const auto start = offsets[node_idx];
+        const auto stop = offsets[node_idx + 1];
+        if (start >= stop || stop > n_kmers) {
+            throw std::invalid_argument("Node k-mer range is invalid");
+        }
         for (std::size_t i = start; i < stop; ++i) {
             sg_kmers.push_back({node_idx, kmers[i].record_idx, kmers[i].pos});
         }
@@ -399,7 +403,7 @@ std::vector<Signature> extract_signatures(
     const std::vector<Subgraph>& subgraphs,
     const Kmer* kmers,
     std::size_t n_kmers,
-    const Node* nodes,
+    const std::size_t* offsets,
     std::size_t n_nodes,
     const std::uint32_t* record_offsets,
     std::size_t n_record_offsets,
@@ -435,7 +439,7 @@ std::vector<Signature> extract_signatures(
             subgraphs[subgraph_idx],
             kmers,
             n_kmers,
-            nodes,
+            offsets,
             n_nodes,
             record_offsets,
             n_record_offsets,

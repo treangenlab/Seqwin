@@ -54,7 +54,6 @@ std::size_t require_1d_size(const Array& array, const char* name) {
 
 PYBIND11_MODULE(_native, m) {
     PYBIND11_NUMPY_DTYPE(seqwin::Kmer, pos, record_idx);
-    PYBIND11_NUMPY_DTYPE(seqwin::Node, hash, start, prevalence);
     PYBIND11_NUMPY_DTYPE(seqwin::FilteredNode, idx, n_tar, n_neg, penalty);
     PYBIND11_NUMPY_DTYPE(seqwin::Edge, first, second, weight);
 
@@ -88,8 +87,10 @@ PYBIND11_MODULE(_native, m) {
             }
 
             return py::make_tuple(
-                array_to_numpy(std::move(graph.kmers)),
-                array_to_numpy(std::move(graph.nodes)),
+                array_to_numpy(std::move(graph.nodes.kmers)),
+                array_to_numpy(std::move(graph.nodes.offsets)),
+                array_to_numpy(std::move(graph.nodes.prevalence)),
+                array_to_numpy(std::move(graph.nodes.hashes)),
                 array_to_numpy(std::move(graph.edges)),
                 array_to_numpy(std::move(graph.record_offsets)),
                 std::move(graph.record_ids),
@@ -106,7 +107,8 @@ PYBIND11_MODULE(_native, m) {
 
     m.def("_filter_native",
         [](NumpyArray<seqwin::Kmer> kmers,
-           NumpyArray<seqwin::Node> nodes,
+           NumpyArray<std::size_t> offsets,
+           NumpyArray<std::uint32_t> prevalence,
            NumpyArray<seqwin::Edge> edges,
            NumpyArray<std::uint32_t> record_offsets,
            NumpyArray<std::size_t> assembly_nodes,
@@ -130,7 +132,8 @@ PYBIND11_MODULE(_native, m) {
            const std::optional<std::string>& csv_path
         ) {
             const auto* kmers_ptr = kmers.data();
-            const auto* nodes_ptr = nodes.data();
+            const auto* offsets_ptr = offsets.data();
+            const auto* prevalence_ptr = prevalence.data();
             const auto* edges_ptr = edges.data();
             const auto* record_offsets_ptr = record_offsets.data();
             const auto* is_targets_ptr = is_targets.data();
@@ -138,7 +141,8 @@ PYBIND11_MODULE(_native, m) {
             const auto* node_offsets_ptr = node_offsets.data();
 
             const auto n_kmers = require_1d_size(kmers, "kmers");
-            const auto n_nodes = require_1d_size(nodes, "nodes");
+            const auto n_offsets = require_1d_size(offsets, "offsets");
+            const auto n_nodes = require_1d_size(prevalence, "prevalence");
             const auto n_edges = require_1d_size(edges, "edges");
             const auto n_record_offsets = require_1d_size(record_offsets, "record_offsets");
             const auto n_assembly_nodes = require_1d_size(assembly_nodes, "assembly_nodes");
@@ -179,7 +183,9 @@ PYBIND11_MODULE(_native, m) {
                 out = seqwin::filter(
                     kmers_ptr,
                     n_kmers,
-                    nodes_ptr,
+                    offsets_ptr,
+                    n_offsets,
+                    prevalence_ptr,
                     n_nodes,
                     edges_ptr,
                     n_edges,
@@ -202,7 +208,8 @@ PYBIND11_MODULE(_native, m) {
             return py::make_tuple(std::move(out.first), std::move(out.second));
         },
         py::arg("kmers").noconvert(),
-        py::arg("nodes").noconvert(),
+        py::arg("offsets").noconvert(),
+        py::arg("prevalence").noconvert(),
         py::arg("edges").noconvert(),
         py::arg("record_offsets").noconvert(),
         py::arg("assembly_nodes").noconvert(),

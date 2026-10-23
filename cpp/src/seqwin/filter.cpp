@@ -70,7 +70,7 @@ double expected_presence_jaccard(
 }
 
 void calculate_thresholds(
-    const Node* nodes,
+    const std::uint32_t* prevalence,
     std::size_t n_nodes,
     const bool* is_targets,
     std::size_t n_assemblies,
@@ -98,7 +98,7 @@ void calculate_thresholds(
             e_presence_neg = expected_presence_jaccard(jaccard, n_assemblies, is_targets, false);
         } else {
             std::tie(e_absence_tar, e_presence_neg) = internal::expected_presence(
-                nodes,
+                prevalence,
                 n_nodes,
                 target_counts,
                 filtered.total_tar,
@@ -156,7 +156,9 @@ void calculate_thresholds(
 std::pair<FilteredGraph, std::vector<Signature>> filter(
     const Kmer* kmers,
     std::size_t n_kmers,
-    const Node* nodes,
+    const std::size_t* offsets,
+    std::size_t n_offsets,
+    const std::uint32_t* prevalence,
     std::size_t n_nodes,
     const Edge* edges,
     std::size_t n_edges,
@@ -177,6 +179,12 @@ std::pair<FilteredGraph, std::vector<Signature>> filter(
     if (config.fasta_path.has_value() != config.csv_path.has_value()) {
         throw std::invalid_argument("Both fasta_path and csv_path are required for signature output");
     }
+    if (n_offsets == 0 || n_offsets - 1 != n_nodes) {
+        throw std::invalid_argument("offsets length must equal n_nodes + 1");
+    }
+    if (offsets[0] != 0 || offsets[n_nodes] != n_kmers) {
+        throw std::invalid_argument("offsets must start at zero and end at n_kmers");
+    }
     internal::ThreadPool pool(std::max<std::size_t>(1, config.n_cpu));
 
     FilteredGraph filtered;
@@ -191,7 +199,7 @@ std::pair<FilteredGraph, std::vector<Signature>> filter(
 
     internal::log_python(" - Counting target node occurrences...");
     auto target_counts = internal::count_target_nodes(
-        nodes,
+        prevalence,
         n_nodes,
         assembly_nodes,
         n_assembly_nodes,
@@ -204,7 +212,7 @@ std::pair<FilteredGraph, std::vector<Signature>> filter(
         pool
     );
     calculate_thresholds(
-        nodes,
+        prevalence,
         n_nodes,
         is_targets,
         n_assemblies,
@@ -219,7 +227,7 @@ std::pair<FilteredGraph, std::vector<Signature>> filter(
 
     internal::log_python(" - Filtering graph and calculating node penalty scores...");
     auto graph_topology = internal::prune_graph(
-        nodes,
+        prevalence,
         n_nodes,
         edges,
         n_edges,
@@ -257,7 +265,7 @@ std::pair<FilteredGraph, std::vector<Signature>> filter(
         filtered.subgraphs,
         kmers,
         n_kmers,
-        nodes,
+        offsets,
         n_nodes,
         record_offsets,
         n_record_offsets,
