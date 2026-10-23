@@ -48,20 +48,11 @@ def _assert_graph_matches_expected(actual_path: Path, expected_path: Path) -> No
 
     nodes_dtype = actual['nodes'].dtype
     for field_name in nodes_dtype.names or ():
-        if field_name == 'penalty':
-            np.testing.assert_allclose(
-                actual['nodes'][field_name],
-                expected['nodes'][field_name],
-                rtol=0,
-                atol=1e-12,
-                err_msg='nodes.penalty values mismatch',
-            )
-        else:
-            np.testing.assert_array_equal(
-                actual['nodes'][field_name],
-                expected['nodes'][field_name],
-                err_msg=f'nodes.{field_name} values mismatch',
-            )
+        np.testing.assert_array_equal(
+            actual['nodes'][field_name],
+            expected['nodes'][field_name],
+            err_msg=f'nodes.{field_name} values mismatch',
+        )
 
 
 def _run_cli(*args: str) -> Path:
