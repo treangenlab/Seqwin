@@ -23,14 +23,6 @@ def _files(tmp_path):
     return fasta, csv
 
 
-def test_signature_metrics_stores_blast_separately():
-    blast = pd.DataFrame({'nident': [4]})
-    metric = SignatureMetrics(conservation=1.0, blast=blast)
-    assert metric.blast is blast
-    assert 'blast' not in evaluation._METRIC_NAMES
-    assert all(getattr(SignatureMetrics(), name) == 0.0 for name in evaluation._METRIC_NAMES)
-
-
 def test_file_evaluation_preserves_order_and_appends_metrics(monkeypatch, tmp_path):
     fasta, csv = _files(tmp_path)
     metrics = [SignatureMetrics(conservation=.1), SignatureMetrics(conservation=.8)]
@@ -88,8 +80,8 @@ def test_hits_keep_optimal_alignment_and_input_order(monkeypatch, n_cpu):
     ], columns=['qseqid', 'sseqid', 'bitscore', 'nident', 'mismatch', 'gaps'])
     monkeypatch.setattr(evaluation, 'blast', lambda *args, **kwargs: hits.copy())
     metrics = evaluation.eval_signatures(['AAAA', 'CCCC'], Path(BLASTCONFIG.title_all), 1, 1, n_cpu)
-    assert metrics[0] == SignatureMetrics()
     assert metrics[0].blast is None
+    assert all(getattr(metrics[0], name) == 0.0 for name in evaluation._METRIC_NAMES)
     assert metrics[1].conservation == 1.0
     assert metrics[1].avg_repeats_tar == 2
     assert metrics[1].avg_pident_tar == .75

@@ -114,6 +114,7 @@ def test_cli_to_config_mapping_txt(monkeypatch, tmp_path: Path, targets_txt: Pat
         [
             '--tar-paths', str(targets_txt),
             '--neg-paths', str(non_targets_txt),
+            '--api-key', 'test-key',
             '--mash',
             '--blast',
             '--threads', '2',
@@ -124,6 +125,8 @@ def test_cli_to_config_mapping_txt(monkeypatch, tmp_path: Path, targets_txt: Pat
 
     assert result.exit_code == 0
     cfg = captured['config']
+    assert cfg.api_key is not None
+    assert cfg.api_key.get_secret_value() == 'test-key'
     assert cfg.run_mash is True
     assert cfg.run_blast is True
     assert cfg.n_cpu == 2
@@ -161,27 +164,3 @@ def test_cli_to_config_mapping_dir(monkeypatch, tmp_path: Path, targets_dir: Pat
     assert cfg.title == 'cli-dir-mode'
     assert cfg.run_mash is False
     assert cfg.run_blast is False
-
-
-def test_cli_api_key_mapping(monkeypatch, tmp_path: Path, targets_txt: Path, non_targets_txt: Path) -> None:
-    captured = {}
-
-    def _fake_run(config):
-        captured['config'] = config
-        return object()
-
-    monkeypatch.setattr('seqwin.cli.run', _fake_run)
-
-    result = runner.invoke(
-        cli.app,
-        [
-            '--tar-paths', str(targets_txt),
-            '--neg-paths', str(non_targets_txt),
-            '--prefix', str(tmp_path),
-            '--api-key', 'test-key',
-        ],
-    )
-
-    assert result.exit_code == 0
-    assert captured['config'].api_key is not None
-    assert captured['config'].api_key.get_secret_value() == 'test-key'

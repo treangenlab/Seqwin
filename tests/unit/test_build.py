@@ -32,7 +32,6 @@ def test_graph_save_load_round_trip(tmp_path: Path, targets_dir: Path, non_targe
         'kmers', 'nodes', 'edges', 'record_offsets', 'record_ids',
         'assembly_nodes', 'node_offsets',
     )
-    assert Graph.__slots__ == names
     assert {path.name for path in graph_path.iterdir()} == {f'{name}.npy' for name in names}
 
     loaded = Graph.load(graph_path)

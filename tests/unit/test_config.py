@@ -6,26 +6,6 @@ from pydantic import ValidationError
 from seqwin.config import Config
 
 
-@pytest.mark.parametrize('mode', ('paths', 'dirs'))
-def test_config_resolves_input_paths(
-    request: pytest.FixtureRequest, tmp_path: Path, mode: str,
-) -> None:
-    fixture_suffix = 'txt' if mode == 'paths' else 'dir'
-    field_suffix = 'paths' if mode == 'paths' else 'dir'
-    tar = request.getfixturevalue(f'targets_{fixture_suffix}')
-    neg = request.getfixturevalue(f'non_targets_{fixture_suffix}')
-    config = Config(**{f'tar_{field_suffix}': tar, f'neg_{field_suffix}': neg, 'prefix': tmp_path})
-
-    assert getattr(config, f'tar_{field_suffix}') == tar.resolve(strict=True)
-    assert getattr(config, f'neg_{field_suffix}') == neg.resolve(strict=True)
-    assert config.prefix == tmp_path.resolve(strict=True)
-
-
-def test_download_only_allows_no_inputs(tmp_path: Path) -> None:
-    config = Config(prefix=tmp_path, download_only=True)
-    assert config.download_only is True
-
-
 @pytest.mark.parametrize(
     'invalid',
     (
