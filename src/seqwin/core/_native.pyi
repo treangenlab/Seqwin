@@ -28,7 +28,7 @@ class FilteredGraph:
             - 'n_neg' (uint32): Number of non-target assemblies containing this node's minimizer.
             - 'penalty' (float64): Node penalty score.
         edges (NDArray[np.void]): Edges passing weight and target-support thresholds.
-        subgraphs (list[list[int]]): Low-penalty subgraphs represented by nodes indices of the original graph.
+        subgraphs (list[list[int]]): Low-penalty subgraphs represented by node indices of the original graph.
         total_tar (int): Number of target assemblies.
         total_neg (int): Number of non-target assemblies.
         e_absence_tar (float | None): Expected k-mer absence in target assemblies.
@@ -111,6 +111,7 @@ class Signature:
     @property
     def n_tar(self) -> int: ...
 
+
 def _build_native(
     assembly_paths: Sequence[str],
     kmerlen: int,
@@ -119,7 +120,9 @@ def _build_native(
     low_memory: bool = False,
 ) -> tuple[
     NDArray[np.void],
-    NDArray[np.void],
+    NDArray[np.uintp],
+    NDArray[np.uint32],
+    NDArray[np.uint64],
     NDArray[np.void],
     NDArray[np.uint32],
     list[str],
@@ -129,7 +132,8 @@ def _build_native(
 
 def _filter_native(
     kmers: NDArray[np.void],
-    nodes: NDArray[np.void],
+    offsets: NDArray[np.uintp],
+    prevalence: NDArray[np.uint32],
     edges: NDArray[np.void],
     record_offsets: NDArray[np.uint32],
     assembly_nodes: NDArray[np.uintp],

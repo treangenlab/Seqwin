@@ -164,10 +164,10 @@ using KmerMap = ankerl::unordered_dense::map<
 >;
 
 /**
- * @brief Per-worker maps from a minimizer hash to its start position in `Graph::kmers`.
+ * @brief Per-worker maps from a minimizer hash to its start position in `Nodes::kmers`.
  *
- * Each worker/hash pair owns a disjoint segment inside `Graph::kmers`.
- * When building `Graph::kmers` in the low memory mode, these starts are mutated as cursors.
+ * Each worker/hash pair owns a disjoint segment inside `Nodes::kmers`.
+ * When building `Nodes::kmers` in the low memory mode, these starts are mutated as cursors.
  */
 using KmerMaps = std::vector<KmerMap>;
 

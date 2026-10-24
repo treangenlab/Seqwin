@@ -164,7 +164,7 @@ std::pair<double, double> expected_presence(
         totals.presence_neg += sums.presence_neg;
     }
     if (totals.n_tar == 0) {
-        throw std::invalid_argument("No target minimizers are available for threshold estimation");
+        throw std::invalid_argument("No target minimizer available for threshold estimation");
     }
 
     return {
@@ -372,7 +372,7 @@ void get_subgraphs(
         }
         frontier.clear();
 
-        // Output subgraphs using indices of the original node array
+        // Output subgraphs using node indices from the original graph
         if (subgraph.size() >= min_nodes) {
             for (auto& node : subgraph) {
                 used[node] = 1;

@@ -27,7 +27,7 @@ struct NodeChunk {
     std::size_t start = 0;
     /** End of this chunk in the sorted worker nodes. */
     std::size_t end = 0;
-    /** Output offset into `Nodes::offsets`. */
+    /** Output offset into `Nodes::hashes` and `Nodes::offsets`. */
     std::size_t node_start = 0;
     /** Number of final nodes whose hash runs start in this chunk. */
     std::size_t node_count = 0;
@@ -112,12 +112,12 @@ NoInitArray<WorkerEdge> concat_edges(
 }
 
 /**
- * @brief Sort worker-local nodes, build `Nodes::hashes`, and prepare merge chunks.
+ * @brief Sort worker-local nodes, build `Nodes::hashes`, and compute node chunk metadata.
  *
  * `n_workers` is used for preparing low-memory metadata. Pass 0 for standard mode.
  */
 template <typename WorkerNodeT>
-static std::vector<NodeChunk> prepare_merge(
+static std::vector<NodeChunk> prepare_node_chunks(
     NoInitArray<WorkerNodeT>& worker_nodes,
     std::size_t n_workers,
     Nodes& nodes,
@@ -129,14 +129,7 @@ static std::vector<NodeChunk> prepare_merge(
         return {};
     }
 
-    lsd_radix_sort(
-        worker_nodes,
-        [](const WorkerNodeT& node) {
-            return node.hash;
-        },
-        pool
-    );
-
+    lsd_radix_sort(worker_nodes, &WorkerNodeT::hash, pool);
     const auto n_chunks = std::min(pool.size(), n_worker_nodes);
     std::vector<NodeChunk> chunks(n_chunks);
 
@@ -191,6 +184,7 @@ static std::vector<NodeChunk> prepare_merge(
 /**
  * @brief Build `Nodes::offsets` and process each worker node.
  *
+ * Used for both standard and low-memory modes.
  * Requires non-empty chunks. Callers handle empty graphs.
  */
 template <typename WorkerNodeT, typename VisitWorkerNode>
@@ -230,11 +224,11 @@ static void merge_node_chunks(
 }
 
 /**
- * @brief Merge sorted worker nodes and their k-mers into the final arrays.
+ * @brief Build `Nodes::kmers` for standard mode.
  *
  * The memory of `worker_nodes` and `WorkerGraph::kmers` is released before returning.
  */
-static void merge_standard(
+static void merge_nodes(
     NoInitArray<WorkerNode>& worker_nodes,
     const std::vector<NodeChunk>& chunks,
     std::vector<WorkerGraph>& graphs,
@@ -275,11 +269,11 @@ static void merge_standard(
 }
 
 /**
- * @brief Merge sorted worker nodes and build `KmerMaps` for low-memory recomputation.
+ * @brief Build `KmerMaps` for low-memory recomputation.
  *
  * The memory of `worker_nodes` is released before returning.
  */
-static KmerMaps merge_low_memory(
+static KmerMaps merge_nodes_lm(
     NoInitArray<WorkerNodeLM>& worker_nodes,
     const std::vector<NodeChunk>& chunks,
     const std::vector<WorkerGraph>& graphs,
@@ -344,8 +338,10 @@ static KmerMaps merge_low_memory(
  *
  * `hashes` must contain the unique node hashes in ascending order (the final node order).
  * The memory of `worker_edges` is released before returning.
+ *
+ * Edges are merged before nodes to reduce peak memory.
  */
-static NoInitArray<Edge> finalize_edges(
+static NoInitArray<Edge> merge_edges(
     NoInitArray<WorkerEdge>& worker_edges,
     const NoInitArray<std::uint64_t>& hashes,
     ThreadPool& pool
@@ -355,19 +351,16 @@ static NoInitArray<Edge> finalize_edges(
     if (n_worker_edges == 0) {
         return {};
     }
-    if (n_nodes == 0) {
-        throw std::logic_error("Edge endpoint does not correspond to a node");
-    }
 
     // Convert second endpoints to node indices
     lsd_radix_sort(worker_edges, &WorkerEdge::second, pool);
     pool.parallel_for_chunks(n_worker_edges, [&](
         std::size_t start, std::size_t end, std::size_t
     ) {
-        auto node_start = std::lower_bound(
+        auto hash_it = std::lower_bound(
             hashes.begin(), hashes.end(), worker_edges[start].second
         );
-        std::size_t node_idx = static_cast<std::size_t>(node_start - hashes.begin());
+        std::size_t node_idx = static_cast<std::size_t>(hash_it - hashes.begin());
         for (std::size_t i = start; i < end; ++i) {
             while (node_idx < n_nodes && hashes[node_idx] < worker_edges[i].second) {
                 ++node_idx;
@@ -387,10 +380,10 @@ static NoInitArray<Edge> finalize_edges(
     pool.parallel_for_chunks(n_worker_edges, [&](
         std::size_t start, std::size_t end, std::size_t chunk_id
     ) {
-        auto node_start = std::lower_bound(
+        auto hash_it = std::lower_bound(
             hashes.begin(), hashes.end(), worker_edges[start].first
         );
-        std::size_t node_idx = static_cast<std::size_t>(node_start - hashes.begin());
+        std::size_t node_idx = static_cast<std::size_t>(hash_it - hashes.begin());
         // Compacted edges are written to the prefix of this chunk
         std::size_t write_i = start;
         for (std::size_t i = start; i < end; ++i) {
@@ -485,17 +478,17 @@ std::pair<Graph, KmerMaps> merge_worker_graphs(
         Nodes nodes;
         std::vector<NodeChunk> chunks;
         if (low_memory) {
-            chunks = prepare_merge(worker_graph.nodes_lm, graphs.size(), nodes, pool);
+            chunks = prepare_node_chunks(worker_graph.nodes_lm, graphs.size(), nodes, pool);
         } else {
-            chunks = prepare_merge(worker_graph.nodes, 0, nodes, pool);
+            chunks = prepare_node_chunks(worker_graph.nodes, 0, nodes, pool);
         }
-        auto edges = finalize_edges(worker_graph.edges, nodes.hashes, pool);
+        auto edges = merge_edges(worker_graph.edges, nodes.hashes, pool);
 
         KmerMaps kmer_maps;
         if (low_memory) {
-            kmer_maps = merge_low_memory(worker_graph.nodes_lm, chunks, graphs, nodes, pool);
+            kmer_maps = merge_nodes_lm(worker_graph.nodes_lm, chunks, graphs, nodes, pool);
         } else {
-            merge_standard(
+            merge_nodes(
                 worker_graph.nodes, chunks, graphs, std::vector<std::uint32_t>{0}, nodes, pool
             );
         }
@@ -542,19 +535,19 @@ std::pair<Graph, KmerMaps> merge_worker_graphs(
     std::vector<NodeChunk> chunks;
     if (low_memory) {
         worker_nodes_lm = concat_nodes_lm(graphs, pool);
-        chunks = prepare_merge(worker_nodes_lm, graphs.size(), nodes, pool);
+        chunks = prepare_node_chunks(worker_nodes_lm, graphs.size(), nodes, pool);
     } else {
         worker_nodes = concat_nodes(graphs, pool);
-        chunks = prepare_merge(worker_nodes, 0, nodes, pool);
+        chunks = prepare_node_chunks(worker_nodes, 0, nodes, pool);
     }
     auto worker_edges = concat_edges(graphs, pool);
-    auto edges = finalize_edges(worker_edges, nodes.hashes, pool);
+    auto edges = merge_edges(worker_edges, nodes.hashes, pool);
 
     KmerMaps kmer_maps;
     if (low_memory) {
-        kmer_maps = merge_low_memory(worker_nodes_lm, chunks, graphs, nodes, pool);
+        kmer_maps = merge_nodes_lm(worker_nodes_lm, chunks, graphs, nodes, pool);
     } else {
-        merge_standard(worker_nodes, chunks, graphs, worker_record_offsets, nodes, pool);
+        merge_nodes(worker_nodes, chunks, graphs, worker_record_offsets, nodes, pool);
     }
 
     std::vector<std::string> record_ids;

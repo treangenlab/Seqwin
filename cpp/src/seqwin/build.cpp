@@ -91,7 +91,7 @@ using EdgeMap = ankerl::unordered_dense::segmented_map<
 >;
 
 /**
- * @brief Builds the worker-local portion of a minimizer graph.
+ * @brief Build the worker-local portion of a minimizer graph.
  *
  * In standard mode, materializes worker-local `kmers` (grouped by hash).
  * In low-memory mode, skips k-mer materialization and records only the node metadata
@@ -230,10 +230,10 @@ WorkerGraph build_worker(
 }
 
 /**
- * @brief Recomputes final `kmers` for a merged graph in low-memory mode.
+ * @brief Recompute k-mers for a merged graph in low-memory mode.
  *
  * Replays each worker's assemblies, recomputes minimizers, and writes them directly
- * into their final `Graph::kmers` positions using the per-worker k-mer maps.
+ * into their final `Nodes::kmers` positions using the per-worker k-mer maps.
  */
 NoInitArray<Kmer> recompute_kmers(
     const std::vector<std::string>& assembly_paths,
@@ -321,7 +321,7 @@ void build_assembly_nodes(Graph& graph, ThreadPool& pool) {
         );
     });
 
-    // Split graph.nodes into contiguous chunks and process them in parallel
+    // Partition the node-index range into contiguous chunks for parallel processing
     const std::size_t n_chunks = std::min(pool.size(), n_nodes);
 
     // First pass: each chunk counts its assigned nodes in each assembly

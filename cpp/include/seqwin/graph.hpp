@@ -18,9 +18,9 @@ namespace seqwin {
  * large arrays.
  *
  * Important:
- * - Every element must be assigned before it is read.
- * - This is not a full `std::vector` replacement.
- * - It intentionally provides no `resize()`, `reserve()`, `push_back()`, or `capacity()`.
+ * @li Every element must be assigned before it is read.
+ * @li This is not a full `std::vector` replacement.
+ * @li It intentionally provides no `resize()`, `reserve()`, `push_back()`, or `capacity()`.
  */
 template <typename T>
 class NoInitArray {
@@ -99,12 +99,22 @@ struct Kmer {
 };
 
 /**
- * @brief Node arrays for the final minimizer graph.
+ * @brief Parallel arrays representing nodes in the final minimizer graph.
+ *
+ * Each node represents a unique minimizer hash. Nodes are ordered by ascending hash.
+ *
+ * The arrays share the same node indices. For node `i`,
+ * `kmers[offsets[i]:offsets[i + 1]]` contains its minimizer occurrences,
+ * `prevalence[i]` is its assembly prevalence, and `hashes[i]` is its hash.
  */
 struct Nodes {
+    /** Minimizer occurrences grouped by node, ordered by record index and position. */
     NoInitArray<Kmer> kmers;
+    /** Cumulative offsets into `kmers` by node, including the final sentinel. */
     NoInitArray<std::size_t> offsets;
+    /** Number of assemblies containing each node's minimizer. */
     NoInitArray<std::uint32_t> prevalence;
+    /** Unique minimizer hashes in strictly ascending order. */
     NoInitArray<std::uint64_t> hashes;
 
     std::size_t size() const noexcept {
@@ -113,13 +123,13 @@ struct Nodes {
 };
 
 /**
- * @brief Undirected weighted edge between two graph nodes.
- * Endpoints are indices into `Graph::nodes`.
+ * @brief Weighted, undirected edge between two graph nodes.
+ * Endpoints are node indices into the graph's node arrays.
  */
 struct Edge {
-    /** Index of the smaller endpoint in the graph. */
+    /** Index of the smaller endpoint. */
     std::size_t first;
-    /** Index of the larger endpoint in the graph. */
+    /** Index of the larger endpoint. */
     std::size_t second;
     /** Number of assemblies where the endpoints are adjacent. */
     std::size_t weight;
@@ -133,21 +143,21 @@ struct Edge {
  * with move assignment or move construction.
  */
 struct Graph {
+    /** Node arrays sharing the same node indices. */
     Nodes nodes;
-    /** Indexed into `nodes`; sorted by descending weight, then ascending endpoints. */
+    /** Endpoints are node indices; sorted by descending weight, then ascending endpoints. */
     NoInitArray<Edge> edges;
-    /** Cumulative global FASTA record offsets by assembly. */
+    /** Cumulative global FASTA record offsets by assembly, including the final sentinel. */
     std::vector<std::uint32_t> record_offsets;
     /** FASTA record IDs in global record order. */
     std::vector<std::string> record_ids;
     /**
-     * @brief Node indices grouped by assembly.
-     *
-     * For assembly `i`, `[node_offsets[i], node_offsets[i + 1])` contains
-     * unique nodes present in that assembly, in ascending node-index order.
+     * Unique node indices grouped by assembly.
+     * For assembly `i`, `assembly_nodes[node_offsets[i]:node_offsets[i + 1]]`
+     * contains unique nodes present in that assembly, in ascending node-index order.
      */
     NoInitArray<std::size_t> assembly_nodes;
-    /** Cumulative offsets into `assembly_nodes` by assembly. */
+    /** Cumulative offsets into `assembly_nodes` by assembly, including the final sentinel. */
     std::vector<std::size_t> node_offsets;
 };
 

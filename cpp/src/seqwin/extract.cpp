@@ -42,7 +42,6 @@ struct ConsecutiveKmers {
     std::vector<std::size_t> node_indices;
 };
 
-/** Hash a vector of k-mer hashes using an FNV-1a-style combining scheme. */
 struct VectorHash {
     std::uint64_t operator()(const std::vector<std::size_t>& values) const noexcept
     {
@@ -56,7 +55,7 @@ struct VectorHash {
 };
 
 /**
- * Count the number of target assemblies containing a canonical k-mer order.
+ * @brief Count the number of target assemblies containing a canonical k-mer order.
  * The first encountered order wins ties.
  */
 struct CanonicalCount {

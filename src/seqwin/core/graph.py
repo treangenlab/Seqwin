@@ -51,52 +51,59 @@ class Graph:
     ...     low_memory = False
     ... )
     ```
-    - `kmers` stores minimizer occurrences in all assemblies, grouped and sorted by hash.
-    - `hashes` stores unique minimizer hashes in strictly increasing order.
-    - `prevalence` stores the number of assemblies containing each node.
-    - `edges` endpoints are node indices; sorted by descending weight, then by ascending endpoints.
 
-    Node i's k-mers occupy `kmers[offsets[i]:offsets[i + 1]]`.
-    `offsets` has one more element than `hashes`, starts at zero, ends at
-    `len(kmers)`, and is strictly increasing. Empty graphs have `offsets == [0]`.
-    ```python
-    >>> kmers = graph.kmers
-    >>> node_idx = 0
-    >>> kmer_group = kmers[graph.offsets[node_idx]:graph.offsets[node_idx + 1]]
-    >>> group_hash = graph.hashes[node_idx]
-    ```
+    Nodes:
+        Each node represents a unique minimizer hash. Nodes are ordered by ascending hash.
 
-    Use `record_offsets` to recover the original assembly and record index of each minimizer.
-    ```python
-    >>> import numpy as np
-    >>> record_offsets = graph.record_offsets
-    >>> assembly_idx = np.searchsorted(
-    ...     record_offsets,
-    ...     kmers['record_idx'],
-    ...     side='right',
-    ... ) - 1
-    >>> record_idx = kmers['record_idx'] - record_offsets[assembly_idx]
-    ```
+        The node arrays share the same node indices. For node `i`,
+        `kmers[offsets[i]:offsets[i + 1]]` contains its minimizer occurrences,
+        `prevalence[i]` is its assembly prevalence, and `hashes[i]` is its hash.
+        ```python
+        >>> kmers, offsets = graph.kmers, graph.offsets
+        >>> prevalence, hashes = graph.prevalence, graph.hashes
+        >>> node_idx = 0
+        >>> node_kmers = kmers[offsets[node_idx]:offsets[node_idx + 1]]
+        >>> node_hash = hashes[node_idx]
+        >>> node_prevalence = prevalence[node_idx]
+        ```
 
-    `assembly_nodes` stores the sorted, unique node indices present in each assembly.
-    For assembly `i`, `assembly_nodes[node_offsets[i]:node_offsets[i + 1]]`
-    contains unique nodes present in that assembly, in ascending node-index order.
+    Edges:
+        Each edge connects two nodes by their node indices.
+        Edges are undirected and sorted by descending weight.
+
+    FASTA records:
+        Each minimizer's `record_idx` is a global FASTA record index.
+        Use `record_offsets` to recover the assembly index and the original record index of each minimizer.
+        ```python
+        >>> import numpy as np
+        >>> record_offsets = graph.record_offsets
+        >>> assembly_indices = np.searchsorted(
+        ...     record_offsets,
+        ...     kmers['record_idx'],
+        ...     side='right',
+        ... ) - 1
+        >>> record_indices = kmers['record_idx'] - record_offsets[assembly_indices]
+        ```
+
+    Assembly-to-node index:
+        `assembly_nodes` stores the unique node indices present in each assembly, in ascending node-index order.
+        For assembly `i`, `assembly_nodes[node_offsets[i]:node_offsets[i + 1]]` contains its node indices.
 
     Attributes:
-        kmers (NDArray[np.void]): A 1-D NumPy structured array of minimizers from all assemblies.
+        kmers (NDArray[np.void]): Minimizer occurrences grouped by node, ordered by record index and position.
             - 'pos' (uint32): 0-based position of the minimizer within its FASTA record.
             - 'record_idx' (uint32): 0-based global index of the FASTA record.
         offsets (NDArray[np.uintp]): Cumulative offsets into `kmers` by node, including the final sentinel.
-        prevalence (NDArray[np.uint32]): Number of assemblies containing each node.
-        hashes (NDArray[np.uint64]): Unique minimizer hashes in ascending order.
-        edges (NDArray[np.void]): A 1-D NumPy structured array of weighted, undirected edges.
-            - 'first' (uintp): Index of the smaller endpoint in the graph.
-            - 'second' (uintp): Index of the larger endpoint in the graph.
+        prevalence (NDArray[np.uint32]): Number of assemblies containing each node's minimizer.
+        hashes (NDArray[np.uint64]): Unique minimizer hashes in strictly ascending order.
+        edges (NDArray[np.void]): Endpoints are node indices; sorted by descending weight, then ascending endpoints.
+            - 'first' (uintp): Index of the smaller endpoint.
+            - 'second' (uintp): Index of the larger endpoint.
             - 'weight' (uintp): Number of assemblies where the endpoints are adjacent.
-        record_offsets (NDArray[np.uint32]): Cumulative global FASTA record offsets by assembly.
-        record_ids (NDArray[np.str\_]): FASTA record IDs in global record order.
-        assembly_nodes (NDArray[np.uintp]): Node indices grouped by assembly.
-        node_offsets (NDArray[np.uintp]): Cumulative offsets into `assembly_nodes` by assembly.
+        record_offsets (NDArray[np.uint32]): Cumulative global FASTA record offsets by assembly, including the final sentinel.
+        record_ids (NDArray[np.str_]): FASTA record IDs in global record order.
+        assembly_nodes (NDArray[np.uintp]): Unique node indices grouped by assembly, sorted in ascending order within each assembly.
+        node_offsets (NDArray[np.uintp]): Cumulative offsets into `assembly_nodes` by assembly, including the final sentinel.
     """
     __module__ = 'seqwin.core'
 
