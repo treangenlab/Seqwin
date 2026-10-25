@@ -140,7 +140,6 @@ WorkerGraph build_worker(
                     "Sequence length exceeds uint32 range for record " +
                     record.id + " in assembly " + assembly_paths[assembly_idx]);
             }
-            graph.record_ids.push_back(std::move(record.id));
 
             // Generate minimizers for the current record
             const auto mins = btllib::minimize_sequence(record.sequence, kmerlen, windowsize);

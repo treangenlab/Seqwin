@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <iterator>
 #include <limits>
 #include <stdexcept>
 #include <utility>
@@ -497,8 +496,7 @@ std::pair<Graph, KmerMaps> merge_worker_graphs(
             Graph{
                 std::move(nodes),
                 std::move(edges),
-                std::move(worker_graph.record_offsets),
-                std::move(worker_graph.record_ids)
+                std::move(worker_graph.record_offsets)
             },
             std::move(kmer_maps)
         };
@@ -506,9 +504,9 @@ std::pair<Graph, KmerMaps> merge_worker_graphs(
 
     log_python(" - Merging from " + std::to_string(graphs.size()) + " workers...");
 
-    // Record index offsets in each worker
+    // Record index offsets in by worker
     std::vector<std::uint32_t> worker_record_offsets(graphs.size());
-    // Record index offsets in each assembly
+    // Record index offsets in by assembly
     std::vector<std::uint32_t> record_offsets{0};
     record_offsets.reserve(n_assemblies + 1);
 
@@ -550,23 +548,11 @@ std::pair<Graph, KmerMaps> merge_worker_graphs(
         merge_nodes(worker_nodes, chunks, graphs, worker_record_offsets, nodes, pool);
     }
 
-    std::vector<std::string> record_ids;
-    record_ids.reserve(total_records);
-    for (auto& worker_graph : graphs) {
-        record_ids.insert(
-            record_ids.end(),
-            std::make_move_iterator(worker_graph.record_ids.begin()),
-            std::make_move_iterator(worker_graph.record_ids.end())
-        );
-        std::vector<std::string>().swap(worker_graph.record_ids);
-    }
-
     return {
         Graph{
             std::move(nodes),
             std::move(edges),
-            std::move(record_offsets),
-            std::move(record_ids)
+            std::move(record_offsets)
         },
         std::move(kmer_maps)
     };

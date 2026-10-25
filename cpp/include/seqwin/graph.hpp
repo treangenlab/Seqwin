@@ -3,7 +3,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
-#include <string>
 #include <utility>
 #include <vector>
 
@@ -149,8 +148,6 @@ struct Graph {
     NoInitArray<Edge> edges;
     /** Cumulative global FASTA record offsets by assembly, including the final sentinel. */
     std::vector<std::uint32_t> record_offsets;
-    /** FASTA record IDs in global record order. */
-    std::vector<std::string> record_ids;
     /**
      * Unique node indices grouped by assembly.
      * For assembly `i`, `assembly_nodes[node_offsets[i]:node_offsets[i + 1]]`

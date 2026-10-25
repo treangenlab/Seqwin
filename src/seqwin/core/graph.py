@@ -38,7 +38,7 @@ EDGE_DTYPE = np.dtype([
 
 
 class Graph:
-    r"""The Seqwin minimizer graph class.
+    """The Seqwin minimizer graph class.
 
     Example usage:
     ```python
@@ -71,7 +71,7 @@ class Graph:
         Each edge connects two nodes by their node indices.
         Edges are undirected and sorted by descending weight.
 
-    FASTA records:
+    FASTA record indices:
         Each minimizer's `record_idx` is a global FASTA record index.
         Use `record_offsets` to recover the assembly index and the original record index of each minimizer.
         ```python
@@ -101,7 +101,6 @@ class Graph:
             - 'second' (uintp): Index of the larger endpoint.
             - 'weight' (uintp): Number of assemblies where the endpoints are adjacent.
         record_offsets (NDArray[np.uint32]): Cumulative global FASTA record offsets by assembly, including the final sentinel.
-        record_ids (NDArray[np.str_]): FASTA record IDs in global record order.
         assembly_nodes (NDArray[np.uintp]): Unique node indices grouped by assembly, sorted in ascending order within each assembly.
         node_offsets (NDArray[np.uintp]): Cumulative offsets into `assembly_nodes` by assembly, including the final sentinel.
     """
@@ -114,7 +113,6 @@ class Graph:
         'hashes',
         'edges',
         'record_offsets',
-        'record_ids',
         'assembly_nodes',
         'node_offsets',
     )
@@ -124,7 +122,6 @@ class Graph:
     hashes: NDArray[np.uint64]
     edges: NDArray[np.void]
     record_offsets: NDArray[np.uint32]
-    record_ids: NDArray[np.str_]
     assembly_nodes: NDArray[np.uintp]
     node_offsets: NDArray[np.uintp]
 
@@ -152,7 +149,6 @@ class Graph:
             self.hashes,
             self.edges,
             self.record_offsets,
-            record_ids,
             self.assembly_nodes,
             self.node_offsets,
         ) = _build_native(
@@ -162,7 +158,6 @@ class Graph:
             int(n_cpu),
             bool(low_memory),
         )
-        self.record_ids = np.asarray(record_ids, dtype='U')
 
     def save(self, path: str | Path) -> None:
         """Save the minimizer graph as a directory of NumPy arrays. Existing files are overwritten.
@@ -195,7 +190,6 @@ class Graph:
             'hashes': 'r',
             'edges': 'r',
             'record_offsets': 'r',
-            'record_ids': 'r',
             'assembly_nodes': 'r',
             'node_offsets': 'r',
         }
@@ -240,11 +234,6 @@ class Graph:
             raise ValueError("Graph array 'record_offsets' must not be empty")
         if int(arrays['record_offsets'][0]) != 0:
             raise ValueError("Graph array 'record_offsets' must start at zero")
-
-        if arrays['record_ids'].dtype.kind != 'U':
-            raise ValueError(f"Graph array 'record_ids' has dtype {arrays['record_ids'].dtype}, expected 'U'")
-        if len(arrays['record_ids']) != int(arrays['record_offsets'][-1]):
-            raise ValueError("Graph array 'record_ids' length must equal the final record offset")
 
         if arrays['node_offsets'].size == 0:
             raise ValueError("Graph array 'node_offsets' must not be empty")

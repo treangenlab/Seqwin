@@ -93,7 +93,6 @@ PYBIND11_MODULE(_native, m) {
                 array_to_numpy(std::move(graph.nodes.hashes)),
                 array_to_numpy(std::move(graph.edges)),
                 array_to_numpy(std::move(graph.record_offsets)),
-                std::move(graph.record_ids),
                 array_to_numpy(std::move(graph.assembly_nodes)),
                 array_to_numpy(std::move(graph.node_offsets))
             );

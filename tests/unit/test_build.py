@@ -10,7 +10,7 @@ def _build(*args, **kwargs):
     graph = Graph(*args, **kwargs)
     return (
         graph.kmers, graph.offsets, graph.prevalences, graph.hashes, graph.edges, graph.record_offsets,
-        graph.record_ids, graph.assembly_nodes, graph.node_offsets,
+        graph.assembly_nodes, graph.node_offsets,
     )
 
 
@@ -29,7 +29,7 @@ def test_graph_save_load_round_trip(tmp_path: Path, targets_dir: Path, non_targe
     graph.save(graph_path)
 
     names = (
-        'kmers', 'offsets', 'prevalences', 'hashes', 'edges', 'record_offsets', 'record_ids',
+        'kmers', 'offsets', 'prevalences', 'hashes', 'edges', 'record_offsets',
         'assembly_nodes', 'node_offsets',
     )
     assert {path.name for path in graph_path.iterdir()} == {f'{name}.npy' for name in names}
@@ -45,7 +45,6 @@ def test_graph_save_load_round_trip(tmp_path: Path, targets_dir: Path, non_targe
         assert loaded_array.flags.c_contiguous
         expected_mode = 'r'
         assert loaded_array.mode == expected_mode
-    assert loaded.record_ids.dtype.kind == 'U'
 
 
 @pytest.mark.parametrize(
@@ -55,7 +54,6 @@ def test_graph_save_load_round_trip(tmp_path: Path, targets_dir: Path, non_targe
         ('offsets', np.empty(1, dtype=KMER_DTYPE), 'has dtype'),
         ('prevalences', np.empty(1, dtype=np.uintp), 'has dtype'),
         ('hashes', np.empty(1, dtype=np.uint32), 'has dtype'),
-        ('record_ids', np.array(['record'], dtype='S6'), 'has dtype'),
         ('assembly_nodes', np.empty(1, dtype=np.uint32), 'has dtype'),
         ('node_offsets', np.empty(0, dtype=np.uintp), 'must not be empty'),
     ),
@@ -150,19 +148,19 @@ def test_build_threading_equivalence(targets_dir, non_targets_dir) -> None:
         non_targets_dir / 'non-target-1.fasta',
         non_targets_dir / 'non-target-2.fasta',
     ]
-    kmers_1, offsets_1, prevalences_1, hashes_1, edges_1, record_offsets_1, record_ids_1, assembly_nodes_1, node_offsets_1 = _build(
+    kmers_1, offsets_1, prevalences_1, hashes_1, edges_1, record_offsets_1, assembly_nodes_1, node_offsets_1 = _build(
         assembly_paths,
         kmerlen=7,
         windowsize=10,
         n_cpu=1,
     )
-    kmers_2, offsets_2, prevalences_2, hashes_2, edges_2, record_offsets_2, record_ids_2, assembly_nodes_2, node_offsets_2 = _build(
+    kmers_2, offsets_2, prevalences_2, hashes_2, edges_2, record_offsets_2, assembly_nodes_2, node_offsets_2 = _build(
         assembly_paths,
         kmerlen=7,
         windowsize=10,
         n_cpu=2,
     )
-    kmers_many, offsets_many, prevalences_many, hashes_many, edges_many, record_offsets_many, record_ids_many, assembly_nodes_many, node_offsets_many = _build(
+    kmers_many, offsets_many, prevalences_many, hashes_many, edges_many, record_offsets_many, assembly_nodes_many, node_offsets_many = _build(
         assembly_paths,
         kmerlen=7,
         windowsize=10,
@@ -171,7 +169,7 @@ def test_build_threading_equivalence(targets_dir, non_targets_dir) -> None:
 
     assert all(array.ndim == 1 for array in (
         kmers_1, offsets_1, prevalences_1, hashes_1, edges_1, assembly_nodes_1, node_offsets_1,
-        record_offsets_1, record_ids_1,
+        record_offsets_1,
     ))
 
     assert np.array_equal(kmers_1, kmers_2)
@@ -187,8 +185,6 @@ def test_build_threading_equivalence(targets_dir, non_targets_dir) -> None:
     assert np.array_equal(node_offsets_1, node_offsets_2)
     assert np.array_equal(node_offsets_1, node_offsets_many)
 
-    assert np.array_equal(record_ids_1, record_ids_2)
-    assert np.array_equal(record_ids_1, record_ids_many)
     assert np.array_equal(record_offsets_1, record_offsets_2)
     assert np.array_equal(record_offsets_1, record_offsets_many)
 
@@ -227,7 +223,7 @@ def test_multi_worker_record_offsets_and_global_record_indices(tmp_path: Path) -
         write_fasta(path, n_records)
         assembly_paths.append(path)
 
-    kmers, _, _, _, _, record_offsets, record_ids, _, _ = _build(
+    kmers, _, _, _, _, record_offsets, _, _ = _build(
         assembly_paths,
         kmerlen=7,
         windowsize=10,
@@ -236,11 +232,6 @@ def test_multi_worker_record_offsets_and_global_record_indices(tmp_path: Path) -
 
     assert record_offsets.dtype == np.dtype(np.uint32)
     assert np.array_equal(record_offsets, np.array([0, 2, 3, 6, 7], dtype=np.uint32))
-    assert record_ids.dtype.kind == 'U'
-    assert record_ids.tolist() == ['r0', 'r1', 'r0', 'r0', 'r1', 'r2', 'r0']
-    assert [record_ids[record_offsets[i]:record_offsets[i + 1]].tolist()
-            for i in range(4)] == [['r0', 'r1'], ['r0'], ['r0', 'r1', 'r2'], ['r0']]
-    assert len(record_ids) == int(record_offsets[-1])
     assert np.array_equal(np.unique(kmers['record_idx']), np.arange(7, dtype=np.uint32))
 
 
@@ -254,7 +245,7 @@ def test_build_empty_record_offsets(tmp_path: Path) -> None:
         ([empty_assembly] * 3, np.zeros(4, dtype=np.uint32)),
     ):
         for low_memory in (False, True):
-            kmers, offsets, prevalences, hashes, _, record_offsets, record_ids, assembly_nodes, node_offsets = _build(
+            kmers, offsets, prevalences, hashes, _, record_offsets, assembly_nodes, node_offsets = _build(
                 assembly_paths,
                 kmerlen=7,
                 windowsize=10,
@@ -270,11 +261,6 @@ def test_build_empty_record_offsets(tmp_path: Path) -> None:
             assert np.array_equal(node_offsets, np.zeros(len(assembly_paths) + 1, dtype=np.uintp))
             assert record_offsets.dtype == np.dtype(np.uint32)
             assert np.array_equal(record_offsets, expected_offsets)
-            assert isinstance(record_ids, np.ndarray)
-            assert record_ids.ndim == 1
-            assert record_ids.dtype.kind == 'U'
-            assert record_ids.size == 0
-            assert len(record_ids) == int(record_offsets[-1])
 
 
 def test_low_memory_build_matches_standard(targets_dir, non_targets_dir) -> None:
