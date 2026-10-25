@@ -133,7 +133,7 @@ def _build_native(
 def _filter_native(
     kmers: NDArray[np.void],
     offsets: NDArray[np.uintp],
-    prevalence: NDArray[np.uint32],
+    prevalences: NDArray[np.uint32],
     edges: NDArray[np.void],
     record_offsets: NDArray[np.uint32],
     assembly_nodes: NDArray[np.uintp],

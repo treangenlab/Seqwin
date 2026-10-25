@@ -84,7 +84,7 @@ def _filter_graph(
     filtered, signatures = _filter_native(
         kmers=graph.kmers,
         offsets=graph.offsets,
-        prevalence=graph.prevalence,
+        prevalences=graph.prevalences,
         edges=graph.edges,
         record_offsets=graph.record_offsets,
         assembly_nodes=graph.assembly_nodes,

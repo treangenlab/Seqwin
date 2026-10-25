@@ -22,7 +22,7 @@ _shared_config = (
 
 def _assert_graph_matches_expected(actual_path: Path, expected_path: Path) -> None:
     required_keys = {
-        'kmers', 'offsets', 'prevalence', 'hashes', 'edges', 'record_offsets', 'record_ids',
+        'kmers', 'offsets', 'prevalences', 'hashes', 'edges', 'record_offsets', 'record_ids',
         'assembly_nodes', 'node_offsets',
     }
     actual_keys = {path.stem for path in actual_path.glob('*.npy')}
@@ -46,7 +46,7 @@ def _assert_graph_matches_expected(actual_path: Path, expected_path: Path) -> No
     np.testing.assert_array_equal(actual['assembly_nodes'], expected['assembly_nodes'], err_msg='assembly_nodes array values mismatch')
     np.testing.assert_array_equal(actual['node_offsets'], expected['node_offsets'], err_msg='node_offsets array values mismatch')
 
-    for name in ('offsets', 'prevalence', 'hashes'):
+    for name in ('offsets', 'prevalences', 'hashes'):
         np.testing.assert_array_equal(actual[name], expected[name], err_msg=f'{name} values mismatch')
 
 

@@ -9,7 +9,7 @@ from seqwin.core import KMER_DTYPE, EDGE_DTYPE, Graph
 def _build(*args, **kwargs):
     graph = Graph(*args, **kwargs)
     return (
-        graph.kmers, graph.offsets, graph.prevalence, graph.hashes, graph.edges, graph.record_offsets,
+        graph.kmers, graph.offsets, graph.prevalences, graph.hashes, graph.edges, graph.record_offsets,
         graph.record_ids, graph.assembly_nodes, graph.node_offsets,
     )
 
@@ -29,7 +29,7 @@ def test_graph_save_load_round_trip(tmp_path: Path, targets_dir: Path, non_targe
     graph.save(graph_path)
 
     names = (
-        'kmers', 'offsets', 'prevalence', 'hashes', 'edges', 'record_offsets', 'record_ids',
+        'kmers', 'offsets', 'prevalences', 'hashes', 'edges', 'record_offsets', 'record_ids',
         'assembly_nodes', 'node_offsets',
     )
     assert {path.name for path in graph_path.iterdir()} == {f'{name}.npy' for name in names}
@@ -53,7 +53,7 @@ def test_graph_save_load_round_trip(tmp_path: Path, targets_dir: Path, non_targe
     (
         ('kmers', np.empty((1, 1), dtype=KMER_DTYPE), 'one-dimensional'),
         ('offsets', np.empty(1, dtype=KMER_DTYPE), 'has dtype'),
-        ('prevalence', np.empty(1, dtype=np.uintp), 'has dtype'),
+        ('prevalences', np.empty(1, dtype=np.uintp), 'has dtype'),
         ('hashes', np.empty(1, dtype=np.uint32), 'has dtype'),
         ('record_ids', np.array(['record'], dtype='S6'), 'has dtype'),
         ('assembly_nodes', np.empty(1, dtype=np.uint32), 'has dtype'),
@@ -104,19 +104,19 @@ def _assert_indexed_edges(nodes: np.ndarray, edges: np.ndarray) -> None:
 def _assert_graph_outputs_equal(standard, low_memory) -> None:
     for standard_array, low_memory_array in zip(standard, low_memory, strict=True):
         np.testing.assert_array_equal(standard_array, low_memory_array)
-    kmers, offsets, prevalence, hashes, edges, *_ = low_memory
+    kmers, offsets, prevalences, hashes, edges, *_ = low_memory
     _assert_edges_weight_sorted(edges)
     _assert_indexed_edges(hashes, edges)
-    _assert_node_ranges(kmers, offsets, prevalence, hashes)
+    _assert_node_ranges(kmers, offsets, prevalences, hashes)
 
 
-def _assert_node_ranges(kmers, offsets, prevalence, hashes) -> None:
+def _assert_node_ranges(kmers, offsets, prevalences, hashes) -> None:
     assert kmers.dtype == KMER_DTYPE
     assert offsets.dtype == np.dtype(np.uintp)
-    assert prevalence.dtype == np.dtype(np.uint32)
+    assert prevalences.dtype == np.dtype(np.uint32)
     assert hashes.dtype == np.dtype(np.uint64)
     assert len(offsets) == len(hashes) + 1
-    assert len(prevalence) == len(hashes)
+    assert len(prevalences) == len(hashes)
     assert offsets[0] == 0
     assert offsets[-1] == len(kmers)
     assert np.all(offsets[:-1] < offsets[1:])
@@ -150,19 +150,19 @@ def test_build_threading_equivalence(targets_dir, non_targets_dir) -> None:
         non_targets_dir / 'non-target-1.fasta',
         non_targets_dir / 'non-target-2.fasta',
     ]
-    kmers_1, offsets_1, prevalence_1, hashes_1, edges_1, record_offsets_1, record_ids_1, assembly_nodes_1, node_offsets_1 = _build(
+    kmers_1, offsets_1, prevalences_1, hashes_1, edges_1, record_offsets_1, record_ids_1, assembly_nodes_1, node_offsets_1 = _build(
         assembly_paths,
         kmerlen=7,
         windowsize=10,
         n_cpu=1,
     )
-    kmers_2, offsets_2, prevalence_2, hashes_2, edges_2, record_offsets_2, record_ids_2, assembly_nodes_2, node_offsets_2 = _build(
+    kmers_2, offsets_2, prevalences_2, hashes_2, edges_2, record_offsets_2, record_ids_2, assembly_nodes_2, node_offsets_2 = _build(
         assembly_paths,
         kmerlen=7,
         windowsize=10,
         n_cpu=2,
     )
-    kmers_many, offsets_many, prevalence_many, hashes_many, edges_many, record_offsets_many, record_ids_many, assembly_nodes_many, node_offsets_many = _build(
+    kmers_many, offsets_many, prevalences_many, hashes_many, edges_many, record_offsets_many, record_ids_many, assembly_nodes_many, node_offsets_many = _build(
         assembly_paths,
         kmerlen=7,
         windowsize=10,
@@ -170,7 +170,7 @@ def test_build_threading_equivalence(targets_dir, non_targets_dir) -> None:
     )
 
     assert all(array.ndim == 1 for array in (
-        kmers_1, offsets_1, prevalence_1, hashes_1, edges_1, assembly_nodes_1, node_offsets_1,
+        kmers_1, offsets_1, prevalences_1, hashes_1, edges_1, assembly_nodes_1, node_offsets_1,
         record_offsets_1, record_ids_1,
     ))
 
@@ -178,8 +178,8 @@ def test_build_threading_equivalence(targets_dir, non_targets_dir) -> None:
     assert np.array_equal(kmers_1, kmers_many)
     assert np.array_equal(offsets_1, offsets_2)
     assert np.array_equal(offsets_1, offsets_many)
-    assert np.array_equal(prevalence_1, prevalence_2)
-    assert np.array_equal(prevalence_1, prevalence_many)
+    assert np.array_equal(prevalences_1, prevalences_2)
+    assert np.array_equal(prevalences_1, prevalences_many)
     assert np.array_equal(hashes_1, hashes_2)
     assert np.array_equal(hashes_1, hashes_many)
     assert np.array_equal(assembly_nodes_1, assembly_nodes_2)
@@ -198,7 +198,7 @@ def test_build_threading_equivalence(targets_dir, non_targets_dir) -> None:
     _assert_edges_weight_sorted(edges_2)
     _assert_edges_weight_sorted(edges_many)
     _assert_indexed_edges(hashes_1, edges_1)
-    _assert_node_ranges(kmers_1, offsets_1, prevalence_1, hashes_1)
+    _assert_node_ranges(kmers_1, offsets_1, prevalences_1, hashes_1)
 
 
 def test_duplicate_edges_across_workers_are_aggregated(tmp_path: Path) -> None:
@@ -254,7 +254,7 @@ def test_build_empty_record_offsets(tmp_path: Path) -> None:
         ([empty_assembly] * 3, np.zeros(4, dtype=np.uint32)),
     ):
         for low_memory in (False, True):
-            kmers, offsets, prevalence, hashes, _, record_offsets, record_ids, assembly_nodes, node_offsets = _build(
+            kmers, offsets, prevalences, hashes, _, record_offsets, record_ids, assembly_nodes, node_offsets = _build(
                 assembly_paths,
                 kmerlen=7,
                 windowsize=10,
@@ -262,7 +262,7 @@ def test_build_empty_record_offsets(tmp_path: Path) -> None:
                 low_memory=low_memory,
             )
             assert len(kmers) == 0
-            _assert_node_ranges(kmers, offsets, prevalence, hashes)
+            _assert_node_ranges(kmers, offsets, prevalences, hashes)
             np.testing.assert_array_equal(offsets, [0])
             assert len(hashes) == 0
             assert len(assembly_nodes) == 0
@@ -318,13 +318,13 @@ def test_assembly_nodes_match_kmer_memberships(tmp_path: Path) -> None:
         ] = assembly_i
 
     expected = [[] for _ in assembly_paths]
-    _assert_node_ranges(graph.kmers, graph.offsets, graph.prevalence, graph.hashes)
+    _assert_node_ranges(graph.kmers, graph.offsets, graph.prevalences, graph.hashes)
     for node_i in range(len(graph.hashes)):
         start, stop = graph.offsets[node_i:node_i + 2]
         assemblies = np.unique(record_assembly[
             graph.kmers['record_idx'][start:stop]
         ])
-        assert graph.prevalence[node_i] == len(assemblies)
+        assert graph.prevalences[node_i] == len(assemblies)
         for assembly_i in assemblies:
             expected[int(assembly_i)].append(node_i)
 

@@ -89,7 +89,7 @@ std::pair<FilteredGraph, std::vector<Signature>> filter(
     std::size_t n_kmers,
     const std::size_t* offsets,
     std::size_t n_offsets,
-    const std::uint32_t* prevalence,
+    const std::uint32_t* prevalences,
     std::size_t n_nodes,
     const Edge* edges,
     std::size_t n_edges,

@@ -70,7 +70,7 @@ double expected_presence_jaccard(
 }
 
 void calculate_thresholds(
-    const std::uint32_t* prevalence,
+    const std::uint32_t* prevalences,
     std::size_t n_nodes,
     const bool* is_targets,
     std::size_t n_assemblies,
@@ -98,7 +98,7 @@ void calculate_thresholds(
             e_presence_neg = expected_presence_jaccard(jaccard, n_assemblies, is_targets, false);
         } else {
             std::tie(e_absence_tar, e_presence_neg) = internal::expected_presence(
-                prevalence,
+                prevalences,
                 n_nodes,
                 target_counts,
                 filtered.total_tar,
@@ -158,7 +158,7 @@ std::pair<FilteredGraph, std::vector<Signature>> filter(
     std::size_t n_kmers,
     const std::size_t* offsets,
     std::size_t n_offsets,
-    const std::uint32_t* prevalence,
+    const std::uint32_t* prevalences,
     std::size_t n_nodes,
     const Edge* edges,
     std::size_t n_edges,
@@ -199,7 +199,7 @@ std::pair<FilteredGraph, std::vector<Signature>> filter(
 
     internal::log_python(" - Counting target node occurrences...");
     auto target_counts = internal::count_target_nodes(
-        prevalence,
+        prevalences,
         n_nodes,
         assembly_nodes,
         n_assembly_nodes,
@@ -212,7 +212,7 @@ std::pair<FilteredGraph, std::vector<Signature>> filter(
         pool
     );
     calculate_thresholds(
-        prevalence,
+        prevalences,
         n_nodes,
         is_targets,
         n_assemblies,
@@ -227,7 +227,7 @@ std::pair<FilteredGraph, std::vector<Signature>> filter(
 
     internal::log_python(" - Filtering graph and calculating node penalty scores...");
     auto graph_topology = internal::prune_graph(
-        prevalence,
+        prevalences,
         n_nodes,
         edges,
         n_edges,

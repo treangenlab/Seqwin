@@ -105,7 +105,7 @@ struct Kmer {
  *
  * The arrays share the same node indices. For node `i`,
  * `kmers[offsets[i]:offsets[i + 1]]` contains its minimizer occurrences,
- * `prevalence[i]` is its assembly prevalence, and `hashes[i]` is its hash.
+ * `prevalences[i]` is its assembly prevalence, and `hashes[i]` is its hash.
  */
 struct Nodes {
     /** Minimizer occurrences grouped by node, ordered by record index and position. */
@@ -113,7 +113,7 @@ struct Nodes {
     /** Cumulative offsets into `kmers` by node, including the final sentinel. */
     NoInitArray<std::size_t> offsets;
     /** Number of assemblies containing each node's minimizer. */
-    NoInitArray<std::uint32_t> prevalence;
+    NoInitArray<std::uint32_t> prevalences;
     /** Unique minimizer hashes in strictly ascending order. */
     NoInitArray<std::uint64_t> hashes;
 

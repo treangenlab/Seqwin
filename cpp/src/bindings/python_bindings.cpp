@@ -89,7 +89,7 @@ PYBIND11_MODULE(_native, m) {
             return py::make_tuple(
                 array_to_numpy(std::move(graph.nodes.kmers)),
                 array_to_numpy(std::move(graph.nodes.offsets)),
-                array_to_numpy(std::move(graph.nodes.prevalence)),
+                array_to_numpy(std::move(graph.nodes.prevalences)),
                 array_to_numpy(std::move(graph.nodes.hashes)),
                 array_to_numpy(std::move(graph.edges)),
                 array_to_numpy(std::move(graph.record_offsets)),
@@ -108,7 +108,7 @@ PYBIND11_MODULE(_native, m) {
     m.def("_filter_native",
         [](NumpyArray<seqwin::Kmer> kmers,
            NumpyArray<std::size_t> offsets,
-           NumpyArray<std::uint32_t> prevalence,
+           NumpyArray<std::uint32_t> prevalences,
            NumpyArray<seqwin::Edge> edges,
            NumpyArray<std::uint32_t> record_offsets,
            NumpyArray<std::size_t> assembly_nodes,
@@ -133,7 +133,7 @@ PYBIND11_MODULE(_native, m) {
         ) {
             const auto* kmers_ptr = kmers.data();
             const auto* offsets_ptr = offsets.data();
-            const auto* prevalence_ptr = prevalence.data();
+            const auto* prevalences_ptr = prevalences.data();
             const auto* edges_ptr = edges.data();
             const auto* record_offsets_ptr = record_offsets.data();
             const auto* is_targets_ptr = is_targets.data();
@@ -142,7 +142,7 @@ PYBIND11_MODULE(_native, m) {
 
             const auto n_kmers = require_1d_size(kmers, "kmers");
             const auto n_offsets = require_1d_size(offsets, "offsets");
-            const auto n_nodes = require_1d_size(prevalence, "prevalence");
+            const auto n_nodes = require_1d_size(prevalences, "prevalences");
             const auto n_edges = require_1d_size(edges, "edges");
             const auto n_record_offsets = require_1d_size(record_offsets, "record_offsets");
             const auto n_assembly_nodes = require_1d_size(assembly_nodes, "assembly_nodes");
@@ -185,7 +185,7 @@ PYBIND11_MODULE(_native, m) {
                     n_kmers,
                     offsets_ptr,
                     n_offsets,
-                    prevalence_ptr,
+                    prevalences_ptr,
                     n_nodes,
                     edges_ptr,
                     n_edges,
@@ -209,7 +209,7 @@ PYBIND11_MODULE(_native, m) {
         },
         py::arg("kmers").noconvert(),
         py::arg("offsets").noconvert(),
-        py::arg("prevalence").noconvert(),
+        py::arg("prevalences").noconvert(),
         py::arg("edges").noconvert(),
         py::arg("record_offsets").noconvert(),
         py::arg("assembly_nodes").noconvert(),

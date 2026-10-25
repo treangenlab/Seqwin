@@ -298,7 +298,7 @@ NoInitArray<Kmer> recompute_kmers(
 }
 
 /**
- * @brief Build the assembly-to-node index and calculate `Nodes::prevalence`.
+ * @brief Build the assembly-to-node index and calculate `Nodes::prevalences`.
  *
  * The resulting node indices are unique and strictly ascending within each
  * assembly, with assembly ranges described by `Graph::node_offsets`.
@@ -309,7 +309,7 @@ void build_assembly_nodes(Graph& graph, ThreadPool& pool) {
     }
     const std::size_t n_assemblies = graph.record_offsets.size() - 1;
     const std::size_t n_nodes = graph.nodes.size();
-    graph.nodes.prevalence = NoInitArray<std::uint32_t>(n_nodes);
+    graph.nodes.prevalences = NoInitArray<std::uint32_t>(n_nodes);
 
     // Map global record_idx to assembly_idx
     NoInitArray<std::uint32_t> record_to_assembly(graph.record_offsets.back());
@@ -347,7 +347,7 @@ void build_assembly_nodes(Graph& graph, ThreadPool& pool) {
                     previous_assembly = assembly_idx;
                 }
             }
-            graph.nodes.prevalence[node_idx] = prevalence;
+            graph.nodes.prevalences[node_idx] = prevalence;
         }
         assembly_counts[chunk_id] = std::move(chunk_counts);
     });

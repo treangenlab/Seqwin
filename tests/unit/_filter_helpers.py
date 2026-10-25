@@ -18,16 +18,16 @@ def _inputs():
     occurrences = {10: (0, 1), 20: (0, 1), 30: (0, 1, 2, 3), 40: (0,)}
     kmers = []
     offsets = []
-    prevalence = []
+    prevalences = []
     for node_hash, records in occurrences.items():
         start = len(kmers)
         kmers.extend((i, record) for i, record in enumerate(records))
         offsets.append(start)
-        prevalence.append(len(set(records)))
+        prevalences.append(len(set(records)))
     return (
         np.array(kmers, dtype=KMER_DTYPE),
         np.array([*offsets, len(kmers)], dtype=np.uintp),
-        np.array(prevalence, dtype=np.uint32),
+        np.array(prevalences, dtype=np.uint32),
         np.array([(0, 1, 1), (1, 2, 1), (2, 3, 1)], dtype=EDGE_DTYPE),
         np.array([0, 1, 2, 3, 4], dtype=np.uint32),
         np.array([True, True, False, False], dtype=np.bool_),
@@ -37,15 +37,15 @@ def _inputs():
 def _filter(tmp_path, *, penalty_th=0.3, jaccard=None, n_cpu=1, targets=None,
             penalty_th_cap=0.2, edge_w_th_mul=0.3, min_nodes_floor=1,
             max_nodes_cap=None, **output_paths):
-    kmers, offsets, prevalence, edges, record_offsets, default_targets = _inputs()
+    kmers, offsets, prevalences, edges, record_offsets, default_targets = _inputs()
     if targets is None:
         targets = default_targets
     assembly_nodes = np.array([0, 1, 2, 3, 0, 1, 2, 2, 2], dtype=np.uintp)
     node_offsets = np.array([0, 4, 7, 8, 9], dtype=np.uintp)
     result = _filter_native(
-        kmers, offsets, prevalence, edges, record_offsets, assembly_nodes, node_offsets,
+        kmers, offsets, prevalences, edges, record_offsets, assembly_nodes, node_offsets,
         _paths(tmp_path), targets, jaccard, 5, 10,
         penalty_th, 5, 0, None, penalty_th_cap, edge_w_th_mul, min_nodes_floor,
         max_nodes_cap, 1.5, n_cpu, **output_paths,
     )
-    return result, prevalence
+    return result, prevalences
