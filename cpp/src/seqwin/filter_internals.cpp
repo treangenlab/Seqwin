@@ -27,7 +27,7 @@ namespace {
  */
 template <typename Counter>
 TargetCounts build_target_counts(
-    const Node* nodes,
+    const std::uint32_t* prevalences,
     std::size_t n_nodes,
     const std::size_t* assembly_nodes,
     const std::size_t* node_offsets,
@@ -56,13 +56,13 @@ TargetCounts build_target_counts(
             }
         }
     });
-    return TargetCounts(std::move(counts), count_targets, nodes);
+    return TargetCounts(std::move(counts), count_targets, prevalences);
 }
 
 } // namespace
 
 TargetCounts count_target_nodes(
-    const Node* nodes,
+    const std::uint32_t* prevalences,
     std::size_t n_nodes,
     const std::size_t* assembly_nodes,
     std::size_t n_assembly_nodes,
@@ -94,21 +94,21 @@ TargetCounts count_target_nodes(
     const std::size_t counted_assemblies = count_targets ? total_tar : total_neg;
     if (counted_assemblies <= std::numeric_limits<std::uint8_t>::max()) {
         return build_target_counts<std::uint8_t>(
-            nodes, n_nodes, assembly_nodes, node_offsets, is_targets, n_assemblies, count_targets, pool
+            prevalences, n_nodes, assembly_nodes, node_offsets, is_targets, n_assemblies, count_targets, pool
         );
     }
     if (counted_assemblies <= std::numeric_limits<std::uint16_t>::max()) {
         return build_target_counts<std::uint16_t>(
-            nodes, n_nodes, assembly_nodes, node_offsets, is_targets, n_assemblies, count_targets, pool
+            prevalences, n_nodes, assembly_nodes, node_offsets, is_targets, n_assemblies, count_targets, pool
         );
     }
     return build_target_counts<std::uint32_t>(
-        nodes, n_nodes, assembly_nodes, node_offsets, is_targets, n_assemblies, count_targets, pool
+        prevalences, n_nodes, assembly_nodes, node_offsets, is_targets, n_assemblies, count_targets, pool
     );
 }
 
 std::pair<double, double> expected_presence(
-    const Node* nodes,
+    const std::uint32_t* prevalences,
     std::size_t n_nodes,
     const TargetCounts& target_counts,
     std::size_t total_tar,
@@ -142,7 +142,7 @@ std::pair<double, double> expected_presence(
                 if (n_tar > std::numeric_limits<std::uint32_t>::max()) {
                     throw std::invalid_argument("Node n_tar exceeds uint32 range");
                 }
-                const auto prevalence = nodes[node_idx].prevalence;
+                const auto prevalence = prevalences[node_idx];
                 if (n_tar > prevalence) {
                     throw std::invalid_argument("Node n_tar exceeds prevalence");
                 }
@@ -164,7 +164,7 @@ std::pair<double, double> expected_presence(
         totals.presence_neg += sums.presence_neg;
     }
     if (totals.n_tar == 0) {
-        throw std::invalid_argument("No target minimizers are available for threshold estimation");
+        throw std::invalid_argument("No target minimizer available for threshold estimation");
     }
 
     return {
@@ -174,7 +174,7 @@ std::pair<double, double> expected_presence(
 }
 
 GraphTopology prune_graph(
-    const Node* nodes,
+    const std::uint32_t* prevalences,
     std::size_t n_nodes,
     const Edge* edges,
     std::size_t n_edges,
@@ -256,7 +256,7 @@ GraphTopology prune_graph(
             if (n_tar > std::numeric_limits<std::uint32_t>::max()) {
                 throw std::invalid_argument("Filtered node n_tar exceeds uint32 range");
             }
-            const auto prevalence = nodes[node_idx].prevalence;
+            const auto prevalence = prevalences[node_idx];
             if (n_tar > prevalence) {
                 throw std::invalid_argument("Filtered node n_tar exceeds prevalence");
             }
@@ -372,7 +372,7 @@ void get_subgraphs(
         }
         frontier.clear();
 
-        // Output subgraphs using indices of the original node array
+        // Output subgraphs using node indices from the original graph
         if (subgraph.size() >= min_nodes) {
             for (auto& node : subgraph) {
                 used[node] = 1;

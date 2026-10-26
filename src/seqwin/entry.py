@@ -48,7 +48,7 @@ def _build_graph(assemblies: Assemblies, config: Config) -> Graph:
     )
 
     logger.info(f' - Found {len(graph.kmers)} minimizers')
-    logger.info(f' - Found {len(graph.nodes)} nodes (unique minimizers)')
+    logger.info(f' - Found {len(graph.hashes)} nodes (unique minimizers)')
     logger.info(f' - Found {len(graph.edges)} weighted edges')
 
     print_time_delta(time()-tik)
@@ -83,7 +83,8 @@ def _filter_graph(
 
     filtered, signatures = _filter_native(
         kmers=graph.kmers,
-        nodes=graph.nodes,
+        offsets=graph.offsets,
+        prevalences=graph.prevalences,
         edges=graph.edges,
         record_offsets=graph.record_offsets,
         assembly_nodes=graph.assembly_nodes,
@@ -188,7 +189,7 @@ class Seqwin(object):
         self.metrics = None
 
     def run(self) -> None:
-        """Build and filter the k-mer graph, then extract candidate signatures.
+        """Build and filter the minimizer graph, then extract candidate signatures.
         """
         config = self.config
         state = self.state

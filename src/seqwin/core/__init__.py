@@ -21,9 +21,8 @@ Classes:
 Attributes:
 -----------
 - KMER_DTYPE (np.dtype)
-- NODE_DTYPE (np.dtype)
 - EDGE_DTYPE (np.dtype)
 """
 
-from .graph import KMER_DTYPE, NODE_DTYPE, EDGE_DTYPE, Graph
+from .graph import KMER_DTYPE, EDGE_DTYPE, Graph
 from ._native import FilteredGraph, SubgraphLoc, Signature

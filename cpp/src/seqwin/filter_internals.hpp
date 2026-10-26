@@ -22,20 +22,26 @@ namespace seqwin::internal {
  */
 class TargetCounts {
 public:
-    TargetCounts(NoInitArray<std::uint8_t>&& counts, bool counts_targets, const Node* nodes)
+    TargetCounts(
+        NoInitArray<std::uint8_t>&& counts, bool counts_targets, const std::uint32_t* prevalences
+    )
         : counts_(std::move(counts))
         , counts_targets_(counts_targets)
-        , nodes_(nodes)
+        , prevalences_(prevalences)
     {}
-    TargetCounts(NoInitArray<std::uint16_t>&& counts, bool counts_targets, const Node* nodes)
+    TargetCounts(
+        NoInitArray<std::uint16_t>&& counts, bool counts_targets, const std::uint32_t* prevalences
+    )
         : counts_(std::move(counts))
         , counts_targets_(counts_targets)
-        , nodes_(nodes)
+        , prevalences_(prevalences)
     {}
-    TargetCounts(NoInitArray<std::uint32_t>&& counts, bool counts_targets, const Node* nodes)
+    TargetCounts(
+        NoInitArray<std::uint32_t>&& counts, bool counts_targets, const std::uint32_t* prevalences
+    )
         : counts_(std::move(counts))
         , counts_targets_(counts_targets)
-        , nodes_(nodes)
+        , prevalences_(prevalences)
     {}
 
     /**
@@ -55,10 +61,10 @@ public:
                 } else {
                     fn([&](std::size_t node_idx) -> std::size_t {
                         const std::size_t n_neg = counts[node_idx];
-                        if (n_neg > nodes_[node_idx].prevalence) {
+                        if (n_neg > prevalences_[node_idx]) {
                             throw std::invalid_argument("Node n_neg exceeds prevalence");
                         }
-                        return nodes_[node_idx].prevalence - n_neg;
+                        return prevalences_[node_idx] - n_neg;
                     });
                 }
             },
@@ -73,7 +79,7 @@ private:
         NoInitArray<std::uint32_t>
     > counts_;
     bool counts_targets_;
-    const Node* nodes_;
+    const std::uint32_t* prevalences_;
 };
 
 /**
@@ -143,7 +149,7 @@ private:
  * @brief For each graph node, count its occurrences in target assemblies (`n_tar`).
  */
 TargetCounts count_target_nodes(
-    const Node* nodes,
+    const std::uint32_t* prevalences,
     std::size_t n_nodes,
     const std::size_t* assembly_nodes,
     std::size_t n_assembly_nodes,
@@ -161,7 +167,7 @@ TargetCounts count_target_nodes(
  * in target assemblies, and expected presence in non-target assemblies.
  */
 std::pair<double, double> expected_presence(
-    const Node* nodes,
+    const std::uint32_t* prevalences,
     std::size_t n_nodes,
     const TargetCounts& target_counts,
     std::size_t total_tar,
@@ -179,7 +185,7 @@ std::pair<double, double> expected_presence(
  * Retained nodes and edges are stored directly in `filtered`.
  */
 GraphTopology prune_graph(
-    const Node* nodes,
+    const std::uint32_t* prevalences,
     std::size_t n_nodes,
     const Edge* edges,
     std::size_t n_edges,
@@ -211,7 +217,7 @@ std::vector<Signature> extract_signatures(
     const std::vector<Subgraph>& subgraphs,
     const Kmer* kmers,
     std::size_t n_kmers,
-    const Node* nodes,
+    const std::size_t* offsets,
     std::size_t n_nodes,
     const std::uint32_t* record_offsets,
     std::size_t n_record_offsets,

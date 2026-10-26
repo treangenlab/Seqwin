@@ -20,10 +20,10 @@ inline constexpr std::array<std::string_view, 5> METADATA_NAMES = {
 };
 
 /**
- * @brief Location and minimizer metadata for a subgraph found in an assembly.
+ * @brief Location and k-mer metadata for a subgraph found in an assembly.
  *
- * This is determined by the longest consecutive minimizer run in the assembly,
- * when considering only the minimizers included in the subgraph.
+ * This is determined by the longest consecutive k-mer run in the assembly,
+ * when considering only the k-mers included in the subgraph.
  *
  * Note that a subgraph may appear more than once in an assembly.
  */
@@ -36,15 +36,15 @@ struct SubgraphLoc {
     std::size_t start;
     /** Exclusive stop position in the FASTA record. */
     std::size_t stop;
-    /** Size of the longest consecutive minimizer run in the assembly. */
+    /** Size of the longest consecutive k-mer run in the assembly. */
     std::size_t n_kmers;
-    /** Number of consecutive minimizer runs found in the assembly. */
+    /** Number of consecutive k-mer runs found in the assembly. */
     std::size_t n_repeats;
 };
 
 /**
  * @brief A signature is extracted from a low-penalty subgraph, represented by a
- * consecutive minimizer run (a.k.a. the representative) found in target assemblies.
+ * consecutive k-mer run (a.k.a. the representative) found in target assemblies.
  *
  * Forward and reversed k-mer orders are treated as the same canonical ordering.
  *

@@ -3,7 +3,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
-#include <string>
 #include <utility>
 #include <vector>
 
@@ -18,9 +17,9 @@ namespace seqwin {
  * large arrays.
  *
  * Important:
- * - Every element must be assigned before it is read.
- * - This is not a full `std::vector` replacement.
- * - It intentionally provides no `resize()`, `reserve()`, `push_back()`, or `capacity()`.
+ * @li Every element must be assigned before it is read.
+ * @li This is not a full `std::vector` replacement.
+ * @li It intentionally provides no `resize()`, `reserve()`, `push_back()`, or `capacity()`.
  */
 template <typename T>
 class NoInitArray {
@@ -89,72 +88,75 @@ private:
 };
 
 /**
- * @brief Location metadata for a minimizer.
+ * @brief Location metadata for a selected k-mer.
+ *
+ * K-mers are selected from input sequences using a sketching method (e.g., minimizers).
  */
 struct Kmer {
-    /** 0-based position of the minimizer within its FASTA record. */
+    /** 0-based position of the k-mer within its FASTA record. */
     std::uint32_t pos;
     /** 0-based global index of the FASTA record. */
     std::uint32_t record_idx;
 };
 
 /**
- * @brief Minimizer graph node for one unique minimizer hash.
+ * @brief Parallel arrays representing nodes in the final k-mer graph.
  *
- * `start` is the beginning of this node's entries in `Graph::kmers`. The end
- * is the next node's `start`, or `Graph::kmers.size()` for the final node.
+ * Each node represents a unique k-mer hash. Nodes are ordered by ascending hash.
+ *
+ * The arrays share the same node indices. For node `i`,
+ * `kmers[offsets[i]:offsets[i + 1]]` contains its k-mer occurrences,
+ * `prevalences[i]` is its assembly prevalence, and `hashes[i]` is its hash.
  */
-struct Node {
-    /** Hash value of the minimizers represented by this node. */
-    std::uint64_t hash;
-    /** Start of this node's minimizer entries in `Graph::kmers`. */
-    std::size_t start;
-    /** Number of assemblies containing this node's minimizer. */
-    std::size_t prevalence;
+struct Nodes {
+    /** K-mer occurrences grouped by node, ordered by record index and position. */
+    NoInitArray<Kmer> kmers;
+    /** Cumulative offsets into `kmers` by node, including the final sentinel. */
+    NoInitArray<std::size_t> offsets;
+    /** Number of assemblies containing each node's k-mer. */
+    NoInitArray<std::uint32_t> prevalences;
+    /** Unique k-mer hashes in strictly ascending order. */
+    NoInitArray<std::uint64_t> hashes;
+
+    std::size_t size() const noexcept {
+        return hashes.size();
+    }
 };
 
 /**
- * @brief Undirected weighted edge between two graph nodes.
- * Endpoints are indices into the graph's node array `Graph::nodes`.
+ * @brief Weighted, undirected edge between two graph nodes.
+ * Endpoints are node indices into the graph's node arrays.
  */
 struct Edge {
-    /** Index of the smaller endpoint in the graph's node array. */
+    /** Index of the smaller endpoint. */
     std::size_t first;
-    /** Index of the larger endpoint in the graph's node array. */
+    /** Index of the larger endpoint. */
     std::size_t second;
     /** Number of assemblies where the endpoints are adjacent. */
     std::size_t weight;
 };
 
 /**
- * @brief Container for the minimizer graph returned by `build()`.
+ * @brief Container for a k-mer graph.
  *
- * `Graph` members do not encode semantic defaults. Build and merge routines
- * construct owned containers separately and transfer them into the final graph
- * with move assignment or move construction.
+ * Each node represents a unique k-mer hash, and edges connect adjacent k-mers in the
+ * input sequences. The graph does not depend on how k-mers are selected. K-mer sketching
+ * methods with a local guarantee can use the same graph representation.
  */
 struct Graph {
-    /**
-     * Minimizer occurrences in all assemblies, grouped and sorted by hash.
-     * `record_idx` is nondecreasing within each node range.
-     */
-    NoInitArray<Kmer> kmers;
-    /** Sorted by hash. */
-    NoInitArray<Node> nodes;
-    /** Indexed into `nodes`; sorted by descending weight, then ascending endpoints. */
+    /** Node arrays sharing the same node indices. */
+    Nodes nodes;
+    /** Endpoints are node indices; sorted by descending weight, then ascending endpoints. */
     NoInitArray<Edge> edges;
-    /** Cumulative global FASTA record offsets by assembly. */
+    /** Cumulative global FASTA record offsets by assembly, including the final sentinel. */
     std::vector<std::uint32_t> record_offsets;
-    /** FASTA record IDs in global record order. */
-    std::vector<std::string> record_ids;
     /**
-     * @brief Node indices grouped by assembly.
-     *
-     * For assembly `i`, `[node_offsets[i], node_offsets[i + 1])` contains
-     * unique nodes present in that assembly, in ascending node-index order.
+     * Unique node indices grouped by assembly.
+     * For assembly `i`, `assembly_nodes[node_offsets[i]:node_offsets[i + 1]]`
+     * contains unique nodes present in that assembly, in ascending node-index order.
      */
     NoInitArray<std::size_t> assembly_nodes;
-    /** Cumulative offsets into `assembly_nodes` by assembly. */
+    /** Cumulative offsets into `assembly_nodes` by assembly, including the final sentinel. */
     std::vector<std::size_t> node_offsets;
 };
 

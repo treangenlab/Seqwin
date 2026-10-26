@@ -23,12 +23,12 @@ class FilteredGraph:
 
     Attributes:
         nodes (NDArray[np.void]): Nodes retained by edge filtering.
-            - 'idx' (uintp): Index into the original `Graph.nodes` array.
-            - 'n_tar' (uint32): Number of target assemblies containing this node's minimizer.
-            - 'n_neg' (uint32): Number of non-target assemblies containing this node's minimizer.
+            - 'idx' (uintp): Node index in the original graph.
+            - 'n_tar' (uint32): Number of target assemblies containing this node's k-mer.
+            - 'n_neg' (uint32): Number of non-target assemblies containing this node's k-mer.
             - 'penalty' (float64): Node penalty score.
         edges (NDArray[np.void]): Edges passing weight and target-support thresholds.
-        subgraphs (list[list[int]]): Low-penalty subgraphs represented by indices of the original `Graph.nodes` array.
+        subgraphs (list[list[int]]): Low-penalty subgraphs represented by node indices of the original graph.
         total_tar (int): Number of target assemblies.
         total_neg (int): Number of non-target assemblies.
         e_absence_tar (float | None): Expected k-mer absence in target assemblies.
@@ -62,10 +62,10 @@ class FilteredGraph:
     def max_nodes(self) -> int | None: ...
 
 class SubgraphLoc:
-    """Location and minimizer metadata for a subgraph found in an assembly.
+    """Location and k-mer metadata for a subgraph found in an assembly.
 
-    This is determined by the longest consecutive minimizer run in the assembly,
-    when considering only the minimizers included in the subgraph.
+    This is determined by the longest consecutive k-mer run in the assembly,
+    when considering only the k-mers included in the subgraph.
 
     Note that a subgraph may appear more than once in an assembly.
 
@@ -74,8 +74,8 @@ class SubgraphLoc:
         record_idx (int): Index of the FASTA record within the assembly.
         start (int): 0-based start position in the FASTA record.
         stop (int): Exclusive stop position in the FASTA record.
-        n_kmers (int): Size of the longest consecutive minimizer run in the assembly.
-        n_repeats (int): Number of consecutive minimizer runs found in the assembly.
+        n_kmers (int): Size of the longest consecutive k-mer run in the assembly.
+        n_repeats (int): Number of consecutive k-mer runs found in the assembly.
     """
     @property
     def assembly_idx(self) -> int: ...
@@ -92,7 +92,7 @@ class SubgraphLoc:
 
 class Signature:
     """A signature is extracted from a low-penalty subgraph, represented by a
-    consecutive minimizer run (a.k.a. the representative) found in target assemblies.
+    consecutive k-mer run (a.k.a. the representative) found in target assemblies.
 
     Forward and reversed k-mer orders are treated as the same canonical ordering.
 
@@ -111,6 +111,7 @@ class Signature:
     @property
     def n_tar(self) -> int: ...
 
+
 def _build_native(
     assembly_paths: Sequence[str],
     kmerlen: int,
@@ -119,17 +120,19 @@ def _build_native(
     low_memory: bool = False,
 ) -> tuple[
     NDArray[np.void],
-    NDArray[np.void],
+    NDArray[np.uintp],
+    NDArray[np.uint32],
+    NDArray[np.uint64],
     NDArray[np.void],
     NDArray[np.uint32],
-    list[str],
     NDArray[np.uintp],
     NDArray[np.uintp],
 ]: ...
 
 def _filter_native(
     kmers: NDArray[np.void],
-    nodes: NDArray[np.void],
+    offsets: NDArray[np.uintp],
+    prevalences: NDArray[np.uint32],
     edges: NDArray[np.void],
     record_offsets: NDArray[np.uint32],
     assembly_nodes: NDArray[np.uintp],

@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from seqwin.core import (
-    EDGE_DTYPE, KMER_DTYPE, NODE_DTYPE, FilteredGraph, Signature
+    EDGE_DTYPE, KMER_DTYPE, FilteredGraph, Signature
 )
 from seqwin.core._native import _filter_native
 
@@ -16,11 +16,8 @@ def _filter_distinct_weights(tmp_path, edge_weight_th):
         [(0, record) for _ in range(4) for record in (0, 1, 2, 3)],
         dtype=KMER_DTYPE,
     )
-    nodes = np.array(
-        [(node_hash, i * 4, 4)
-         for i, node_hash in enumerate((10, 20, 30, 40))],
-        dtype=NODE_DTYPE,
-    )
+    offsets = np.arange(0, len(kmers) + 1, 4, dtype=np.uintp)
+    prevalences = np.full(4, 4, dtype=np.uint32)
     edges = np.array(
         [(0, 1, 5), (1, 2, 3), (2, 3, 2)],
         dtype=EDGE_DTYPE,
@@ -31,7 +28,7 @@ def _filter_distinct_weights(tmp_path, edge_weight_th):
     targets = np.array([True, True, True, True, False], dtype=np.bool_)
     edge_w_th_mul = np.nextafter(edge_weight_th / 2.8, np.inf)
     return _filter_native(
-        kmers, nodes, edges, record_offsets, assembly_nodes, node_offsets,
+        kmers, offsets, prevalences, edges, record_offsets, assembly_nodes, node_offsets,
         _paths(tmp_path, 5), targets, None, 5, 10, .3, 5,
         0, None, .2, edge_w_th_mul, 1, None, 1.5, 1,
     )
@@ -45,7 +42,7 @@ def test_native_filter_preserves_ranges_and_original_indices(tmp_path):
     assert isinstance(signatures, list)
     assert all(isinstance(signature, Signature) for signature in signatures)
 
-    np.testing.assert_array_equal(scored['prevalence'], [2, 2, 4, 1])
+    np.testing.assert_array_equal(scored, [2, 2, 4, 1])
     assert filtered.total_tar == 2 and filtered.total_neg == 2
     assert filtered.e_absence_tar is None
     assert filtered.e_presence_neg is None
@@ -151,13 +148,13 @@ def test_edge_pruning_rejects_all_edges(tmp_path):
 
 
 def test_edge_pruning_handles_empty_edge_array(tmp_path):
-    kmers, nodes, _, offsets, targets = _inputs()
+    kmers, offsets, prevalences, _, record_offsets, targets = _inputs()
     edges = np.empty(0, dtype=EDGE_DTYPE)
     assembly_nodes = np.array([0, 1, 2, 3, 0, 1, 2, 2, 2], dtype=np.uintp)
     node_offsets = np.array([0, 4, 7, 8, 9], dtype=np.uintp)
     with pytest.raises(RuntimeError, match='adjust|Try decrease'):
         _filter_native(
-            kmers, nodes, edges, offsets, assembly_nodes, node_offsets,
+            kmers, offsets, prevalences, edges, record_offsets, assembly_nodes, node_offsets,
             _paths(tmp_path), targets,
             None, 5, 10, .3, 5, 0, None, .2, .3, 1, None, 1.5, 1,
         )
@@ -171,9 +168,11 @@ def _filter_target_support(tmp_path, support, edge_data, total_tar, n_cpu):
         for count in support
     ]
     kmers = []
-    nodes = []
+    offsets = []
+    prevalences = []
     for i, records in enumerate(occurrences):
-        nodes.append(((i + 1) * 10, len(kmers), len(records)))
+        offsets.append(len(kmers))
+        prevalences.append(len(records))
         kmers.extend((0, record) for record in records)
     assembly_nodes = []
     node_offsets = [0]
@@ -187,7 +186,8 @@ def _filter_target_support(tmp_path, support, edge_data, total_tar, n_cpu):
     edge_w_th_mul = 1.5 / ((1.0 - .9) * total_tar)
     return _filter_native(
         np.array(kmers, dtype=KMER_DTYPE),
-        np.array(nodes, dtype=NODE_DTYPE),
+        np.array([*offsets, len(kmers)], dtype=np.uintp),
+        np.array(prevalences, dtype=np.uint32),
         np.array(edge_data, dtype=EDGE_DTYPE),
         np.arange(6, dtype=np.uint32),
         np.array(assembly_nodes, dtype=np.uintp),
@@ -221,12 +221,12 @@ def test_edge_pruning_validates_candidates_before_target_count_access(tmp_path, 
 
 
 def test_original_indices_are_preserved_after_isolated_node_removal(tmp_path):
-    kmers, nodes, _, offsets, targets = _inputs()
+    kmers, offsets, prevalences, _, record_offsets, targets = _inputs()
     edges = np.array([(1, 2, 1)], dtype=EDGE_DTYPE)
     assembly_nodes = np.array([0, 1, 2, 3, 0, 1, 2, 2, 2], dtype=np.uintp)
     node_offsets = np.array([0, 4, 7, 8, 9], dtype=np.uintp)
     result = _filter_native(
-        kmers, nodes, edges, offsets, assembly_nodes, node_offsets,
+        kmers, offsets, prevalences, edges, record_offsets, assembly_nodes, node_offsets,
         _paths(tmp_path), targets, None, 5, 10, 1.0, 5, 0, None, .2, .3, 1, None, 1.5, 1,
     )
 
@@ -289,27 +289,28 @@ def test_native_results_pickle_round_trip(tmp_path):
 
 
 def test_target_counts_include_non_target_only_nodes_and_exclude_isolated_nodes(tmp_path):
-    kmers, original_nodes, _, offsets, targets = _inputs()
+    kmers, offsets, prevalences, _, record_offsets, targets = _inputs()
     extra_kmers = np.array([(0, 2), (1, 3)], dtype=KMER_DTYPE)
-    extra_nodes = np.array([(50, 9, 2)], dtype=NODE_DTYPE)
     edges = np.array([(0, 1, 1), (1, 2, 1), (2, 4, 1)], dtype=EDGE_DTYPE)
     assembly_nodes = np.array([0, 1, 2, 3, 0, 1, 2, 2, 4, 2, 4], dtype=np.uintp)
     node_offsets = np.array([0, 4, 7, 9, 11], dtype=np.uintp)
     kmers = np.concatenate((kmers, extra_kmers))
-    original_nodes = np.concatenate((original_nodes, extra_nodes))
-    before = original_nodes.copy()
-    original_nodes.setflags(write=False)
+    offsets = np.append(offsets, np.uintp(len(kmers)))
+    prevalences = np.append(prevalences, np.uint32(2))
+    before = prevalences.copy()
+    prevalences.setflags(write=False)
     filtered, _ = _filter_native(
         kmers,
-        original_nodes,
-        edges,
         offsets,
+        prevalences,
+        edges,
+        record_offsets,
         assembly_nodes,
         node_offsets,
         _paths(tmp_path), targets, None, 5, 10, 2.0, 5, 0, None, .2, 0, 1, None, 1.5, 1,
     )
 
-    np.testing.assert_array_equal(original_nodes, before)
+    np.testing.assert_array_equal(prevalences, before)
     np.testing.assert_array_equal(filtered.nodes['idx'], [0, 1, 2, 4])
     np.testing.assert_array_equal(filtered.nodes['n_tar'], [2, 2, 2, 0])
     np.testing.assert_array_equal(filtered.nodes['n_neg'], [0, 0, 2, 2])
