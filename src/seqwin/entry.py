@@ -189,7 +189,7 @@ class Seqwin(object):
         self.metrics = None
 
     def run(self) -> None:
-        """Build and filter the k-mer graph, then extract candidate signatures.
+        """Build and filter the minimizer graph, then extract candidate signatures.
         """
         config = self.config
         state = self.state

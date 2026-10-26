@@ -53,10 +53,10 @@ class Graph:
     ```
 
     Nodes:
-        Each node represents a unique minimizer hash. Nodes are ordered by ascending hash.
+        Each node represents a unique k-mer hash. Nodes are ordered by ascending hash.
 
         The node arrays share the same node indices. For node `i`,
-        `kmers[offsets[i]:offsets[i + 1]]` contains its minimizer occurrences,
+        `kmers[offsets[i]:offsets[i + 1]]` contains its k-mer occurrences,
         `prevalences[i]` is its assembly prevalence, and `hashes[i]` is its hash.
         ```python
         >>> kmers, offsets = graph.kmers, graph.offsets
@@ -72,8 +72,8 @@ class Graph:
         Edges are undirected and sorted by descending weight.
 
     FASTA record indices:
-        Each minimizer's `record_idx` is a global FASTA record index.
-        Use `record_offsets` to recover the assembly index and the original record index of each minimizer.
+        Each k-mer's `record_idx` is a global FASTA record index.
+        Use `record_offsets` to recover the assembly index and the original record index of each k-mer.
         ```python
         >>> import numpy as np
         >>> record_offsets = graph.record_offsets
@@ -90,12 +90,12 @@ class Graph:
         For assembly `i`, `assembly_nodes[node_offsets[i]:node_offsets[i + 1]]` contains its node indices.
 
     Attributes:
-        kmers (NDArray[np.void]): Minimizer occurrences grouped by node, ordered by record index and position.
-            - 'pos' (uint32): 0-based position of the minimizer within its FASTA record.
+        kmers (NDArray[np.void]): K-mer occurrences grouped by node, ordered by record index and position.
+            - 'pos' (uint32): 0-based position of the k-mer within its FASTA record.
             - 'record_idx' (uint32): 0-based global index of the FASTA record.
         offsets (NDArray[np.uintp]): Cumulative offsets into `kmers` by node, including the final sentinel.
-        prevalences (NDArray[np.uint32]): Number of assemblies containing each node's minimizer.
-        hashes (NDArray[np.uint64]): Unique minimizer hashes in strictly ascending order.
+        prevalences (NDArray[np.uint32]): Number of assemblies containing each node's k-mer.
+        hashes (NDArray[np.uint64]): Unique k-mer hashes in strictly ascending order.
         edges (NDArray[np.void]): Endpoints are node indices; sorted by descending weight, then ascending endpoints.
             - 'first' (uintp): Index of the smaller endpoint.
             - 'second' (uintp): Index of the larger endpoint.

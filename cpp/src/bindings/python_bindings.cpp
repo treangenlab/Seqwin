@@ -57,7 +57,7 @@ PYBIND11_MODULE(_native, m) {
     PYBIND11_NUMPY_DTYPE(seqwin::FilteredNode, idx, n_tar, n_neg, penalty);
     PYBIND11_NUMPY_DTYPE(seqwin::Edge, first, second, weight);
 
-    m.doc() = "Seqwin minimizer graph bindings";
+    m.doc() = "Seqwin native bindings";
 
     seqwin::bindings::bind_python_classes(m);
 

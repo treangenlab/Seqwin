@@ -88,32 +88,34 @@ private:
 };
 
 /**
- * @brief Location metadata for a minimizer.
+ * @brief Location metadata for a selected k-mer.
+ *
+ * K-mers are selected from input sequences using a sketching method (e.g., minimizers).
  */
 struct Kmer {
-    /** 0-based position of the minimizer within its FASTA record. */
+    /** 0-based position of the k-mer within its FASTA record. */
     std::uint32_t pos;
     /** 0-based global index of the FASTA record. */
     std::uint32_t record_idx;
 };
 
 /**
- * @brief Parallel arrays representing nodes in the final minimizer graph.
+ * @brief Parallel arrays representing nodes in the final k-mer graph.
  *
- * Each node represents a unique minimizer hash. Nodes are ordered by ascending hash.
+ * Each node represents a unique k-mer hash. Nodes are ordered by ascending hash.
  *
  * The arrays share the same node indices. For node `i`,
- * `kmers[offsets[i]:offsets[i + 1]]` contains its minimizer occurrences,
+ * `kmers[offsets[i]:offsets[i + 1]]` contains its k-mer occurrences,
  * `prevalences[i]` is its assembly prevalence, and `hashes[i]` is its hash.
  */
 struct Nodes {
-    /** Minimizer occurrences grouped by node, ordered by record index and position. */
+    /** K-mer occurrences grouped by node, ordered by record index and position. */
     NoInitArray<Kmer> kmers;
     /** Cumulative offsets into `kmers` by node, including the final sentinel. */
     NoInitArray<std::size_t> offsets;
-    /** Number of assemblies containing each node's minimizer. */
+    /** Number of assemblies containing each node's k-mer. */
     NoInitArray<std::uint32_t> prevalences;
-    /** Unique minimizer hashes in strictly ascending order. */
+    /** Unique k-mer hashes in strictly ascending order. */
     NoInitArray<std::uint64_t> hashes;
 
     std::size_t size() const noexcept {
@@ -135,11 +137,11 @@ struct Edge {
 };
 
 /**
- * @brief Container for the minimizer graph returned by `build()`.
+ * @brief Container for a k-mer graph.
  *
- * `Graph` members do not encode semantic defaults. Build and merge routines
- * construct owned containers separately and transfer them into the final graph
- * with move assignment or move construction.
+ * Each node represents a unique k-mer hash, and edges connect adjacent k-mers in the
+ * input sequences. The graph does not depend on how k-mers are selected. K-mer sketching
+ * methods with a local guarantee can use the same graph representation.
  */
 struct Graph {
     /** Node arrays sharing the same node indices. */

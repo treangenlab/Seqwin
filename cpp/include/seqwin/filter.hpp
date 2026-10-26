@@ -43,9 +43,9 @@ struct FilterConfig {
 struct FilteredNode {
     /** Node index in the original graph. */
     std::size_t idx;
-    /** Number of target assemblies containing this node's minimizer. */
+    /** Number of target assemblies containing this node's k-mer. */
     std::uint32_t n_tar;
-    /** Number of non-target assemblies containing this node's minimizer. */
+    /** Number of non-target assemblies containing this node's k-mer. */
     std::uint32_t n_neg;
     /** Node penalty score. */
     double penalty;
@@ -82,7 +82,7 @@ struct FilteredGraph {
 };
 
 /**
- * @brief Filter the minimizer graph and extract signatures from low-penalty subgraphs.
+ * @brief Filter the k-mer graph and extract signatures from low-penalty subgraphs.
  */
 std::pair<FilteredGraph, std::vector<Signature>> filter(
     const Kmer* kmers,

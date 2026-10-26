@@ -32,6 +32,9 @@ struct SubgraphKmer {
 
 /**
  * @brief A run of consecutive k-mers found in an assembly.
+ *
+ * K-mers are consecutive when their positions in the same FASTA
+ * record differ by at most the configured maximum gap.
  */
 struct ConsecutiveKmers {
     /** Location spanned by the k-mer run. */
