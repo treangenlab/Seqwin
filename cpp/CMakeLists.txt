@@ -40,6 +40,7 @@ if (NOT PYBIND11_STATUS EQUAL 0)
 endif()
 
 Python_add_library(_native MODULE WITH_SOABI
+    src/bindings/python_graph.cpp
     src/bindings/python_classes.cpp
     src/bindings/python_bindings.cpp
     src/seqwin/build.cpp
@@ -65,7 +66,8 @@ endif()
 
 target_compile_definitions(_native PRIVATE PYBIND11_DETAILED_ERROR_MESSAGES)
 
-set_target_properties(_native PROPERTIES PREFIX "")
+# Binding-layer graph holders contain pybind11 objects with hidden visibility.
+set_target_properties(_native PROPERTIES PREFIX "" CXX_VISIBILITY_PRESET hidden)
 
 install(TARGETS _native
     LIBRARY DESTINATION seqwin/core

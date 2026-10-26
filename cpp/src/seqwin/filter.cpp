@@ -83,7 +83,9 @@ void calculate_thresholds(
     double penalty_th;
     if (config.penalty_th) {
         penalty_th = *config.penalty_th;
-        internal::log_python("Penalty threshold is provided (--penalty-th), skip auto estimation", "warning");
+        internal::log_python(
+            "Penalty threshold is provided (--penalty-th), skip auto estimation", "warning"
+        );
     } else {
         // Consider k-mers in target assemblies:
         double e_absence_tar; // their expected absence in target assemblies
@@ -133,7 +135,8 @@ void calculate_thresholds(
         : config.max_nodes_cap;
     if (max_nodes) {
         internal::log_python(
-            " - Subgraph size limit is set to [" + std::to_string(min_nodes) + ", " + std::to_string(*max_nodes) + "]"
+            " - Subgraph size limit is set to [" +
+            std::to_string(min_nodes) + ", " + std::to_string(*max_nodes) + "]"
         );
     } else {
         internal::log_python(
@@ -151,51 +154,34 @@ void calculate_thresholds(
 } // namespace
 
 std::pair<FilteredGraph, std::vector<Signature>> filter(
-    const Kmer* kmers,
-    std::size_t n_kmers,
-    const std::size_t* offsets,
-    std::size_t n_offsets,
-    const std::uint32_t* prevalences,
-    std::size_t n_nodes,
-    const Edge* edges,
-    std::size_t n_edges,
-    const std::uint32_t* record_offsets,
-    std::size_t n_record_offsets,
-    const std::size_t* assembly_nodes,
-    std::size_t n_assembly_nodes,
-    const std::size_t* node_offsets,
-    std::size_t n_node_offsets,
+    const GraphView& graph,
     const std::vector<std::string>& assembly_paths,
-    const bool* is_targets,
-    std::size_t n_assemblies,
+    ArrayView<bool> is_targets,
     const double* jaccard,
     std::size_t jaccard_rows,
     std::size_t jaccard_cols,
     const FilterConfig& config
 ) {
-    const ArrayView<Kmer> kmers_view(kmers, n_kmers);
-    const ArrayView<std::size_t> offsets_view(offsets, n_offsets);
-    const ArrayView<std::uint32_t> prevalences_view(prevalences, n_nodes);
-    const ArrayView<Edge> edges_view(edges, n_edges);
-    const ArrayView<std::uint32_t> record_offsets_view(record_offsets, n_record_offsets);
-    const ArrayView<std::size_t> assembly_nodes_view(assembly_nodes, n_assembly_nodes);
-    const ArrayView<std::size_t> node_offsets_view(node_offsets, n_node_offsets);
-    const ArrayView<bool> is_targets_view(is_targets, n_assemblies);
-
     if (config.fasta_path.has_value() != config.csv_path.has_value()) {
         throw std::invalid_argument("Both fasta_path and csv_path are required for signature output");
     }
-    if (n_offsets == 0 || n_offsets - 1 != n_nodes) {
+    if (
+        graph.nodes.offsets.size() == 0 ||
+        graph.nodes.offsets.size() - 1 != graph.nodes.prevalences.size()
+    ) {
         throw std::invalid_argument("offsets length must equal n_nodes + 1");
     }
-    if (offsets[0] != 0 || offsets[n_nodes] != n_kmers) {
+    if (
+        graph.nodes.offsets[0] != 0 ||
+        graph.nodes.offsets[graph.nodes.prevalences.size()] != graph.nodes.kmers.size()
+    ) {
         throw std::invalid_argument("offsets must start at zero and end at n_kmers");
     }
     internal::ThreadPool pool(std::max<std::size_t>(1, config.n_cpu));
 
     FilteredGraph filtered;
-    filtered.total_tar = std::count(is_targets_view.begin(), is_targets_view.end(), true);
-    filtered.total_neg = n_assemblies - filtered.total_tar;
+    filtered.total_tar = std::count(is_targets.begin(), is_targets.end(), true);
+    filtered.total_neg = is_targets.size() - filtered.total_tar;
     if (filtered.total_tar == 0) {
         throw std::invalid_argument("is_targets must contain at least one target assembly");
     }
@@ -205,17 +191,17 @@ std::pair<FilteredGraph, std::vector<Signature>> filter(
 
     internal::log_python(" - Counting target node occurrences...");
     auto target_counts = internal::count_target_nodes(
-        prevalences_view,
-        assembly_nodes_view,
-        node_offsets_view,
-        is_targets_view,
+        graph.nodes.prevalences,
+        graph.assembly_nodes,
+        graph.node_offsets,
+        is_targets,
         filtered.total_tar,
         filtered.total_neg,
         pool
     );
     calculate_thresholds(
-        prevalences_view,
-        is_targets_view,
+        graph.nodes.prevalences,
+        is_targets,
         jaccard,
         jaccard_rows,
         jaccard_cols,
@@ -227,8 +213,8 @@ std::pair<FilteredGraph, std::vector<Signature>> filter(
 
     internal::log_python(" - Filtering graph and calculating node penalty scores...");
     auto graph_topology = internal::prune_graph(
-        prevalences_view,
-        edges_view,
+        graph.nodes.prevalences,
+        graph.edges,
         target_counts,
         filtered.total_tar,
         filtered.total_neg,
@@ -237,12 +223,13 @@ std::pair<FilteredGraph, std::vector<Signature>> filter(
         pool
     );
     internal::log_python(
-        " - Removed " + std::to_string(n_edges - filtered.edges.size()) + " edges failing weight/target-support thresholds, " +
+        " - Removed " + std::to_string(graph.edges.size() - filtered.edges.size()) +
+        " edges failing weight/target-support thresholds, " +
         std::to_string(filtered.edges.size()) + " edges left"
     );
     internal::log_python(
-        " - Removed " + std::to_string(n_nodes - filtered.nodes.size()) + " isolated nodes, " +
-        std::to_string(filtered.nodes.size()) + " nodes left"
+        " - Removed " + std::to_string(graph.nodes.prevalences.size() - filtered.nodes.size()) +
+        " isolated nodes, " + std::to_string(filtered.nodes.size()) + " nodes left"
     );
 
     internal::get_subgraphs(
@@ -254,18 +241,20 @@ std::pair<FilteredGraph, std::vector<Signature>> filter(
         filtered
     );
     if (filtered.subgraphs.empty()) {
-        throw std::runtime_error("No low-penalty subgraph was found. Try decrease --stringency, or increase --penalty-th");
+        throw std::runtime_error(
+            "No low-penalty subgraph was found. Try decrease --stringency, or increase --penalty-th"
+        );
     }
     internal::log_python(" - Found " + std::to_string(filtered.subgraphs.size()) + " low-penalty subgraphs");
 
     internal::log_python(" - Finding a representative for each low-penalty subgraph...");
     auto signatures = internal::extract_signatures(
         filtered.subgraphs,
-        kmers_view,
-        offsets_view,
-        record_offsets_view,
+        graph.nodes.kmers,
+        graph.nodes.offsets,
+        graph.record_offsets,
         assembly_paths,
-        is_targets_view,
+        is_targets,
         config.kmerlen,
         config.windowsize,
         config.min_len,

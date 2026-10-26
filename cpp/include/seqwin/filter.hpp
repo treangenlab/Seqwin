@@ -7,7 +7,7 @@
 #include <utility>
 #include <vector>
 
-#include "seqwin/graph.hpp"
+#include "seqwin/graph_view.hpp"
 #include "seqwin/signature.hpp"
 
 namespace seqwin {
@@ -85,23 +85,9 @@ struct FilteredGraph {
  * @brief Filter the k-mer graph and extract signatures from low-penalty subgraphs.
  */
 std::pair<FilteredGraph, std::vector<Signature>> filter(
-    const Kmer* kmers,
-    std::size_t n_kmers,
-    const std::size_t* offsets,
-    std::size_t n_offsets,
-    const std::uint32_t* prevalences,
-    std::size_t n_nodes,
-    const Edge* edges,
-    std::size_t n_edges,
-    const std::uint32_t* record_offsets,
-    std::size_t n_record_offsets,
-    const std::size_t* assembly_nodes,
-    std::size_t n_assembly_nodes,
-    const std::size_t* node_offsets,
-    std::size_t n_node_offsets,
+    const GraphView& graph,
     const std::vector<std::string>& assembly_paths,
-    const bool* is_targets,
-    std::size_t n_assemblies,
+    ArrayView<bool> is_targets,
     const double* jaccard,
     std::size_t jaccard_rows,
     std::size_t jaccard_cols,

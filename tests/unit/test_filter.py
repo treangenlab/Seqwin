@@ -3,12 +3,10 @@ import pickle
 import numpy as np
 import pytest
 
-from seqwin.core import (
-    EDGE_DTYPE, KMER_DTYPE, FilteredGraph, Signature
-)
+from seqwin.core import FilteredGraph, Signature
 from seqwin.core._native import _filter_native
 
-from _filter_helpers import _filter, _inputs, _paths
+from _filter_helpers import EDGE_DTYPE, KMER_DTYPE, _filter, _graph, _inputs, _paths
 
 
 def _filter_distinct_weights(tmp_path, edge_weight_th):
@@ -27,8 +25,11 @@ def _filter_distinct_weights(tmp_path, edge_weight_th):
     node_offsets = np.array([0, 4, 8, 12, 16, 16], dtype=np.uintp)
     targets = np.array([True, True, True, True, False], dtype=np.bool_)
     edge_w_th_mul = np.nextafter(edge_weight_th / 2.8, np.inf)
+    graph = _graph(
+        tmp_path, kmers, offsets, prevalences, edges, record_offsets, assembly_nodes, node_offsets,
+    )
     return _filter_native(
-        kmers, offsets, prevalences, edges, record_offsets, assembly_nodes, node_offsets,
+        graph,
         _paths(tmp_path, 5), targets, None, 5, 10, .3, 5,
         0, None, .2, edge_w_th_mul, 1, None, 1.5, 1,
     )
@@ -153,8 +154,11 @@ def test_edge_pruning_handles_empty_edge_array(tmp_path):
     assembly_nodes = np.array([0, 1, 2, 3, 0, 1, 2, 2, 2], dtype=np.uintp)
     node_offsets = np.array([0, 4, 7, 8, 9], dtype=np.uintp)
     with pytest.raises(RuntimeError, match='adjust|Try decrease'):
+        graph = _graph(
+            tmp_path, kmers, offsets, prevalences, edges, record_offsets, assembly_nodes, node_offsets,
+        )
         _filter_native(
-            kmers, offsets, prevalences, edges, record_offsets, assembly_nodes, node_offsets,
+            graph,
             _paths(tmp_path), targets,
             None, 5, 10, .3, 5, 0, None, .2, .3, 1, None, 1.5, 1,
         )
@@ -184,7 +188,8 @@ def _filter_target_support(tmp_path, support, edge_data, total_tar, n_cpu):
     targets = np.arange(5) < total_tar
     # The integer pruning threshold is 1; weight-1 edges must be rejected.
     edge_w_th_mul = 1.5 / ((1.0 - .9) * total_tar)
-    return _filter_native(
+    graph = _graph(
+        tmp_path,
         np.array(kmers, dtype=KMER_DTYPE),
         np.array([*offsets, len(kmers)], dtype=np.uintp),
         np.array(prevalences, dtype=np.uint32),
@@ -192,6 +197,9 @@ def _filter_target_support(tmp_path, support, edge_data, total_tar, n_cpu):
         np.arange(6, dtype=np.uint32),
         np.array(assembly_nodes, dtype=np.uintp),
         np.array(node_offsets, dtype=np.uintp),
+    )
+    return _filter_native(
+        graph,
         _paths(tmp_path, 5), targets, None, 5, 10, .9, 5,
         0, None, .2, edge_w_th_mul, 1, None, 1.5, n_cpu,
     )
@@ -225,8 +233,11 @@ def test_original_indices_are_preserved_after_isolated_node_removal(tmp_path):
     edges = np.array([(1, 2, 1)], dtype=EDGE_DTYPE)
     assembly_nodes = np.array([0, 1, 2, 3, 0, 1, 2, 2, 2], dtype=np.uintp)
     node_offsets = np.array([0, 4, 7, 8, 9], dtype=np.uintp)
+    graph = _graph(
+        tmp_path, kmers, offsets, prevalences, edges, record_offsets, assembly_nodes, node_offsets,
+    )
     result = _filter_native(
-        kmers, offsets, prevalences, edges, record_offsets, assembly_nodes, node_offsets,
+        graph,
         _paths(tmp_path), targets, None, 5, 10, 1.0, 5, 0, None, .2, .3, 1, None, 1.5, 1,
     )
 
@@ -299,14 +310,11 @@ def test_target_counts_include_non_target_only_nodes_and_exclude_isolated_nodes(
     prevalences = np.append(prevalences, np.uint32(2))
     before = prevalences.copy()
     prevalences.setflags(write=False)
+    graph = _graph(
+        tmp_path, kmers, offsets, prevalences, edges, record_offsets, assembly_nodes, node_offsets,
+    )
     filtered, _ = _filter_native(
-        kmers,
-        offsets,
-        prevalences,
-        edges,
-        record_offsets,
-        assembly_nodes,
-        node_offsets,
+        graph,
         _paths(tmp_path), targets, None, 5, 10, 2.0, 5, 0, None, .2, 0, 1, None, 1.5, 1,
     )
 
@@ -317,3 +325,73 @@ def test_target_counts_include_non_target_only_nodes_and_exclude_isolated_nodes(
     np.testing.assert_allclose(filtered.nodes['penalty'], [0, 0, 1, np.sqrt(2)])
     assert 3 not in filtered.nodes['idx']
     assert filtered.edges.tolist() == [(0, 1, 1), (1, 2, 1), (2, 4, 1)]
+
+
+def test_built_and_mapped_filter_results_match(tmp_path, targets_dir, non_targets_dir):
+    from seqwin.core import Graph
+
+    paths = [str(path) for directory in (targets_dir, non_targets_dir)
+             for path in sorted(directory.glob('*.fasta'))]
+    graph = Graph(paths, 17, 10)
+    before = graph.nodes.kmers.copy()
+    graph.save(tmp_path)
+    loaded = Graph.load(tmp_path)
+    targets = np.array([True, True, False, False], dtype=np.bool_)
+    results = [
+        _filter_native(
+            graph=value, assembly_paths=paths, is_targets=targets, jaccard=None,
+            kmerlen=17, windowsize=10, penalty_th=None, stringency=5,
+            min_len=17, max_len=200, penalty_th_cap=.2, edge_w_th_mul=.3,
+            min_nodes_floor=1, max_nodes_cap=None, consec_kmer_mul=1.5, n_cpu=2,
+        )
+        for value in (graph, loaded)
+    ]
+    original, mapped = results
+    np.testing.assert_array_equal(original[0].nodes, mapped[0].nodes)
+    np.testing.assert_array_equal(original[0].edges, mapped[0].edges)
+    assert original[0].subgraphs == mapped[0].subgraphs
+    assert original[1]
+    # Existing pickle state includes all thresholds, locations and signature metadata.
+    assert pickle.dumps(original) == pickle.dumps(mapped)
+    np.testing.assert_array_equal(graph.nodes.kmers, before)
+    assert {path.name for path in tmp_path.iterdir()} == {
+        f'{name}.npy' for name in ('kmers', 'offsets', 'prevalences', 'hashes',
+                                  'edges', 'record_offsets', 'assembly_nodes', 'node_offsets')
+    }
+
+
+@pytest.mark.parametrize('targets', (
+    [True, True, False, False],
+    np.array([1, 1, 0, 0], dtype=np.uint8),
+    np.array([True, False] * 4, dtype=np.bool_)[::2],
+))
+def test_filter_rejects_target_array_conversions(tmp_path, targets):
+    with pytest.raises(TypeError):
+        _filter(tmp_path, targets=targets)
+
+
+@pytest.mark.parametrize('jaccard', (
+    [[.5] * 4] * 4,
+    np.ones((4, 4), dtype=np.float32),
+    np.ones((4, 4), dtype=np.float64).T,
+    np.ones((4, 4), dtype=np.float64).astype(np.dtype(np.float64).newbyteorder('S')),
+))
+def test_filter_rejects_jaccard_array_conversions(tmp_path, jaccard):
+    with pytest.raises(TypeError):
+        _filter(tmp_path, jaccard=jaccard)
+
+
+def test_filter_rejects_unaligned_jaccard(tmp_path):
+    jaccard = np.ndarray((4, 4), dtype=np.float64, buffer=bytearray(129), offset=1)
+    with pytest.raises(ValueError, match='aligned'):
+        _filter(tmp_path, jaccard=jaccard)
+
+
+def test_filter_rejects_non_vector_targets(tmp_path):
+    with pytest.raises(ValueError, match='one-dimensional'):
+        _filter(tmp_path, targets=np.ones((2, 2), dtype=np.bool_))
+
+
+def test_filter_rejects_non_matrix_jaccard(tmp_path):
+    with pytest.raises(ValueError, match='two-dimensional'):
+        _filter(tmp_path, jaccard=np.ones(4, dtype=np.float64))

@@ -3,12 +3,15 @@ Type declarations for the Seqwin C++ extension
 
 Classes:
 --------
+- Graph
+- Nodes
 - FilteredGraph
 - SubgraphLoc
 - Signature
 """
 
 from collections.abc import Sequence
+from pathlib import Path
 
 import numpy as np
 from numpy.typing import NDArray
@@ -16,50 +19,196 @@ from numpy.typing import NDArray
 # Columns in the signature metadata CSV.
 _METADATA_NAMES: tuple[str, ...]
 
+class Nodes:
+    """Parallel arrays representing nodes in the final k-mer graph.
+    """
+    @property
+    def kmers(self) -> NDArray[np.void]:
+        """K-mer occurrences grouped by node, ordered by record index and position.
+            - 'pos' (uint32): 0-based position of the k-mer within its FASTA record.
+            - 'record_idx' (uint32): 0-based global index of the FASTA record.
+        """
+        ...
+    @property
+    def offsets(self) -> NDArray[np.uintp]:
+        """Cumulative offsets into `kmers` by node, including the final sentinel."""
+        ...
+    @property
+    def prevalences(self) -> NDArray[np.uint32]:
+        """Number of assemblies containing each node's k-mer."""
+        ...
+    @property
+    def hashes(self) -> NDArray[np.uint64]:
+        """Unique k-mer hashes in strictly ascending order."""
+        ...
+
+class Graph:
+    """The Seqwin minimizer graph class.
+
+    Example usage:
+    ```python
+    >>> from seqwin.core import Graph
+    >>> graph = Graph(
+    ...     assembly_paths = ['asm1.fasta', 'asm2.fasta'],
+    ...     kmerlen = 21,
+    ...     windowsize = 200,
+    ...     n_cpu = 4,
+    ...     low_memory = False
+    ... )
+    ```
+
+    Nodes:
+        Each node represents a unique k-mer hash. Nodes are ordered by ascending hash.
+
+        The node arrays share the same node indices. For node `i`,
+        `kmers[offsets[i]:offsets[i + 1]]` contains its k-mer occurrences,
+        `prevalences[i]` is its assembly prevalence, and `hashes[i]` is its hash.
+    ```python
+    >>> kmers, offsets = graph.nodes.kmers, graph.nodes.offsets
+    >>> prevalences, hashes = graph.nodes.prevalences, graph.nodes.hashes
+    >>> node_idx = 0
+    >>> node_kmers = kmers[offsets[node_idx]:offsets[node_idx + 1]]
+    >>> node_hash = hashes[node_idx]
+    >>> node_prevalence = prevalences[node_idx]
+    ```
+
+    Edges:
+        Each edge connects two nodes by their node indices.
+        Edges are undirected and sorted by descending weight.
+
+    FASTA record indices:
+        Each k-mer's `record_idx` is a global FASTA record index.
+        Use `record_offsets` to recover the assembly index and the original record index of each k-mer.
+    ```python
+    >>> import numpy as np
+    >>> record_offsets = graph.record_offsets
+    >>> assembly_indices = np.searchsorted(
+    ...     record_offsets,
+    ...     kmers['record_idx'],
+    ...     side='right',
+    ... ) - 1
+    >>> record_indices = kmers['record_idx'] - record_offsets[assembly_indices]
+    ```
+
+    Assembly-to-node index:
+        `assembly_nodes` stores the unique node indices present in each assembly, in ascending node-index order.
+        For assembly `i`, `assembly_nodes[node_offsets[i]:node_offsets[i + 1]]` contains its node indices.
+    """
+    def __init__(
+        self,
+        assembly_paths: Sequence[str | Path],
+        kmerlen: int,
+        windowsize: int,
+        n_cpu: int = 4,
+        low_memory: bool = False,
+    ) -> None:
+        """Build a minimizer graph.
+
+        Args:
+            assembly_paths (Sequence[str | Path]): Paths to input assemblies in FASTA format (plain or gzipped).
+            kmerlen (int): K-mer length for minimizer sketch.
+            windowsize (int): Window size for minimizer sketch.
+            n_cpu (int, optional): Number of worker threads to use. [4]
+            low_memory (bool, optional): Recompute minimizers in a second pass to reduce peak memory. [False]
+        """
+        ...
+    @property
+    def nodes(self) -> Nodes:
+        """Parallel node arrays; the returned object keeps graph storage alive."""
+        ...
+    @property
+    def edges(self) -> NDArray[np.void]:
+        """Endpoints are node indices; sorted by descending weight, then ascending endpoints.
+            - 'first' (uintp): Index of the smaller endpoint.
+            - 'second' (uintp): Index of the larger endpoint.
+            - 'weight' (uintp): Number of assemblies where the endpoints are adjacent.
+        """
+        ...
+    @property
+    def record_offsets(self) -> NDArray[np.uint32]:
+        """Cumulative global FASTA record offsets by assembly, including the final sentinel."""
+        ...
+    @property
+    def assembly_nodes(self) -> NDArray[np.uintp]:
+        """Unique node indices grouped by assembly, sorted in ascending order within each assembly."""
+        ...
+    @property
+    def node_offsets(self) -> NDArray[np.uintp]:
+        """Cumulative offsets into `assembly_nodes` by assembly, including the final sentinel."""
+        ...
+    def save(self, path: str | Path) -> None:
+        """Save the minimizer graph as a directory of NumPy arrays. Existing files are overwritten.
+
+        Args:
+            path (str | Path): Path to the graph directory.
+        """
+        ...
+    @staticmethod
+    def load(path: str | Path) -> Graph:
+        """Load a memory-mapped minimizer graph.
+
+        Args:
+            path (str | Path): Path to the graph directory.
+
+        Returns:
+            Graph: A graph backed by the saved NumPy array files.
+        """
+        ...
+
 class FilteredGraph:
     """Includes filtered graph arrays, low-penalty subgraphs, and calculated values.
 
     Filtered nodes and edges follow their original order.
-
-    Attributes:
-        nodes (NDArray[np.void]): Nodes retained by edge filtering.
+    """
+    @property
+    def nodes(self) -> NDArray[np.void]:
+        """Nodes retained by edge filtering.
             - 'idx' (uintp): Node index in the original graph.
             - 'n_tar' (uint32): Number of target assemblies containing this node's k-mer.
             - 'n_neg' (uint32): Number of non-target assemblies containing this node's k-mer.
             - 'penalty' (float64): Node penalty score.
-        edges (NDArray[np.void]): Edges passing weight and target-support thresholds.
-        subgraphs (list[list[int]]): Low-penalty subgraphs represented by node indices of the original graph.
-        total_tar (int): Number of target assemblies.
-        total_neg (int): Number of non-target assemblies.
-        e_absence_tar (float | None): Expected k-mer absence in target assemblies.
-        e_presence_neg (float | None): Expected k-mer presence in non-target assemblies.
-        penalty_th (float): Node penalty threshold (user input or auto-computed).
-        edge_weight_th (float): Graph edge weight threshold.
-        min_nodes (int): Minimum number of nodes for a low-penalty subgraph.
-        max_nodes (int | None): Maximum number of nodes for a low-penalty subgraph.
-    """
+        """
+        ...
     @property
-    def nodes(self) -> NDArray[np.void]: ...
+    def edges(self) -> NDArray[np.void]:
+        """Edges passing weight and target-support thresholds."""
+        ...
     @property
-    def edges(self) -> NDArray[np.void]: ...
+    def subgraphs(self) -> list[list[int]]:
+        """Low-penalty subgraphs represented by node indices of the original graph."""
+        ...
     @property
-    def subgraphs(self) -> list[list[int]]: ...
+    def total_tar(self) -> int:
+        """Number of target assemblies."""
+        ...
     @property
-    def total_tar(self) -> int: ...
+    def total_neg(self) -> int:
+        """Number of non-target assemblies."""
+        ...
     @property
-    def total_neg(self) -> int: ...
+    def e_absence_tar(self) -> float | None:
+        """Expected k-mer absence in target assemblies."""
+        ...
     @property
-    def e_absence_tar(self) -> float | None: ...
+    def e_presence_neg(self) -> float | None:
+        """Expected k-mer presence in non-target assemblies."""
+        ...
     @property
-    def e_presence_neg(self) -> float | None: ...
+    def penalty_th(self) -> float:
+        """Node penalty threshold (user input or auto-computed)."""
+        ...
     @property
-    def penalty_th(self) -> float: ...
+    def edge_weight_th(self) -> float:
+        """Graph edge weight threshold."""
+        ...
     @property
-    def edge_weight_th(self) -> float: ...
+    def min_nodes(self) -> int:
+        """Minimum number of nodes for a low-penalty subgraph."""
+        ...
     @property
-    def min_nodes(self) -> int: ...
-    @property
-    def max_nodes(self) -> int | None: ...
+    def max_nodes(self) -> int | None:
+        """Maximum number of nodes for a low-penalty subgraph."""
+        ...
 
 class SubgraphLoc:
     """Location and k-mer metadata for a subgraph found in an assembly.
@@ -68,27 +217,31 @@ class SubgraphLoc:
     when considering only the k-mers included in the subgraph.
 
     Note that a subgraph may appear more than once in an assembly.
-
-    Attributes:
-        assembly_idx (int): Index of the assembly containing the subgraph.
-        record_idx (int): Index of the FASTA record within the assembly.
-        start (int): 0-based start position in the FASTA record.
-        stop (int): Exclusive stop position in the FASTA record.
-        n_kmers (int): Size of the longest consecutive k-mer run in the assembly.
-        n_repeats (int): Number of consecutive k-mer runs found in the assembly.
     """
     @property
-    def assembly_idx(self) -> int: ...
+    def assembly_idx(self) -> int:
+        """Index of the assembly containing the subgraph."""
+        ...
     @property
-    def record_idx(self) -> int: ...
+    def record_idx(self) -> int:
+        """Index of the FASTA record within the assembly."""
+        ...
     @property
-    def start(self) -> int: ...
+    def start(self) -> int:
+        """0-based start position in the FASTA record."""
+        ...
     @property
-    def stop(self) -> int: ...
+    def stop(self) -> int:
+        """Exclusive stop position in the FASTA record."""
+        ...
     @property
-    def n_kmers(self) -> int: ...
+    def n_kmers(self) -> int:
+        """Size of the longest consecutive k-mer run in the assembly."""
+        ...
     @property
-    def n_repeats(self) -> int: ...
+    def n_repeats(self) -> int:
+        """Number of consecutive k-mer runs found in the assembly."""
+        ...
 
 class Signature:
     """A signature is extracted from a low-penalty subgraph, represented by a
@@ -98,45 +251,23 @@ class Signature:
 
     The nucleotide sequence of the signature is fetched from the first target assembly
     containing the representative.
-
-    Attributes:
-        subgraph_idx (int): Index of the low-penalty subgraph that produced the signature.
-        location (SubgraphLoc): Location and metadata of the representative.
-        n_tar (int): Number of target assemblies containing the representative.
     """
     @property
-    def subgraph_idx(self) -> int: ...
+    def subgraph_idx(self) -> int:
+        """Index of the low-penalty subgraph that produced the signature."""
+        ...
     @property
-    def location(self) -> SubgraphLoc: ...
+    def location(self) -> SubgraphLoc:
+        """Location and metadata of the representative."""
+        ...
     @property
-    def n_tar(self) -> int: ...
+    def n_tar(self) -> int:
+        """Number of target assemblies containing the representative."""
+        ...
 
-
-def _build_native(
-    assembly_paths: Sequence[str],
-    kmerlen: int,
-    windowsize: int,
-    n_cpu: int = 4,
-    low_memory: bool = False,
-) -> tuple[
-    NDArray[np.void],
-    NDArray[np.uintp],
-    NDArray[np.uint32],
-    NDArray[np.uint64],
-    NDArray[np.void],
-    NDArray[np.uint32],
-    NDArray[np.uintp],
-    NDArray[np.uintp],
-]: ...
 
 def _filter_native(
-    kmers: NDArray[np.void],
-    offsets: NDArray[np.uintp],
-    prevalences: NDArray[np.uint32],
-    edges: NDArray[np.void],
-    record_offsets: NDArray[np.uint32],
-    assembly_nodes: NDArray[np.uintp],
-    node_offsets: NDArray[np.uintp],
+    graph: Graph,
     assembly_paths: Sequence[str],
     is_targets: NDArray[np.bool_],
     jaccard: NDArray[np.float64] | None,

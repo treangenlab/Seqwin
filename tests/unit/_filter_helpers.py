@@ -1,7 +1,30 @@
+from pathlib import Path
+from tempfile import mkdtemp
+
 import numpy as np
 
-from seqwin.core import EDGE_DTYPE, KMER_DTYPE
+from seqwin.core import Graph
 from seqwin.core._native import _filter_native
+
+
+KMER_DTYPE = np.dtype([('pos', np.uint32), ('record_idx', np.uint32)])
+EDGE_DTYPE = np.dtype([('first', np.uintp), ('second', np.uintp), ('weight', np.uintp)])
+
+
+def _graph(tmp_path, kmers, offsets, prevalences, edges, record_offsets,
+           assembly_nodes, node_offsets, *, hashes=None):
+    """Load synthetic arrays using the public eight-file persistence interface."""
+    path = Path(mkdtemp(dir=tmp_path, prefix='graph-'))
+    if hashes is None:
+        hashes = np.arange(len(prevalences), dtype=np.uint64)
+    arrays = dict(
+        kmers=kmers, offsets=offsets, prevalences=prevalences, hashes=hashes,
+        edges=edges, record_offsets=record_offsets, assembly_nodes=assembly_nodes,
+        node_offsets=node_offsets,
+    )
+    for name, array in arrays.items():
+        np.save(path / f'{name}.npy', array, allow_pickle=False)
+    return Graph.load(path)
 
 
 def _paths(tmp_path, n_assemblies=4, *, sequence_length=12):
@@ -42,8 +65,11 @@ def _filter(tmp_path, *, penalty_th=0.3, jaccard=None, n_cpu=1, targets=None,
         targets = default_targets
     assembly_nodes = np.array([0, 1, 2, 3, 0, 1, 2, 2, 2], dtype=np.uintp)
     node_offsets = np.array([0, 4, 7, 8, 9], dtype=np.uintp)
+    graph = _graph(
+        tmp_path, kmers, offsets, prevalences, edges, record_offsets, assembly_nodes, node_offsets,
+    )
     result = _filter_native(
-        kmers, offsets, prevalences, edges, record_offsets, assembly_nodes, node_offsets,
+        graph,
         _paths(tmp_path), targets, jaccard, 5, 10,
         penalty_th, 5, 0, None, penalty_th_cap, edge_w_th_mul, min_nodes_floor,
         max_nodes_cap, 1.5, n_cpu, **output_paths,
