@@ -27,28 +27,31 @@ namespace {
  */
 template <typename Counter>
 TargetCounts build_target_counts(
-    const std::uint32_t* prevalences,
-    std::size_t n_nodes,
-    const std::size_t* assembly_nodes,
-    const std::size_t* node_offsets,
-    const bool* is_targets,
-    std::size_t n_assemblies,
+    ArrayView<std::uint32_t> prevalences,
+    ArrayView<std::size_t> assembly_nodes,
+    ArrayView<std::size_t> node_offsets,
+    ArrayView<bool> is_targets,
     bool count_targets,
     ThreadPool& pool
 ) {
-    NoInitArray<Counter> counts(n_nodes);
-    pool.parallel_for_chunks(n_nodes, [&](std::size_t start, std::size_t end, std::size_t) {
+    NoInitArray<Counter> counts(prevalences.size());
+    pool.parallel_for_chunks(
+        prevalences.size(), [&](std::size_t start, std::size_t end, std::size_t
+    ) {
         std::fill(
             counts.begin() + start,
             counts.begin() + end,
             Counter{0}
         );
-        for (std::size_t assembly_idx = 0; assembly_idx < n_assemblies; ++assembly_idx) {
+        for (std::size_t assembly_idx = 0; assembly_idx < is_targets.size(); ++assembly_idx) {
             if (is_targets[assembly_idx] != count_targets) {
                 continue;
             }
-            const auto* assembly_start = assembly_nodes + node_offsets[assembly_idx];
-            const auto* assembly_end = assembly_nodes + node_offsets[assembly_idx + 1];
+            if (node_offsets[assembly_idx] == node_offsets[assembly_idx + 1]) {
+                continue;
+            }
+            const auto* assembly_start = assembly_nodes.data() + node_offsets[assembly_idx];
+            const auto* assembly_end = assembly_nodes.data() + node_offsets[assembly_idx + 1];
             const auto* first = std::lower_bound(assembly_start, assembly_end, start);
             const auto* last = std::lower_bound(first, assembly_end, end);
             for (auto it = first; it != last; ++it) {
@@ -62,30 +65,21 @@ TargetCounts build_target_counts(
 } // namespace
 
 TargetCounts count_target_nodes(
-    const std::uint32_t* prevalences,
-    std::size_t n_nodes,
-    const std::size_t* assembly_nodes,
-    std::size_t n_assembly_nodes,
-    const std::size_t* node_offsets,
-    std::size_t n_node_offsets,
-    const bool* is_targets,
-    std::size_t n_assemblies,
+    ArrayView<std::uint32_t> prevalences,
+    ArrayView<std::size_t> assembly_nodes,
+    ArrayView<std::size_t> node_offsets,
+    ArrayView<bool> is_targets,
     std::size_t total_tar,
     std::size_t total_neg,
     ThreadPool& pool
 ) {
-    if (n_node_offsets != n_assemblies + 1) {
+    if (node_offsets.size() != is_targets.size() + 1) {
         throw std::invalid_argument("len(node_offsets) must equal len(is_targets) + 1");
     }
-    if (n_node_offsets == 0 || node_offsets[0] != 0) {
+    if (node_offsets.empty() || node_offsets[0] != 0) {
         throw std::invalid_argument("node_offsets must start with 0");
     }
-    for (std::size_t i = 0; i < n_assemblies; ++i) {
-        if (node_offsets[i + 1] < node_offsets[i]) {
-            throw std::invalid_argument("node_offsets must be nondecreasing");
-        }
-    }
-    if (node_offsets[n_assemblies] != n_assembly_nodes) {
+    if (node_offsets[is_targets.size()] != assembly_nodes.size()) {
         throw std::invalid_argument("Final node offset must equal len(assembly_nodes)");
     }
 
@@ -94,22 +88,21 @@ TargetCounts count_target_nodes(
     const std::size_t counted_assemblies = count_targets ? total_tar : total_neg;
     if (counted_assemblies <= std::numeric_limits<std::uint8_t>::max()) {
         return build_target_counts<std::uint8_t>(
-            prevalences, n_nodes, assembly_nodes, node_offsets, is_targets, n_assemblies, count_targets, pool
+            prevalences, assembly_nodes, node_offsets, is_targets, count_targets, pool
         );
     }
     if (counted_assemblies <= std::numeric_limits<std::uint16_t>::max()) {
         return build_target_counts<std::uint16_t>(
-            prevalences, n_nodes, assembly_nodes, node_offsets, is_targets, n_assemblies, count_targets, pool
+            prevalences, assembly_nodes, node_offsets, is_targets, count_targets, pool
         );
     }
     return build_target_counts<std::uint32_t>(
-        prevalences, n_nodes, assembly_nodes, node_offsets, is_targets, n_assemblies, count_targets, pool
+        prevalences, assembly_nodes, node_offsets, is_targets, count_targets, pool
     );
 }
 
 std::pair<double, double> expected_presence(
-    const std::uint32_t* prevalences,
-    std::size_t n_nodes,
+    ArrayView<std::uint32_t> prevalences,
     const TargetCounts& target_counts,
     std::size_t total_tar,
     std::size_t total_neg,
@@ -129,7 +122,7 @@ std::pair<double, double> expected_presence(
     const double total_neg_inv = 1.0 / total_neg;
 
     target_counts.with([&](const auto& n_tar_at) {
-        pool.parallel_for_chunks(n_nodes, [&](
+        pool.parallel_for_chunks(prevalences.size(), [&](
             std::size_t start, std::size_t end, std::size_t chunk_id
         ) {
             NodeSums sums;
@@ -174,10 +167,8 @@ std::pair<double, double> expected_presence(
 }
 
 GraphTopology prune_graph(
-    const std::uint32_t* prevalences,
-    std::size_t n_nodes,
-    const Edge* edges,
-    std::size_t n_edges,
+    ArrayView<std::uint32_t> prevalences,
+    ArrayView<Edge> edges,
     const TargetCounts& target_counts,
     std::size_t total_tar,
     std::size_t total_neg,
@@ -202,12 +193,12 @@ GraphTopology prune_graph(
     // Store each retained edge as two endpoint records
     std::vector<Endpoint> endpoints;
     target_counts.with([&](const auto& n_tar_at) {
-        for (std::size_t i = 0; i < n_edges; ++i) {
+        for (std::size_t i = 0; i < edges.size(); ++i) {
             const auto& edge = edges[i];
             if (edge.weight <= th) {
                 break;
             }
-            if (edge.first >= n_nodes || edge.second >= n_nodes) {
+            if (edge.first >= prevalences.size() || edge.second >= prevalences.size()) {
                 throw std::invalid_argument("Edge endpoint does not correspond to a node");
             }
             if (n_tar_at(edge.first) > th || n_tar_at(edge.second) > th) {

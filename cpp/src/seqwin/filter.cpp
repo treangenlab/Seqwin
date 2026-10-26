@@ -40,7 +40,7 @@ std::string format_value(double value, int precision)
 double expected_presence_jaccard(
     const double* jaccard,
     std::size_t n,
-    const bool* is_targets,
+    ArrayView<bool> is_targets,
     bool vs_targets // If True, compare against target assemblies
 ) {
     double sum = 0.0;
@@ -70,10 +70,8 @@ double expected_presence_jaccard(
 }
 
 void calculate_thresholds(
-    const std::uint32_t* prevalences,
-    std::size_t n_nodes,
-    const bool* is_targets,
-    std::size_t n_assemblies,
+    ArrayView<std::uint32_t> prevalences,
+    ArrayView<bool> is_targets,
     const double* jaccard,
     std::size_t jaccard_rows,
     std::size_t jaccard_cols,
@@ -91,15 +89,14 @@ void calculate_thresholds(
         double e_absence_tar; // their expected absence in target assemblies
         double e_presence_neg; // their expected presence in non-target assemblies
         if (jaccard) {
-            if (jaccard_rows != n_assemblies || jaccard_cols != n_assemblies) {
+            if (jaccard_rows != is_targets.size() || jaccard_cols != is_targets.size()) {
                 throw std::invalid_argument("Jaccard matrix shape must match the number of assemblies");
             }
-            e_absence_tar = 1.0 - expected_presence_jaccard(jaccard, n_assemblies, is_targets, true);
-            e_presence_neg = expected_presence_jaccard(jaccard, n_assemblies, is_targets, false);
+            e_absence_tar = 1.0 - expected_presence_jaccard(jaccard, is_targets.size(), is_targets, true);
+            e_presence_neg = expected_presence_jaccard(jaccard, is_targets.size(), is_targets, false);
         } else {
             std::tie(e_absence_tar, e_presence_neg) = internal::expected_presence(
                 prevalences,
-                n_nodes,
                 target_counts,
                 filtered.total_tar,
                 filtered.total_neg,
@@ -176,6 +173,15 @@ std::pair<FilteredGraph, std::vector<Signature>> filter(
     std::size_t jaccard_cols,
     const FilterConfig& config
 ) {
+    const ArrayView<Kmer> kmers_view(kmers, n_kmers);
+    const ArrayView<std::size_t> offsets_view(offsets, n_offsets);
+    const ArrayView<std::uint32_t> prevalences_view(prevalences, n_nodes);
+    const ArrayView<Edge> edges_view(edges, n_edges);
+    const ArrayView<std::uint32_t> record_offsets_view(record_offsets, n_record_offsets);
+    const ArrayView<std::size_t> assembly_nodes_view(assembly_nodes, n_assembly_nodes);
+    const ArrayView<std::size_t> node_offsets_view(node_offsets, n_node_offsets);
+    const ArrayView<bool> is_targets_view(is_targets, n_assemblies);
+
     if (config.fasta_path.has_value() != config.csv_path.has_value()) {
         throw std::invalid_argument("Both fasta_path and csv_path are required for signature output");
     }
@@ -188,7 +194,7 @@ std::pair<FilteredGraph, std::vector<Signature>> filter(
     internal::ThreadPool pool(std::max<std::size_t>(1, config.n_cpu));
 
     FilteredGraph filtered;
-    filtered.total_tar = std::count(is_targets, is_targets + n_assemblies, true);
+    filtered.total_tar = std::count(is_targets_view.begin(), is_targets_view.end(), true);
     filtered.total_neg = n_assemblies - filtered.total_tar;
     if (filtered.total_tar == 0) {
         throw std::invalid_argument("is_targets must contain at least one target assembly");
@@ -199,23 +205,17 @@ std::pair<FilteredGraph, std::vector<Signature>> filter(
 
     internal::log_python(" - Counting target node occurrences...");
     auto target_counts = internal::count_target_nodes(
-        prevalences,
-        n_nodes,
-        assembly_nodes,
-        n_assembly_nodes,
-        node_offsets,
-        n_node_offsets,
-        is_targets,
-        n_assemblies,
+        prevalences_view,
+        assembly_nodes_view,
+        node_offsets_view,
+        is_targets_view,
         filtered.total_tar,
         filtered.total_neg,
         pool
     );
     calculate_thresholds(
-        prevalences,
-        n_nodes,
-        is_targets,
-        n_assemblies,
+        prevalences_view,
+        is_targets_view,
         jaccard,
         jaccard_rows,
         jaccard_cols,
@@ -227,10 +227,8 @@ std::pair<FilteredGraph, std::vector<Signature>> filter(
 
     internal::log_python(" - Filtering graph and calculating node penalty scores...");
     auto graph_topology = internal::prune_graph(
-        prevalences,
-        n_nodes,
-        edges,
-        n_edges,
+        prevalences_view,
+        edges_view,
         target_counts,
         filtered.total_tar,
         filtered.total_neg,
@@ -263,15 +261,11 @@ std::pair<FilteredGraph, std::vector<Signature>> filter(
     internal::log_python(" - Finding a representative for each low-penalty subgraph...");
     auto signatures = internal::extract_signatures(
         filtered.subgraphs,
-        kmers,
-        n_kmers,
-        offsets,
-        n_nodes,
-        record_offsets,
-        n_record_offsets,
+        kmers_view,
+        offsets_view,
+        record_offsets_view,
         assembly_paths,
-        is_targets,
-        n_assemblies,
+        is_targets_view,
         config.kmerlen,
         config.windowsize,
         config.min_len,
