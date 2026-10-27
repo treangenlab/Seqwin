@@ -7,6 +7,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 find_package(Python REQUIRED COMPONENTS Interpreter Development.Module)
+find_package(pybind11 CONFIG REQUIRED)
 
 # Fetch and build zlib from source for internal use only.
 # Seqwin links zlib statically into the Python extension, so users do not need
@@ -29,17 +30,7 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(zlib)
 
-execute_process(
-    COMMAND "${Python_EXECUTABLE}" -c "import pybind11; print(pybind11.get_include())"
-    OUTPUT_VARIABLE PYBIND11_INCLUDE
-    RESULT_VARIABLE PYBIND11_STATUS
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-)
-if (NOT PYBIND11_STATUS EQUAL 0)
-    message(FATAL_ERROR "pybind11 Python package is required (pip/conda install pybind11)")
-endif()
-
-Python_add_library(_native MODULE WITH_SOABI
+pybind11_add_module(_native
     src/bindings/python_graph.cpp
     src/bindings/python_classes.cpp
     src/bindings/python_bindings.cpp
@@ -54,8 +45,8 @@ Python_add_library(_native MODULE WITH_SOABI
     vendor/btllib/status.cpp
 )
 
-target_include_directories(_native PRIVATE include src vendor "${PYBIND11_INCLUDE}")
-target_link_libraries(_native PRIVATE Python::Module ZLIB::ZLIBSTATIC)
+target_include_directories(_native PRIVATE include src vendor)
+target_link_libraries(_native PRIVATE ZLIB::ZLIBSTATIC)
 
 # GCC 8's libstdc++ keeps std::filesystem symbols in a separate library.
 # Without this, the extension can compile but fail to import with unresolved
@@ -65,9 +56,6 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_L
 endif()
 
 target_compile_definitions(_native PRIVATE PYBIND11_DETAILED_ERROR_MESSAGES)
-
-# Binding-layer graph holders contain pybind11 objects with hidden visibility.
-set_target_properties(_native PROPERTIES PREFIX "" CXX_VISIBILITY_PRESET hidden)
 
 install(TARGETS _native
     LIBRARY DESTINATION seqwin/core
