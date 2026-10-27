@@ -8,6 +8,7 @@
 #include <stdexcept>
 #include <string>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 #include "seqwin/filter_internals.hpp"
@@ -35,46 +36,47 @@ std::string format_value(double value, int precision)
  *
  * Here, the input matrix `jaccard` contains both target and non-target assemblies, with shape
  * `(M+N, M+N)`. The first group is always the target assemblies, and the second group is either
- * targets or non-targets. So the calculation only happens for certain rows and columns in `jaccard`.
+ * targets or non-targets. Both expectations are calculated by traversing the target rows in `jaccard`.
  */
-double expected_presence_jaccard(
+std::pair<double, double> expected_presence_jaccard(
     const double* jaccard,
-    std::size_t n,
-    ArrayView<bool> is_targets,
-    bool vs_targets // If True, compare against target assemblies
+    ArrayView<bool> is_targets
 ) {
-    double sum = 0.0;
-    std::size_t count = 0;
+    const std::size_t n = is_targets.size();
+    double sum_tar = 0.0;
+    double sum_neg = 0.0;
+    std::size_t count_tar = 0;
+    std::size_t count_neg = 0;
     for (std::size_t row = 0; row < n; ++row) {
         if (!is_targets[row]) {
             // Always select targets for the first group
             continue;
         }
         for (std::size_t col = 0; col < n; ++col) {
-            if (is_targets[col] != vs_targets) {
-                // Select targets or non-targets for the second group
-                continue;
-            }
             const double value = jaccard[row * n + col];
             if (!std::isfinite(value) || value < 0.0 || value > 1.0) {
                 throw std::invalid_argument("Jaccard values must be finite and between 0 and 1");
             }
-            sum += 2.0 * value / (1.0 + value);
-            ++count;
+            const double inc = 2.0 * value / (1.0 + value);
+            if (is_targets[col]) {
+                sum_tar += inc;
+                ++count_tar;
+            } else {
+                sum_neg += inc;
+                ++count_neg;
+            }
         }
     }
-    if (count == 0) {
-        throw std::invalid_argument("Jaccard matrix must not be empty");
-    }
-    return sum / static_cast<double>(count);
+    return {
+        1.0 - sum_tar / count_tar,
+        sum_neg / count_neg
+    };
 }
 
 void calculate_thresholds(
     ArrayView<std::uint32_t> prevalences,
     ArrayView<bool> is_targets,
     const double* jaccard,
-    std::size_t jaccard_rows,
-    std::size_t jaccard_cols,
     const internal::TargetCounts& target_counts,
     const FilterConfig& config,
     FilteredGraph& filtered,
@@ -91,11 +93,7 @@ void calculate_thresholds(
         double e_absence_tar; // their expected absence in target assemblies
         double e_presence_neg; // their expected presence in non-target assemblies
         if (jaccard) {
-            if (jaccard_rows != is_targets.size() || jaccard_cols != is_targets.size()) {
-                throw std::invalid_argument("Jaccard matrix shape must match the number of assemblies");
-            }
-            e_absence_tar = 1.0 - expected_presence_jaccard(jaccard, is_targets.size(), is_targets, true);
-            e_presence_neg = expected_presence_jaccard(jaccard, is_targets.size(), is_targets, false);
+            std::tie(e_absence_tar, e_presence_neg) = expected_presence_jaccard(jaccard, is_targets);
         } else {
             std::tie(e_absence_tar, e_presence_neg) = internal::expected_presence(
                 prevalences,
@@ -162,20 +160,21 @@ std::pair<FilteredGraph, std::vector<Signature>> filter(
     std::size_t jaccard_cols,
     const FilterConfig& config
 ) {
+    const std::size_t n_assemblies = graph.node_offsets.size() - 1;
+    if (assembly_paths.size() != n_assemblies) {
+        throw std::invalid_argument("assembly_paths length must match the number of assemblies");
+    }
+    if (is_targets.size() != n_assemblies) {
+        throw std::invalid_argument("is_targets length must match the number of assemblies");
+    }
+    if (jaccard && (jaccard_rows != n_assemblies || jaccard_cols != n_assemblies)) {
+        throw std::invalid_argument("Jaccard matrix shape must match the number of assemblies");
+    }
     if (config.fasta_path.has_value() != config.csv_path.has_value()) {
         throw std::invalid_argument("Both fasta_path and csv_path are required for signature output");
     }
-    if (
-        graph.nodes.offsets.size() == 0 ||
-        graph.nodes.offsets.size() - 1 != graph.nodes.prevalences.size()
-    ) {
-        throw std::invalid_argument("offsets length must equal n_nodes + 1");
-    }
-    if (
-        graph.nodes.offsets[0] != 0 ||
-        graph.nodes.offsets[graph.nodes.prevalences.size()] != graph.nodes.kmers.size()
-    ) {
-        throw std::invalid_argument("offsets must start at zero and end at n_kmers");
+    if (!std::isfinite(config.consec_kmer_mul) || config.consec_kmer_mul <= 0.0) {
+        throw std::invalid_argument("consec_kmer_mul must be finite and greater than zero");
     }
     internal::ThreadPool pool(std::max<std::size_t>(1, config.n_cpu));
 
@@ -203,8 +202,6 @@ std::pair<FilteredGraph, std::vector<Signature>> filter(
         graph.nodes.prevalences,
         is_targets,
         jaccard,
-        jaccard_rows,
-        jaccard_cols,
         target_counts,
         config,
         filtered,

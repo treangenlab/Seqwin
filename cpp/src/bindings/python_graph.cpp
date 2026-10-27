@@ -222,23 +222,6 @@ void GraphPy::save(const py::object& path) const {
 
 GraphPy GraphPy::load(const py::object& path) {
     const auto directory = py::module_::import("pathlib").attr("Path")(path);
-    if (!directory.attr("is_dir")().cast<bool>()) {
-        PyErr_SetString(
-            PyExc_NotADirectoryError,
-            ("Not a graph directory: " + py::str(directory).cast<std::string>()).c_str()
-        );
-        throw py::error_already_set();
-    }
-    for (const auto* name : graph_array_names) {
-        const auto file = directory.attr("joinpath")(std::string(name) + ".npy");
-        if (!file.attr("is_file")().cast<bool>()) {
-            PyErr_SetString(
-                PyExc_FileNotFoundError,
-                (std::string("Missing graph array file: ") + name + ".npy").c_str()
-            );
-            throw py::error_already_set();
-        }
-    }
     GraphMemmap graph{
         {
             load_numpy<Kmer>(directory, "kmers"),

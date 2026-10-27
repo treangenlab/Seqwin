@@ -413,15 +413,6 @@ std::vector<Signature> extract_signatures(
     std::size_t total_tar,
     ThreadPool& pool
 ) {
-    if (record_offsets.size() != is_targets.size() + 1 || assembly_paths.size() != is_targets.size()) {
-        throw std::invalid_argument("assembly metadata dimensions do not match");
-    }
-    if (total_tar == 0) {
-        throw std::invalid_argument("at least one target assembly is required");
-    }
-    if (!std::isfinite(consec_kmer_mul) || consec_kmer_mul <= 0.0) {
-        throw std::invalid_argument("consec_kmer_mul must be finite and greater than zero");
-    }
     if (subgraphs.empty()) {
         return {};
     }

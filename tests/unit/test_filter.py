@@ -110,11 +110,18 @@ def test_dense_counts_use_smaller_assembly_group_in_parallel(
 
 
 def test_automatic_threshold_from_jaccard_and_cap(tmp_path):
-    jaccard = np.full((4, 4), .5, dtype=np.float64)
+    jaccard = np.array([
+        [1, .5, .25, 0],
+        [.5, 1, .5, 1],
+        [.25, .5, 1, .75],
+        [0, 1, .75, 1],
+    ], dtype=np.float64)
+    e_absence_tar = 1 / 6
+    e_presence_neg = (.4 + 0 + 2 / 3 + 1) / 4
     result, _ = _filter(tmp_path, penalty_th=None, jaccard=jaccard, penalty_th_cap=1)
-    assert result[0].penalty_th == pytest.approx(.5 * np.sqrt((1 / 3) * (2 / 3)))
-    assert result[0].e_absence_tar == pytest.approx(1 / 3)
-    assert result[0].e_presence_neg == pytest.approx(2 / 3)
+    assert result[0].penalty_th == pytest.approx(.5 * np.sqrt(e_absence_tar * e_presence_neg))
+    assert result[0].e_absence_tar == pytest.approx(e_absence_tar)
+    assert result[0].e_presence_neg == pytest.approx(e_presence_neg)
     capped, _ = _filter(tmp_path, penalty_th=None, jaccard=jaccard, penalty_th_cap=.1)
     assert capped[0].penalty_th == .1
 

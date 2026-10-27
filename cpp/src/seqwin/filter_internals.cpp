@@ -73,16 +73,6 @@ TargetCounts count_target_nodes(
     std::size_t total_neg,
     ThreadPool& pool
 ) {
-    if (node_offsets.size() != is_targets.size() + 1) {
-        throw std::invalid_argument("len(node_offsets) must equal len(is_targets) + 1");
-    }
-    if (node_offsets.empty() || node_offsets[0] != 0) {
-        throw std::invalid_argument("node_offsets must start with 0");
-    }
-    if (node_offsets[is_targets.size()] != assembly_nodes.size()) {
-        throw std::invalid_argument("Final node offset must equal len(assembly_nodes)");
-    }
-
     // The smaller assembly group is counted using the narrowest safe counter type
     const bool count_targets = total_tar <= total_neg;
     const std::size_t counted_assemblies = count_targets ? total_tar : total_neg;
