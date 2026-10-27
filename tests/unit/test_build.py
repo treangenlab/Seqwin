@@ -356,13 +356,22 @@ def test_constructor_paths_and_native_hierarchy(targets_dir, non_targets_dir):
 
 
 @pytest.mark.parametrize('mapped', (False, True))
-def test_graph_array_ownership_and_readonly(tmp_path, targets_dir, non_targets_dir, mapped):
+def test_graph_array_ownership_and_readonly(tmp_path, targets_dir, non_targets_dir, mapped, monkeypatch):
     import gc
     import weakref
 
     graph = _small_graph(targets_dir, non_targets_dir)
     if mapped:
         graph.save(tmp_path)
+        original_load = np.load
+        mapped_arrays = {}
+
+        def load(path, **kwargs):
+            array = original_load(path, **kwargs)
+            mapped_arrays[Path(path).stem] = array
+            return array
+
+        monkeypatch.setattr(np, 'load', load)
         graph = Graph.load(tmp_path)
     nodes = graph.nodes
     arrays = _arrays(graph)
@@ -375,6 +384,7 @@ def test_graph_array_ownership_and_readonly(tmp_path, targets_dir, non_targets_d
         assert not array.flags.owndata
         if mapped:
             assert array is repeated
+            assert array is mapped_arrays[name]
             assert isinstance(array, np.memmap)
             assert array.mode == 'r'
         else:
@@ -386,8 +396,10 @@ def test_graph_array_ownership_and_readonly(tmp_path, targets_dir, non_targets_d
                 array[0] = array[0]
     del graph, repeated, array
     gc.collect()
-    assert graph_ref() is not None  # Nodes retains its parent in either storage mode.
-    np.testing.assert_array_equal(nodes.hashes, expected['hashes'])
+    assert (graph_ref() is None) == mapped
+    for name in ('kmers', 'offsets', 'prevalences', 'hashes'):
+        assert getattr(nodes, name) is getattr(nodes, name)
+        np.testing.assert_array_equal(getattr(nodes, name), expected[name])
     del nodes
     gc.collect()
     for name, array in arrays.items():
@@ -409,41 +421,20 @@ def test_nodes_alone_retains_graph(targets_dir, non_targets_dir):
     np.testing.assert_array_equal(nodes.kmers, expected)
 
 
-def test_load_old_fixture_and_save_copy(tmp_path, expected_graph):
+def test_load_old_fixture(expected_graph):
     graph = Graph.load(expected_graph)
-    graph.save(str(tmp_path))
-    copied = Graph.load(str(tmp_path))
     for name, array in _arrays(graph).items():
-        np.testing.assert_array_equal(array, _arrays(copied)[name])
+        expected = np.load(expected_graph / f'{name}.npy')
+        np.testing.assert_array_equal(array, expected)
         assert isinstance(array, np.memmap)
-        assert (tmp_path / f'{name}.npy').read_bytes() == (expected_graph / f'{name}.npy').read_bytes()
+        assert not array.flags.writeable
 
 
-@pytest.mark.parametrize('alias', ('same', 'directory_symlink', 'file_symlink', 'hard_link'))
-def test_mapped_save_rejects_input_overwrite(tmp_path, targets_dir, non_targets_dir, alias):
-    source = tmp_path / 'source'
-    source.mkdir()
-    _small_graph(targets_dir, non_targets_dir).save(source)
-    graph = Graph.load(source)
-    before = {path.name: path.read_bytes() for path in source.iterdir()}
-    destination = tmp_path / 'destination'
-    if alias == 'same':
-        destination = source
-    elif alias == 'directory_symlink':
-        destination.symlink_to(source, target_is_directory=True)
-    else:
-        destination.mkdir()
-        # Cross-name aliases must be caught before even the first file is written.
-        if alias == 'file_symlink':
-            (destination / 'node_offsets.npy').symlink_to(source / 'kmers.npy')
-        else:
-            (destination / 'node_offsets.npy').hardlink_to(source / 'kmers.npy')
-    with pytest.raises(ValueError, match='Cannot overwrite a memory-mapped'):
-        graph.save(destination)
-    assert before == {path.name: path.read_bytes() for path in source.iterdir()}
-    if alias in ('file_symlink', 'hard_link'):
-        assert not (destination / 'kmers.npy').exists()
-    np.testing.assert_array_equal(graph.nodes.kmers, np.load(source / 'kmers.npy'))
+def test_mapped_graph_cannot_be_saved(tmp_path, expected_graph):
+    graph = Graph.load(expected_graph)
+    with pytest.raises(ValueError, match='Cannot save a memory-mapped graph'):
+        graph.save(tmp_path)
+    assert not any(tmp_path.iterdir())
 
 
 @pytest.mark.parametrize('low_memory', (False, True))

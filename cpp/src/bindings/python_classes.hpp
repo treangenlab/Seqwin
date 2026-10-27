@@ -9,14 +9,28 @@
 
 namespace seqwin::bindings {
 
+/** Python module path used by public classes. */
+inline constexpr char public_module[] = "seqwin.core";
+
 /**
- * @brief Read-only NumPy memory-mapped graph arrays.
+ * @brief NumPy node arrays exposed through the Python graph API.
+ *
+ * For native graphs, arrays are read-only, zero-copy views that retain
+ * the parent graph. For mapped graphs, they are the original NumPy
+ * memmaps, which keep their mapped storage alive independently.
  */
-struct GraphMmap {
+struct NodesPy {
     pybind11::array kmers;
     pybind11::array offsets;
     pybind11::array prevalences;
     pybind11::array hashes;
+};
+
+/**
+ * @brief Read-only memory-mapped NumPy arrays backing a graph.
+ */
+struct GraphMmap {
+    NodesPy nodes;
     pybind11::array edges;
     pybind11::array record_offsets;
     pybind11::array assembly_nodes;
@@ -26,24 +40,30 @@ struct GraphMmap {
 GraphView make_view(const GraphMmap& graph);
 
 /**
- * @brief Own either native graph buffers or NumPy memory maps.
+ * @brief Provide the Python-facing graph over native or memory-mapped storage.
  */
-struct GraphHandle {
-    explicit GraphHandle(Graph&& graph);
-    explicit GraphHandle(GraphMmap&& graph);
+class GraphPy {
+public:
+    explicit GraphPy(Graph&& graph);
+    explicit GraphPy(GraphMmap&& graph);
 
+    /** Return native storage, or nullptr for a memory-mapped graph. */
+    const Graph* native() const noexcept;
+
+    /** Return memory-mapped storage, or nullptr for a native graph. */
+    const GraphMmap* mmap() const noexcept;
+
+    /** Return a non-owning graph view for downstream C++ processing. */
     GraphView view() const;
+
+    /** Save native graph arrays as NumPy files. */
     void save(const pybind11::object& path) const;
-    static GraphHandle load(const pybind11::object& path);
 
-    std::variant<Graph, GraphMmap> storage;
-};
+    /** Load a graph backed by read-only NumPy memory maps. */
+    static GraphPy load(const pybind11::object& path);
 
-/**
- * @brief Keep the parent graph alive while its node arrays are accessible.
- */
-struct NodesHandle {
-    pybind11::object graph;
+private:
+    std::variant<Graph, GraphMmap> storage_;
 };
 
 void bind_python_graph(pybind11::module_& module);
