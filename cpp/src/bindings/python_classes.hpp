@@ -15,9 +15,8 @@ inline constexpr char public_module[] = "seqwin.core";
 /**
  * @brief NumPy node arrays exposed through the Python graph API.
  *
- * For native graphs, arrays are read-only, zero-copy views that retain
- * the parent graph. For mapped graphs, they are the original NumPy
- * memmaps, which keep their mapped storage alive independently.
+ * For native graphs, they are read-only, zero-copy views of the native buffers.
+ * For memory-mapped graphs, they are the original NumPy memmaps.
  */
 struct NodesPy {
     pybind11::array kmers;
@@ -29,7 +28,7 @@ struct NodesPy {
 /**
  * @brief Read-only memory-mapped NumPy arrays backing a graph.
  */
-struct GraphMmap {
+struct GraphMemmap {
     NodesPy nodes;
     pybind11::array edges;
     pybind11::array record_offsets;
@@ -37,7 +36,12 @@ struct GraphMmap {
     pybind11::array node_offsets;
 };
 
-GraphView make_view(const GraphMmap& graph);
+/**
+ * @brief View a memory-mapped graph without copying its arrays.
+ *
+ * The graph's memory maps must remain valid for the lifetime of the view.
+ */
+GraphView make_view(const GraphMemmap& graph);
 
 /**
  * @brief Provide the Python-facing graph over native or memory-mapped storage.
@@ -45,13 +49,13 @@ GraphView make_view(const GraphMmap& graph);
 class GraphPy {
 public:
     explicit GraphPy(Graph&& graph);
-    explicit GraphPy(GraphMmap&& graph);
+    explicit GraphPy(GraphMemmap&& graph);
 
     /** Return native storage, or nullptr for a memory-mapped graph. */
     const Graph* native() const noexcept;
 
     /** Return memory-mapped storage, or nullptr for a native graph. */
-    const GraphMmap* mmap() const noexcept;
+    const GraphMemmap* memmap() const noexcept;
 
     /** Return a non-owning graph view for downstream C++ processing. */
     GraphView view() const;
@@ -63,7 +67,7 @@ public:
     static GraphPy load(const pybind11::object& path);
 
 private:
-    std::variant<Graph, GraphMmap> storage_;
+    std::variant<Graph, GraphMemmap> storage_;
 };
 
 void bind_python_graph(pybind11::module_& module);

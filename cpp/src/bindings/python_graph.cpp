@@ -126,7 +126,7 @@ void validate_graph(const seqwin::GraphView& graph) {
 }
 
 /**
- * @brief Expose a native or memory-mapped array as a NumPy array.
+ * @brief Expose a native or memory-mapped graph array as a NumPy array.
  *
  * Return the original NumPy memmap for mapped storage,
  * or a read-only, zero-copy NumPy array for native storage.
@@ -135,11 +135,11 @@ template <typename Container>
 py::array expose_array(
     const py::object& owner,
     Container seqwin::Graph::* native_member,
-    py::array seqwin::bindings::GraphMmap::* mapped_member
+    py::array seqwin::bindings::GraphMemmap::* memmap_member
 ) {
     const auto& graph = owner.cast<const seqwin::bindings::GraphPy&>();
-    if (const auto* mapped = graph.mmap()) {
-        return mapped->*mapped_member;
+    if (const auto* memmap = graph.memmap()) {
+        return memmap->*memmap_member;
     }
     return to_numpy(graph.native()->*native_member, owner);
 }
@@ -153,7 +153,7 @@ constexpr const char* graph_array_names[] = {
 
 namespace seqwin::bindings {
 
-GraphView make_view(const GraphMmap& graph) {
+GraphView make_view(const GraphMemmap& graph) {
     return {
         {
             numpy_to_view<Kmer>(graph.nodes.kmers),
@@ -172,7 +172,7 @@ GraphPy::GraphPy(Graph&& graph)
     : storage_(std::move(graph))
 {}
 
-GraphPy::GraphPy(GraphMmap&& graph)
+GraphPy::GraphPy(GraphMemmap&& graph)
     : storage_(std::move(graph))
 {}
 
@@ -180,8 +180,8 @@ const Graph* GraphPy::native() const noexcept {
     return std::get_if<Graph>(&storage_);
 }
 
-const GraphMmap* GraphPy::mmap() const noexcept {
-    return std::get_if<GraphMmap>(&storage_);
+const GraphMemmap* GraphPy::memmap() const noexcept {
+    return std::get_if<GraphMemmap>(&storage_);
 }
 
 GraphView GraphPy::view() const {
@@ -194,7 +194,7 @@ GraphView GraphPy::view() const {
 }
 
 void GraphPy::save(const py::object& path) const {
-    if (mmap()) {
+    if (memmap()) {
         throw std::invalid_argument("Cannot save a memory-mapped graph");
     }
     const auto directory = py::module_::import("pathlib").attr("Path")(path);
@@ -239,7 +239,7 @@ GraphPy GraphPy::load(const py::object& path) {
             throw py::error_already_set();
         }
     }
-    GraphMmap graph{
+    GraphMemmap graph{
         {
             load_numpy<Kmer>(directory, "kmers"),
             load_numpy<std::size_t>(directory, "offsets"),
@@ -291,8 +291,8 @@ void bind_python_graph(py::module_& module) {
         )
         .def_property_readonly("nodes", [](py::object self) {
             const auto& graph = self.cast<const GraphPy&>();
-            if (const auto* mapped = graph.mmap()) {
-                return mapped->nodes;
+            if (const auto* memmap = graph.memmap()) {
+                return memmap->nodes;
             }
             const auto& nodes = graph.native()->nodes;
             return NodesPy{
@@ -303,16 +303,16 @@ void bind_python_graph(py::module_& module) {
             };
         })
         .def_property_readonly("edges", [](py::object self) {
-            return expose_array(self, &Graph::edges, &GraphMmap::edges);
+            return expose_array(self, &Graph::edges, &GraphMemmap::edges);
         })
         .def_property_readonly("record_offsets", [](py::object self) {
-            return expose_array(self, &Graph::record_offsets, &GraphMmap::record_offsets);
+            return expose_array(self, &Graph::record_offsets, &GraphMemmap::record_offsets);
         })
         .def_property_readonly("assembly_nodes", [](py::object self) {
-            return expose_array(self, &Graph::assembly_nodes, &GraphMmap::assembly_nodes);
+            return expose_array(self, &Graph::assembly_nodes, &GraphMemmap::assembly_nodes);
         })
         .def_property_readonly("node_offsets", [](py::object self) {
-            return expose_array(self, &Graph::node_offsets, &GraphMmap::node_offsets);
+            return expose_array(self, &Graph::node_offsets, &GraphMemmap::node_offsets);
         })
         .def("save", &GraphPy::save, py::arg("path"))
         .def_static("load", &GraphPy::load, py::arg("path"))
