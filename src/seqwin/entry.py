@@ -47,8 +47,8 @@ def _build_graph(assemblies: Assemblies, config: Config) -> Graph:
         low_memory=config.low_memory,
     )
 
-    logger.info(f' - Found {len(graph.kmers)} minimizers')
-    logger.info(f' - Found {len(graph.hashes)} nodes (unique minimizers)')
+    logger.info(f' - Found {len(graph.nodes.kmers)} minimizers')
+    logger.info(f' - Found {len(graph.nodes)} nodes (unique minimizers)')
     logger.info(f' - Found {len(graph.edges)} weighted edges')
 
     print_time_delta(time()-tik)
@@ -82,13 +82,7 @@ def _filter_graph(
     file_to_write(csv_path, config.overwrite)
 
     filtered, signatures = _filter_native(
-        kmers=graph.kmers,
-        offsets=graph.offsets,
-        prevalences=graph.prevalences,
-        edges=graph.edges,
-        record_offsets=graph.record_offsets,
-        assembly_nodes=graph.assembly_nodes,
-        node_offsets=graph.node_offsets,
+        graph=graph,
         assembly_paths=list(map(str, assemblies.paths)),
         is_targets=assemblies.is_targets,
         jaccard=jaccard,

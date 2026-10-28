@@ -3,10 +3,9 @@ import csv
 import numpy as np
 import pytest
 
-from seqwin.core import EDGE_DTYPE, KMER_DTYPE
 from seqwin.core._native import _METADATA_NAMES, _filter_native
 
-from _filter_helpers import _filter, _inputs, _paths
+from _filter_helpers import EDGE_DTYPE, KMER_DTYPE, _filter, _graph, _inputs, _paths
 
 
 def _extract_signature(tmp_path, *, target_records, edge_data):
@@ -28,7 +27,7 @@ def _extract_signature(tmp_path, *, target_records, edge_data):
         present = {node_hash for node_hash, _ in record}
         assembly_nodes.extend(i for i, node_hash in enumerate(hashes) if node_hash in present)
         node_offsets.append(len(assembly_nodes))
-    _, signatures = _filter_native(
+    graph = _graph(
         kmers=np.array(kmers, dtype=KMER_DTYPE),
         offsets=np.array([*offsets, len(kmers)], dtype=np.uintp),
         prevalences=np.array(prevalences, dtype=np.uint32),
@@ -36,6 +35,10 @@ def _extract_signature(tmp_path, *, target_records, edge_data):
         record_offsets=np.arange(len(records) + 1, dtype=np.uint32),
         assembly_nodes=np.array(assembly_nodes, dtype=np.uintp),
         node_offsets=np.array(node_offsets, dtype=np.uintp),
+        hashes=np.array(hashes, dtype=np.uint64),
+    )
+    _, signatures = _filter_native(
+        graph=graph,
         assembly_paths=_paths(tmp_path, len(records), sequence_length=64),
         is_targets=np.array([True] * len(target_records) + [False], dtype=np.bool_),
         jaccard=None, kmerlen=5, windowsize=5, penalty_th=.9, stringency=5,
@@ -104,18 +107,21 @@ def test_signature_extraction_uses_final_original_node_range(tmp_path):
     assert signatures
 
 
-@pytest.mark.parametrize('final_start_offset', (0, 1))
-def test_signature_extraction_rejects_invalid_final_node_range(tmp_path, final_start_offset):
+@pytest.mark.parametrize(('final_start_offset', 'message'), (
+    (0, 'Node k-mer range is invalid'),
+    (1, 'Node k-mer range is invalid'),
+))
+def test_signature_extraction_rejects_invalid_final_node_range(tmp_path, final_start_offset, message):
     kmers, offsets, prevalences, edges, record_offsets, targets = _inputs()
     offsets[-2] = len(kmers) + final_start_offset
     assembly_nodes = np.array([0, 1, 2, 3, 0, 1, 2, 2, 2], dtype=np.uintp)
     node_offsets = np.array([0, 4, 7, 8, 9], dtype=np.uintp)
 
-    with pytest.raises(ValueError, match='Node k-mer range is invalid'):
+    graph = _graph(kmers, offsets, prevalences, edges, record_offsets, assembly_nodes, node_offsets)
+    with pytest.raises(ValueError, match=message):
         _filter_native(
-            kmers, offsets, prevalences, edges, record_offsets, assembly_nodes, node_offsets,
-            _paths(tmp_path), targets, None, 5, 10, 2.0, 5, 0, None, .2, 0, 1,
-            None, 1.5, 1,
+            graph, _paths(tmp_path), targets, None, 5, 10, 2.0, 5, 0, None,
+            .2, 0, 1, None, 1.5, 1,
         )
 
 
@@ -129,10 +135,17 @@ def test_native_csv_escaping_and_fasta_wrapping(tmp_path, record_id):
         paths.append(str(path))
     fasta_path = tmp_path / 'signatures.fasta'
     csv_path = tmp_path / 'signatures.csv'
-    _filter_native(
-        kmers, offsets, prevalences, edges, record_offsets,
+    graph = _graph(
+        kmers,
+        offsets,
+        prevalences,
+        edges,
+        record_offsets,
         np.array([0, 1, 2, 3, 0, 1, 2, 2, 2], dtype=np.uintp),
         np.array([0, 4, 7, 8, 9], dtype=np.uintp),
+    )
+    _filter_native(
+        graph,
         paths, targets, None, 100, 10, .3, 5, 0, None, .2, .3, 1, None, 1.5, 1,
         fasta_path=str(fasta_path), csv_path=str(csv_path),
     )

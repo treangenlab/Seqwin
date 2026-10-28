@@ -2,7 +2,7 @@
 Seqwin core
 ===========
 
-Core classes and dtypes of Seqwin.
+Core classes of Seqwin.
 
 Usage:
 ------
@@ -13,16 +13,11 @@ Usage:
 
 Classes:
 --------
+- Nodes
 - Graph
 - FilteredGraph
 - SubgraphLoc
 - Signature
-
-Attributes:
------------
-- KMER_DTYPE (np.dtype)
-- EDGE_DTYPE (np.dtype)
 """
 
-from .graph import KMER_DTYPE, EDGE_DTYPE, Graph
-from ._native import FilteredGraph, SubgraphLoc, Signature
+from ._native import Nodes, Graph, FilteredGraph, SubgraphLoc, Signature

@@ -8,6 +8,7 @@
 #include <stdexcept>
 #include <string>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 #include "seqwin/filter_internals.hpp"
@@ -35,48 +36,47 @@ std::string format_value(double value, int precision)
  *
  * Here, the input matrix `jaccard` contains both target and non-target assemblies, with shape
  * `(M+N, M+N)`. The first group is always the target assemblies, and the second group is either
- * targets or non-targets. So the calculation only happens for certain rows and columns in `jaccard`.
+ * targets or non-targets. Both expectations are calculated by traversing the target rows in `jaccard`.
  */
-double expected_presence_jaccard(
+std::pair<double, double> expected_presence_jaccard(
     const double* jaccard,
-    std::size_t n,
-    const bool* is_targets,
-    bool vs_targets // If True, compare against target assemblies
+    ArrayView<bool> is_targets
 ) {
-    double sum = 0.0;
-    std::size_t count = 0;
+    const std::size_t n = is_targets.size();
+    double sum_tar = 0.0;
+    double sum_neg = 0.0;
+    std::size_t count_tar = 0;
+    std::size_t count_neg = 0;
     for (std::size_t row = 0; row < n; ++row) {
         if (!is_targets[row]) {
             // Always select targets for the first group
             continue;
         }
         for (std::size_t col = 0; col < n; ++col) {
-            if (is_targets[col] != vs_targets) {
-                // Select targets or non-targets for the second group
-                continue;
-            }
             const double value = jaccard[row * n + col];
             if (!std::isfinite(value) || value < 0.0 || value > 1.0) {
                 throw std::invalid_argument("Jaccard values must be finite and between 0 and 1");
             }
-            sum += 2.0 * value / (1.0 + value);
-            ++count;
+            const double inc = 2.0 * value / (1.0 + value);
+            if (is_targets[col]) {
+                sum_tar += inc;
+                ++count_tar;
+            } else {
+                sum_neg += inc;
+                ++count_neg;
+            }
         }
     }
-    if (count == 0) {
-        throw std::invalid_argument("Jaccard matrix must not be empty");
-    }
-    return sum / static_cast<double>(count);
+    return {
+        1.0 - sum_tar / count_tar,
+        sum_neg / count_neg
+    };
 }
 
 void calculate_thresholds(
-    const std::uint32_t* prevalences,
-    std::size_t n_nodes,
-    const bool* is_targets,
-    std::size_t n_assemblies,
+    ArrayView<std::uint32_t> prevalences,
+    ArrayView<bool> is_targets,
     const double* jaccard,
-    std::size_t jaccard_rows,
-    std::size_t jaccard_cols,
     const internal::TargetCounts& target_counts,
     const FilterConfig& config,
     FilteredGraph& filtered,
@@ -85,21 +85,18 @@ void calculate_thresholds(
     double penalty_th;
     if (config.penalty_th) {
         penalty_th = *config.penalty_th;
-        internal::log_python("Penalty threshold is provided (--penalty-th), skip auto estimation", "warning");
+        internal::log_python(
+            "Penalty threshold is provided (--penalty-th), skip auto estimation", "warning"
+        );
     } else {
         // Consider k-mers in target assemblies:
         double e_absence_tar; // their expected absence in target assemblies
         double e_presence_neg; // their expected presence in non-target assemblies
         if (jaccard) {
-            if (jaccard_rows != n_assemblies || jaccard_cols != n_assemblies) {
-                throw std::invalid_argument("Jaccard matrix shape must match the number of assemblies");
-            }
-            e_absence_tar = 1.0 - expected_presence_jaccard(jaccard, n_assemblies, is_targets, true);
-            e_presence_neg = expected_presence_jaccard(jaccard, n_assemblies, is_targets, false);
+            std::tie(e_absence_tar, e_presence_neg) = expected_presence_jaccard(jaccard, is_targets);
         } else {
             std::tie(e_absence_tar, e_presence_neg) = internal::expected_presence(
                 prevalences,
-                n_nodes,
                 target_counts,
                 filtered.total_tar,
                 filtered.total_neg,
@@ -136,7 +133,8 @@ void calculate_thresholds(
         : config.max_nodes_cap;
     if (max_nodes) {
         internal::log_python(
-            " - Subgraph size limit is set to [" + std::to_string(min_nodes) + ", " + std::to_string(*max_nodes) + "]"
+            " - Subgraph size limit is set to [" +
+            std::to_string(min_nodes) + ", " + std::to_string(*max_nodes) + "]"
         );
     } else {
         internal::log_python(
@@ -154,42 +152,35 @@ void calculate_thresholds(
 } // namespace
 
 std::pair<FilteredGraph, std::vector<Signature>> filter(
-    const Kmer* kmers,
-    std::size_t n_kmers,
-    const std::size_t* offsets,
-    std::size_t n_offsets,
-    const std::uint32_t* prevalences,
-    std::size_t n_nodes,
-    const Edge* edges,
-    std::size_t n_edges,
-    const std::uint32_t* record_offsets,
-    std::size_t n_record_offsets,
-    const std::size_t* assembly_nodes,
-    std::size_t n_assembly_nodes,
-    const std::size_t* node_offsets,
-    std::size_t n_node_offsets,
+    const GraphView& graph,
     const std::vector<std::string>& assembly_paths,
-    const bool* is_targets,
-    std::size_t n_assemblies,
+    ArrayView<bool> is_targets,
     const double* jaccard,
     std::size_t jaccard_rows,
     std::size_t jaccard_cols,
     const FilterConfig& config
 ) {
+    const std::size_t n_assemblies = graph.node_offsets.size() - 1;
+    if (assembly_paths.size() != n_assemblies) {
+        throw std::invalid_argument("assembly_paths length must match the number of assemblies");
+    }
+    if (is_targets.size() != n_assemblies) {
+        throw std::invalid_argument("is_targets length must match the number of assemblies");
+    }
+    if (jaccard && (jaccard_rows != n_assemblies || jaccard_cols != n_assemblies)) {
+        throw std::invalid_argument("Jaccard matrix shape must match the number of assemblies");
+    }
     if (config.fasta_path.has_value() != config.csv_path.has_value()) {
         throw std::invalid_argument("Both fasta_path and csv_path are required for signature output");
     }
-    if (n_offsets == 0 || n_offsets - 1 != n_nodes) {
-        throw std::invalid_argument("offsets length must equal n_nodes + 1");
-    }
-    if (offsets[0] != 0 || offsets[n_nodes] != n_kmers) {
-        throw std::invalid_argument("offsets must start at zero and end at n_kmers");
+    if (!std::isfinite(config.consec_kmer_mul) || config.consec_kmer_mul <= 0.0) {
+        throw std::invalid_argument("consec_kmer_mul must be finite and greater than zero");
     }
     internal::ThreadPool pool(std::max<std::size_t>(1, config.n_cpu));
 
     FilteredGraph filtered;
-    filtered.total_tar = std::count(is_targets, is_targets + n_assemblies, true);
-    filtered.total_neg = n_assemblies - filtered.total_tar;
+    filtered.total_tar = std::count(is_targets.begin(), is_targets.end(), true);
+    filtered.total_neg = is_targets.size() - filtered.total_tar;
     if (filtered.total_tar == 0) {
         throw std::invalid_argument("is_targets must contain at least one target assembly");
     }
@@ -199,26 +190,18 @@ std::pair<FilteredGraph, std::vector<Signature>> filter(
 
     internal::log_python(" - Counting target node occurrences...");
     auto target_counts = internal::count_target_nodes(
-        prevalences,
-        n_nodes,
-        assembly_nodes,
-        n_assembly_nodes,
-        node_offsets,
-        n_node_offsets,
+        graph.nodes.prevalences,
+        graph.assembly_nodes,
+        graph.node_offsets,
         is_targets,
-        n_assemblies,
         filtered.total_tar,
         filtered.total_neg,
         pool
     );
     calculate_thresholds(
-        prevalences,
-        n_nodes,
+        graph.nodes.prevalences,
         is_targets,
-        n_assemblies,
         jaccard,
-        jaccard_rows,
-        jaccard_cols,
         target_counts,
         config,
         filtered,
@@ -227,10 +210,8 @@ std::pair<FilteredGraph, std::vector<Signature>> filter(
 
     internal::log_python(" - Filtering graph and calculating node penalty scores...");
     auto graph_topology = internal::prune_graph(
-        prevalences,
-        n_nodes,
-        edges,
-        n_edges,
+        graph.nodes.prevalences,
+        graph.edges,
         target_counts,
         filtered.total_tar,
         filtered.total_neg,
@@ -239,12 +220,13 @@ std::pair<FilteredGraph, std::vector<Signature>> filter(
         pool
     );
     internal::log_python(
-        " - Removed " + std::to_string(n_edges - filtered.edges.size()) + " edges failing weight/target-support thresholds, " +
+        " - Removed " + std::to_string(graph.edges.size() - filtered.edges.size()) +
+        " edges failing weight/target-support thresholds, " +
         std::to_string(filtered.edges.size()) + " edges left"
     );
     internal::log_python(
-        " - Removed " + std::to_string(n_nodes - filtered.nodes.size()) + " isolated nodes, " +
-        std::to_string(filtered.nodes.size()) + " nodes left"
+        " - Removed " + std::to_string(graph.nodes.prevalences.size() - filtered.nodes.size()) +
+        " isolated nodes, " + std::to_string(filtered.nodes.size()) + " nodes left"
     );
 
     internal::get_subgraphs(
@@ -256,22 +238,20 @@ std::pair<FilteredGraph, std::vector<Signature>> filter(
         filtered
     );
     if (filtered.subgraphs.empty()) {
-        throw std::runtime_error("No low-penalty subgraph was found. Try decrease --stringency, or increase --penalty-th");
+        throw std::runtime_error(
+            "No low-penalty subgraph was found. Try decrease --stringency, or increase --penalty-th"
+        );
     }
     internal::log_python(" - Found " + std::to_string(filtered.subgraphs.size()) + " low-penalty subgraphs");
 
     internal::log_python(" - Finding a representative for each low-penalty subgraph...");
     auto signatures = internal::extract_signatures(
         filtered.subgraphs,
-        kmers,
-        n_kmers,
-        offsets,
-        n_nodes,
-        record_offsets,
-        n_record_offsets,
+        graph.nodes.kmers,
+        graph.nodes.offsets,
+        graph.record_offsets,
         assembly_paths,
         is_targets,
-        n_assemblies,
         config.kmerlen,
         config.windowsize,
         config.min_len,

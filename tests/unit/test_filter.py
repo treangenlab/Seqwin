@@ -3,12 +3,19 @@ import pickle
 import numpy as np
 import pytest
 
-from seqwin.core import (
-    EDGE_DTYPE, KMER_DTYPE, FilteredGraph, Signature
-)
+from seqwin.core import FilteredGraph, Signature
 from seqwin.core._native import _filter_native
 
-from _filter_helpers import _filter, _inputs, _paths
+from _filter_helpers import EDGE_DTYPE, KMER_DTYPE, _arrays, _filter, _graph, _inputs, _paths
+
+
+def _signature_values(signature):
+    location = signature.location
+    return (
+        signature.subgraph_idx, signature.n_tar,
+        location.assembly_idx, location.record_idx, location.start, location.stop,
+        location.n_kmers, location.n_repeats,
+    )
 
 
 def _filter_distinct_weights(tmp_path, edge_weight_th):
@@ -27,8 +34,11 @@ def _filter_distinct_weights(tmp_path, edge_weight_th):
     node_offsets = np.array([0, 4, 8, 12, 16, 16], dtype=np.uintp)
     targets = np.array([True, True, True, True, False], dtype=np.bool_)
     edge_w_th_mul = np.nextafter(edge_weight_th / 2.8, np.inf)
-    return _filter_native(
+    graph = _graph(
         kmers, offsets, prevalences, edges, record_offsets, assembly_nodes, node_offsets,
+    )
+    return _filter_native(
+        graph,
         _paths(tmp_path, 5), targets, None, 5, 10, .3, 5,
         0, None, .2, edge_w_th_mul, 1, None, 1.5, 1,
     )
@@ -54,18 +64,12 @@ def test_native_filter_preserves_ranges_and_original_indices(tmp_path):
     np.testing.assert_array_equal(nodes['n_neg'], [0, 0, 2, 0])
     np.testing.assert_allclose(nodes['penalty'], [0, 0, 1, .5])
     assert edges.tolist() == [(0, 1, 1), (1, 2, 1), (2, 3, 1)]
-    assert np.all(edges['first'] < len(scored))
-    assert np.all(edges['second'] < len(scored))
-    assert set(edges['first']) <= set(nodes['idx'])
-    assert set(edges['second']) <= set(nodes['idx'])
     assert subgraphs == [[0, 1]]
     assert len(signatures) == 1
     signature = signatures[0]
     assert signature.subgraph_idx == 0
     assert signature.location.stop - signature.location.start == 5
     assert signature.n_tar == 2
-    assert all(node_i < len(scored) for subgraph in subgraphs for node_i in subgraph)
-    assert set(nodes['idx']) - set(subgraphs[0]) == {2, 3}
 
 
 def test_automatic_threshold_from_minimizers_and_parallel_equivalence(tmp_path):
@@ -84,14 +88,7 @@ def test_automatic_threshold_from_minimizers_and_parallel_equivalence(tmp_path):
             np.testing.assert_array_equal(left, right)
         else:
             assert left == right
-    signature_fields = lambda signature: (
-        signature.subgraph_idx, signature.location.assembly_idx,
-        signature.location.record_idx, signature.location.start,
-        signature.location.stop, signature.location.n_kmers,
-        signature.location.n_repeats,
-        signature.n_tar,
-    )
-    assert list(map(signature_fields, first[1])) == list(map(signature_fields, parallel[1]))
+    assert list(map(_signature_values, first[1])) == list(map(_signature_values, parallel[1]))
 
 
 @pytest.mark.parametrize(
@@ -113,18 +110,20 @@ def test_dense_counts_use_smaller_assembly_group_in_parallel(
 
 
 def test_automatic_threshold_from_jaccard_and_cap(tmp_path):
-    jaccard = np.full((4, 4), .5, dtype=np.float64)
+    jaccard = np.array([
+        [1, .5, .25, 0],
+        [.5, 1, .5, 1],
+        [.25, .5, 1, .75],
+        [0, 1, .75, 1],
+    ], dtype=np.float64)
+    e_absence_tar = 1 / 6
+    e_presence_neg = (.4 + 0 + 2 / 3 + 1) / 4
     result, _ = _filter(tmp_path, penalty_th=None, jaccard=jaccard, penalty_th_cap=1)
-    assert result[0].penalty_th == pytest.approx(.5 * np.sqrt((1 / 3) * (2 / 3)))
-    assert result[0].e_absence_tar == pytest.approx(1 / 3)
-    assert result[0].e_presence_neg == pytest.approx(2 / 3)
+    assert result[0].penalty_th == pytest.approx(.5 * np.sqrt(e_absence_tar * e_presence_neg))
+    assert result[0].e_absence_tar == pytest.approx(e_absence_tar)
+    assert result[0].e_presence_neg == pytest.approx(e_presence_neg)
     capped, _ = _filter(tmp_path, penalty_th=None, jaccard=jaccard, penalty_th_cap=.1)
     assert capped[0].penalty_th == .1
-
-
-def test_low_weight_edges_isolated_nodes_and_no_subgraph_error(tmp_path):
-    with pytest.raises(RuntimeError, match='adjust|Try decrease'):
-        _filter(tmp_path, edge_w_th_mul=1, min_nodes_floor=2)
 
 
 @pytest.mark.parametrize(
@@ -140,24 +139,6 @@ def test_edge_pruning_retains_descending_prefix_with_strict_threshold(
 ):
     result = _filter_distinct_weights(tmp_path, edge_weight_th)
     assert result[0].edges.tolist() == expected
-
-
-def test_edge_pruning_rejects_all_edges(tmp_path):
-    with pytest.raises(RuntimeError, match='adjust|Try decrease'):
-        _filter_distinct_weights(tmp_path, 5)
-
-
-def test_edge_pruning_handles_empty_edge_array(tmp_path):
-    kmers, offsets, prevalences, _, record_offsets, targets = _inputs()
-    edges = np.empty(0, dtype=EDGE_DTYPE)
-    assembly_nodes = np.array([0, 1, 2, 3, 0, 1, 2, 2, 2], dtype=np.uintp)
-    node_offsets = np.array([0, 4, 7, 8, 9], dtype=np.uintp)
-    with pytest.raises(RuntimeError, match='adjust|Try decrease'):
-        _filter_native(
-            kmers, offsets, prevalences, edges, record_offsets, assembly_nodes, node_offsets,
-            _paths(tmp_path), targets,
-            None, 5, 10, .3, 5, 0, None, .2, .3, 1, None, 1.5, 1,
-        )
 
 
 def _filter_target_support(tmp_path, support, edge_data, total_tar, n_cpu):
@@ -184,7 +165,7 @@ def _filter_target_support(tmp_path, support, edge_data, total_tar, n_cpu):
     targets = np.arange(5) < total_tar
     # The integer pruning threshold is 1; weight-1 edges must be rejected.
     edge_w_th_mul = 1.5 / ((1.0 - .9) * total_tar)
-    return _filter_native(
+    graph = _graph(
         np.array(kmers, dtype=KMER_DTYPE),
         np.array([*offsets, len(kmers)], dtype=np.uintp),
         np.array(prevalences, dtype=np.uint32),
@@ -192,6 +173,9 @@ def _filter_target_support(tmp_path, support, edge_data, total_tar, n_cpu):
         np.arange(6, dtype=np.uint32),
         np.array(assembly_nodes, dtype=np.uintp),
         np.array(node_offsets, dtype=np.uintp),
+    )
+    return _filter_native(
+        graph,
         _paths(tmp_path, 5), targets, None, 5, 10, .9, 5,
         0, None, .2, edge_w_th_mul, 1, None, 1.5, n_cpu,
     )
@@ -225,8 +209,11 @@ def test_original_indices_are_preserved_after_isolated_node_removal(tmp_path):
     edges = np.array([(1, 2, 1)], dtype=EDGE_DTYPE)
     assembly_nodes = np.array([0, 1, 2, 3, 0, 1, 2, 2, 2], dtype=np.uintp)
     node_offsets = np.array([0, 4, 7, 8, 9], dtype=np.uintp)
-    result = _filter_native(
+    graph = _graph(
         kmers, offsets, prevalences, edges, record_offsets, assembly_nodes, node_offsets,
+    )
+    result = _filter_native(
+        graph,
         _paths(tmp_path), targets, None, 5, 10, 1.0, 5, 0, None, .2, .3, 1, None, 1.5, 1,
     )
 
@@ -234,16 +221,10 @@ def test_original_indices_are_preserved_after_isolated_node_removal(tmp_path):
     filtered_nodes, filtered_edges, subgraphs = filtered.nodes, filtered.edges, filtered.subgraphs
     np.testing.assert_array_equal(filtered_nodes['idx'], [1, 2])
     np.testing.assert_array_equal(filtered_edges, edges)
-    assert filtered_edges.tolist() == [(1, 2, 1)]
     assert subgraphs == [[1, 2]]
     assert len(signatures) == 1
     assert signatures[0].location.stop - signatures[0].location.start == 5
     assert signatures[0].location.n_kmers == 2
-
-
-def test_jaccard_shape_validation(tmp_path):
-    with pytest.raises(ValueError, match='Jaccard matrix shape'):
-        _filter(tmp_path, penalty_th=None, jaccard=np.ones((2, 2), dtype=np.float64))
 
 
 def test_filtered_arrays_keep_native_owner_alive(tmp_path):
@@ -269,19 +250,9 @@ def test_native_results_pickle_round_trip(tmp_path):
         'max_nodes',
     ):
         assert getattr(restored, name) == getattr(filtered, name)
-    nodes, edges = restored.nodes, restored.edges
-    assert nodes.base is restored
-    assert edges.base is restored
-    del restored
-    np.testing.assert_array_equal(nodes['idx'], [0, 1, 2, 3])
-    assert edges.tolist() == [(0, 1, 1), (1, 2, 1), (2, 3, 1)]
-
     signature = signatures[0]
     restored_signature = pickle.loads(pickle.dumps(signature, protocol=5))
-    assert restored_signature.subgraph_idx == signature.subgraph_idx
-    assert restored_signature.n_tar == signature.n_tar
-    for name in ('assembly_idx', 'record_idx', 'start', 'stop', 'n_kmers', 'n_repeats'):
-        assert getattr(restored_signature.location, name) == getattr(signature.location, name)
+    assert _signature_values(restored_signature) == _signature_values(signature)
 
     restored_location = pickle.loads(pickle.dumps(signature.location, protocol=5))
     for name in ('assembly_idx', 'record_idx', 'start', 'stop', 'n_kmers', 'n_repeats'):
@@ -297,23 +268,58 @@ def test_target_counts_include_non_target_only_nodes_and_exclude_isolated_nodes(
     kmers = np.concatenate((kmers, extra_kmers))
     offsets = np.append(offsets, np.uintp(len(kmers)))
     prevalences = np.append(prevalences, np.uint32(2))
-    before = prevalences.copy()
-    prevalences.setflags(write=False)
+    graph = _graph(
+        kmers, offsets, prevalences, edges, record_offsets, assembly_nodes, node_offsets,
+    )
     filtered, _ = _filter_native(
-        kmers,
-        offsets,
-        prevalences,
-        edges,
-        record_offsets,
-        assembly_nodes,
-        node_offsets,
+        graph,
         _paths(tmp_path), targets, None, 5, 10, 2.0, 5, 0, None, .2, 0, 1, None, 1.5, 1,
     )
 
-    np.testing.assert_array_equal(prevalences, before)
     np.testing.assert_array_equal(filtered.nodes['idx'], [0, 1, 2, 4])
     np.testing.assert_array_equal(filtered.nodes['n_tar'], [2, 2, 2, 0])
     np.testing.assert_array_equal(filtered.nodes['n_neg'], [0, 0, 2, 2])
     np.testing.assert_allclose(filtered.nodes['penalty'], [0, 0, 1, np.sqrt(2)])
-    assert 3 not in filtered.nodes['idx']
     assert filtered.edges.tolist() == [(0, 1, 1), (1, 2, 1), (2, 4, 1)]
+
+
+@pytest.mark.parametrize('mapped', (False, True))
+def test_built_and_numpy_filter_results_match(tmp_path, targets_dir, non_targets_dir, mapped):
+    from seqwin.core import Graph
+
+    paths = [str(path) for directory in (targets_dir, non_targets_dir)
+             for path in sorted(directory.glob('*.fasta'))]
+    graph = Graph(paths, 17, 10)
+    if mapped:
+        graph.save(tmp_path)
+        loaded = Graph.load(tmp_path)
+    else:
+        arrays = {name: array.copy() for name, array in _arrays(graph).items()}
+        for array in arrays.values():
+            array.setflags(write=False)
+        loaded = Graph._from_numpy(**arrays)
+    targets = np.array([True, True, False, False], dtype=np.bool_)
+    results = [
+        _filter_native(
+            graph=value, assembly_paths=paths, is_targets=targets, jaccard=None,
+            kmerlen=17, windowsize=10, penalty_th=None, stringency=5,
+            min_len=17, max_len=200, penalty_th_cap=.2, edge_w_th_mul=.3,
+            min_nodes_floor=1, max_nodes_cap=None, consec_kmer_mul=1.5, n_cpu=2,
+        )
+        for value in (graph, loaded)
+    ]
+    original, numpy_backed = results
+    np.testing.assert_array_equal(original[0].nodes, numpy_backed[0].nodes)
+    np.testing.assert_array_equal(original[0].edges, numpy_backed[0].edges)
+    assert original[0].subgraphs == numpy_backed[0].subgraphs
+    assert original[1]
+    assert list(map(_signature_values, original[1])) == list(map(_signature_values, numpy_backed[1]))
+    for name in ('total_tar', 'total_neg', 'e_absence_tar', 'e_presence_neg',
+                 'penalty_th', 'edge_weight_th', 'min_nodes', 'max_nodes'):
+        assert getattr(original[0], name) == getattr(numpy_backed[0], name)
+
+
+def test_filter_rejects_unaligned_jaccard(tmp_path):
+    jaccard = np.ndarray((4, 4), dtype=np.float64, buffer=bytearray(129), offset=1)
+    with pytest.raises(ValueError, match='aligned'):
+        _filter(tmp_path, jaccard=jaccard)

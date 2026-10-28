@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "seqwin/filter.hpp"
+#include "seqwin/graph_view.hpp"
 #include "utils/thread_pool.hpp"
 
 namespace seqwin::internal {
@@ -23,21 +24,21 @@ namespace seqwin::internal {
 class TargetCounts {
 public:
     TargetCounts(
-        NoInitArray<std::uint8_t>&& counts, bool counts_targets, const std::uint32_t* prevalences
+        NoInitArray<std::uint8_t>&& counts, bool counts_targets, ArrayView<std::uint32_t> prevalences
     )
         : counts_(std::move(counts))
         , counts_targets_(counts_targets)
         , prevalences_(prevalences)
     {}
     TargetCounts(
-        NoInitArray<std::uint16_t>&& counts, bool counts_targets, const std::uint32_t* prevalences
+        NoInitArray<std::uint16_t>&& counts, bool counts_targets, ArrayView<std::uint32_t> prevalences
     )
         : counts_(std::move(counts))
         , counts_targets_(counts_targets)
         , prevalences_(prevalences)
     {}
     TargetCounts(
-        NoInitArray<std::uint32_t>&& counts, bool counts_targets, const std::uint32_t* prevalences
+        NoInitArray<std::uint32_t>&& counts, bool counts_targets, ArrayView<std::uint32_t> prevalences
     )
         : counts_(std::move(counts))
         , counts_targets_(counts_targets)
@@ -79,7 +80,7 @@ private:
         NoInitArray<std::uint32_t>
     > counts_;
     bool counts_targets_;
-    const std::uint32_t* prevalences_;
+    ArrayView<std::uint32_t> prevalences_;
 };
 
 /**
@@ -149,14 +150,10 @@ private:
  * @brief For each graph node, count its occurrences in target assemblies (`n_tar`).
  */
 TargetCounts count_target_nodes(
-    const std::uint32_t* prevalences,
-    std::size_t n_nodes,
-    const std::size_t* assembly_nodes,
-    std::size_t n_assembly_nodes,
-    const std::size_t* node_offsets,
-    std::size_t n_node_offsets,
-    const bool* is_targets,
-    std::size_t n_assemblies,
+    ArrayView<std::uint32_t> prevalences,
+    ArrayView<std::size_t> assembly_nodes,
+    ArrayView<std::size_t> node_offsets,
+    ArrayView<bool> is_targets,
     std::size_t total_tar,
     std::size_t total_neg,
     ThreadPool& pool
@@ -167,8 +164,7 @@ TargetCounts count_target_nodes(
  * in target assemblies, and expected presence in non-target assemblies.
  */
 std::pair<double, double> expected_presence(
-    const std::uint32_t* prevalences,
-    std::size_t n_nodes,
+    ArrayView<std::uint32_t> prevalences,
     const TargetCounts& target_counts,
     std::size_t total_tar,
     std::size_t total_neg,
@@ -185,10 +181,8 @@ std::pair<double, double> expected_presence(
  * Retained nodes and edges are stored directly in `filtered`.
  */
 GraphTopology prune_graph(
-    const std::uint32_t* prevalences,
-    std::size_t n_nodes,
-    const Edge* edges,
-    std::size_t n_edges,
+    ArrayView<std::uint32_t> prevalences,
+    ArrayView<Edge> edges,
     const TargetCounts& target_counts,
     std::size_t total_tar,
     std::size_t total_neg,
@@ -215,15 +209,11 @@ void get_subgraphs(
  */
 std::vector<Signature> extract_signatures(
     const std::vector<Subgraph>& subgraphs,
-    const Kmer* kmers,
-    std::size_t n_kmers,
-    const std::size_t* offsets,
-    std::size_t n_nodes,
-    const std::uint32_t* record_offsets,
-    std::size_t n_record_offsets,
+    ArrayView<Kmer> kmers,
+    ArrayView<std::size_t> offsets,
+    ArrayView<std::uint32_t> record_offsets,
     const std::vector<std::string>& assembly_paths,
-    const bool* is_targets,
-    std::size_t n_assemblies,
+    ArrayView<bool> is_targets,
     std::size_t kmerlen,
     std::size_t windowsize,
     std::size_t min_len,

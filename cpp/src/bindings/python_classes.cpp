@@ -19,9 +19,6 @@ namespace py = pybind11;
 
 namespace {
 
-// Make public classes appear as seqwin.core, not seqwin.core._native
-constexpr char public_module[] = "seqwin.core";
-
 // Define an explicit, versioned binary format
 constexpr int pickle_version = 1;
 
@@ -90,6 +87,8 @@ Container bytes_to_array(const py::bytes& value, const char* name) {
 namespace seqwin::bindings {
 
 void bind_python_classes(py::module_& module) {
+    bind_python_graph(module);
+
     py::class_<FilteredGraph>(module, "FilteredGraph")
         .def_property_readonly("nodes", [](py::object self) {
             auto& filtered = self.cast<FilteredGraph&>();

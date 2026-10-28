@@ -91,14 +91,10 @@ void write_csv_field(std::ostream& out, std::string_view value) {
 std::optional<Signature> extract_worker(
     std::size_t subgraph_idx,
     const Subgraph& subgraph,
-    const Kmer* kmers,
-    std::size_t n_kmers,
-    const std::size_t* offsets,
-    std::size_t n_nodes,
-    const std::uint32_t* record_offsets,
-    std::size_t n_record_offsets,
-    const bool* is_targets,
-    std::size_t n_assemblies,
+    ArrayView<Kmer> kmers,
+    ArrayView<std::size_t> offsets,
+    ArrayView<std::uint32_t> record_offsets,
+    ArrayView<bool> is_targets,
     std::size_t kmerlen,
     std::size_t windowsize,
     std::size_t min_len,
@@ -110,12 +106,12 @@ std::optional<Signature> extract_worker(
     // Each node in a low-penalty subgraph should contain roughly total_tar k-mers
     sg_kmers.reserve(2 * total_tar * subgraph.size());
     for (const auto node_idx : subgraph) {
-        if (node_idx >= n_nodes) {
+        if (offsets.empty() || node_idx >= offsets.size() - 1) {
             throw std::invalid_argument("subgraph node index is out of bounds");
         }
         const auto start = offsets[node_idx];
         const auto stop = offsets[node_idx + 1];
-        if (start >= stop || stop > n_kmers) {
+        if (start >= stop || stop > kmers.size()) {
             throw std::invalid_argument("Node k-mer range is invalid");
         }
         for (std::size_t i = start; i < stop; ++i) {
@@ -132,18 +128,18 @@ std::optional<Signature> extract_worker(
 
     // Select the longest consecutive k-mer run from each assembly
     std::vector<ConsecutiveKmers> all_runs;
-    all_runs.reserve(std::min(n_assemblies, sg_kmers.size()));
+    all_runs.reserve(std::min(is_targets.size(), sg_kmers.size()));
     const double max_gap = consec_kmer_mul * windowsize;
     std::size_t assembly_idx = 0;
     for (std::size_t begin = 0; begin < sg_kmers.size();) {
         while (
-            assembly_idx + 1 < n_record_offsets &&
+            assembly_idx + 1 < record_offsets.size() &&
             sg_kmers[begin].record_idx >= record_offsets[assembly_idx + 1]
         ) {
             ++assembly_idx;
         }
         if (
-            assembly_idx >= n_assemblies ||
+            assembly_idx >= is_targets.size() ||
             sg_kmers[begin].record_idx < record_offsets[assembly_idx]
         ) {
             throw std::invalid_argument("k-mer record_idx is outside record_offsets");
@@ -403,15 +399,11 @@ void fetch_signature_sequences(
 
 std::vector<Signature> extract_signatures(
     const std::vector<Subgraph>& subgraphs,
-    const Kmer* kmers,
-    std::size_t n_kmers,
-    const std::size_t* offsets,
-    std::size_t n_nodes,
-    const std::uint32_t* record_offsets,
-    std::size_t n_record_offsets,
+    ArrayView<Kmer> kmers,
+    ArrayView<std::size_t> offsets,
+    ArrayView<std::uint32_t> record_offsets,
     const std::vector<std::string>& assembly_paths,
-    const bool* is_targets,
-    std::size_t n_assemblies,
+    ArrayView<bool> is_targets,
     std::size_t kmerlen,
     std::size_t windowsize,
     std::size_t min_len,
@@ -421,15 +413,6 @@ std::vector<Signature> extract_signatures(
     std::size_t total_tar,
     ThreadPool& pool
 ) {
-    if (n_record_offsets != n_assemblies + 1 || assembly_paths.size() != n_assemblies) {
-        throw std::invalid_argument("assembly metadata dimensions do not match");
-    }
-    if (total_tar == 0) {
-        throw std::invalid_argument("at least one target assembly is required");
-    }
-    if (!std::isfinite(consec_kmer_mul) || consec_kmer_mul <= 0.0) {
-        throw std::invalid_argument("consec_kmer_mul must be finite and greater than zero");
-    }
     if (subgraphs.empty()) {
         return {};
     }
@@ -440,13 +423,9 @@ std::vector<Signature> extract_signatures(
             subgraph_idx,
             subgraphs[subgraph_idx],
             kmers,
-            n_kmers,
             offsets,
-            n_nodes,
             record_offsets,
-            n_record_offsets,
             is_targets,
-            n_assemblies,
             kmerlen,
             windowsize,
             min_len,
