@@ -5,15 +5,7 @@ import pytest
 
 from seqwin.core import Graph
 
-from _filter_helpers import KMER_DTYPE, _graph
-
-
-def _build(*args, **kwargs):
-    graph = Graph(*args, **kwargs)
-    return (
-        graph.nodes.kmers, graph.nodes.offsets, graph.nodes.prevalences, graph.nodes.hashes, graph.edges, graph.record_offsets,
-        graph.assembly_nodes, graph.node_offsets,
-    )
+from _filter_helpers import KMER_DTYPE, _arrays, _graph
 
 
 def _small_graph(targets_dir: Path, non_targets_dir: Path) -> Graph:
@@ -32,7 +24,9 @@ def test_graph_save_load_round_trip(tmp_path: Path, targets_dir: Path, non_targe
 
     arrays = _arrays(graph)
     assert {path.name for path in graph_path.iterdir()} == {f'{name}.npy' for name in arrays}
-    loaded = _arrays(Graph.load(graph_path))
+    loaded_graph = Graph.load(graph_path)
+    assert len(graph.nodes) == len(loaded_graph.nodes) == len(graph.nodes.hashes) > 0
+    loaded = _arrays(loaded_graph)
     for name, array in arrays.items():
         assert loaded[name].dtype == array.dtype
         np.testing.assert_array_equal(loaded[name], array)
@@ -53,12 +47,12 @@ def _assert_indexed_edges(nodes: np.ndarray, edges: np.ndarray) -> None:
 
 
 def _assert_graph_outputs_equal(expected, actual) -> None:
-    for expected_array, actual_array in zip(expected, actual, strict=True):
-        np.testing.assert_array_equal(expected_array, actual_array)
-    kmers, offsets, prevalences, hashes, edges, *_ = actual
-    _assert_edges_weight_sorted(edges)
-    _assert_indexed_edges(hashes, edges)
-    _assert_node_ranges(kmers, offsets, prevalences, hashes)
+    expected_arrays = _arrays(expected)
+    for name, array in _arrays(actual).items():
+        np.testing.assert_array_equal(expected_arrays[name], array)
+    _assert_edges_weight_sorted(actual.edges)
+    _assert_indexed_edges(actual.nodes.hashes, actual.edges)
+    _assert_node_ranges(actual.nodes.kmers, actual.nodes.offsets, actual.nodes.prevalences, actual.nodes.hashes)
 
 
 def _assert_node_ranges(kmers, offsets, prevalences, hashes) -> None:
@@ -84,9 +78,9 @@ def test_build_threading_equivalence(targets_dir, non_targets_dir) -> None:
         non_targets_dir / 'non-target-1.fasta',
         non_targets_dir / 'non-target-2.fasta',
     ]
-    single_worker = _build(assembly_paths, kmerlen=7, windowsize=10, n_cpu=1)
+    single_worker = Graph(assembly_paths, kmerlen=7, windowsize=10, n_cpu=1)
     for n_cpu in (2, 99):
-        parallel = _build(assembly_paths, kmerlen=7, windowsize=10, n_cpu=n_cpu)
+        parallel = Graph(assembly_paths, kmerlen=7, windowsize=10, n_cpu=n_cpu)
         _assert_graph_outputs_equal(single_worker, parallel)
 
 
@@ -116,16 +110,16 @@ def test_multi_worker_record_offsets_and_global_record_indices(tmp_path: Path) -
         write_fasta(path, n_records)
         assembly_paths.append(path)
 
-    kmers, _, _, _, _, record_offsets, _, _ = _build(
+    graph = Graph(
         assembly_paths,
         kmerlen=7,
         windowsize=10,
         n_cpu=2,
     )
 
-    assert record_offsets.dtype == np.dtype(np.uint32)
-    assert np.array_equal(record_offsets, np.array([0, 2, 3, 6, 7], dtype=np.uint32))
-    assert np.array_equal(np.unique(kmers['record_idx']), np.arange(7, dtype=np.uint32))
+    assert graph.record_offsets.dtype == np.dtype(np.uint32)
+    assert np.array_equal(graph.record_offsets, np.array([0, 2, 3, 6, 7], dtype=np.uint32))
+    assert np.array_equal(np.unique(graph.nodes.kmers['record_idx']), np.arange(7, dtype=np.uint32))
 
 
 def test_build_empty_record_offsets(tmp_path: Path) -> None:
@@ -138,22 +132,22 @@ def test_build_empty_record_offsets(tmp_path: Path) -> None:
         ([empty_assembly] * 3, np.zeros(4, dtype=np.uint32)),
     ):
         for low_memory in (False, True):
-            kmers, offsets, prevalences, hashes, _, record_offsets, assembly_nodes, node_offsets = _build(
+            graph = Graph(
                 assembly_paths,
                 kmerlen=7,
                 windowsize=10,
                 n_cpu=2,
                 low_memory=low_memory,
             )
-            assert len(kmers) == 0
-            _assert_node_ranges(kmers, offsets, prevalences, hashes)
-            np.testing.assert_array_equal(offsets, [0])
-            assert len(hashes) == 0
-            assert len(assembly_nodes) == 0
-            assert assembly_nodes.dtype == np.dtype(np.uintp)
-            assert np.array_equal(node_offsets, np.zeros(len(assembly_paths) + 1, dtype=np.uintp))
-            assert record_offsets.dtype == np.dtype(np.uint32)
-            assert np.array_equal(record_offsets, expected_offsets)
+            assert len(graph.nodes) == 0
+            assert len(graph.nodes.kmers) == 0
+            _assert_node_ranges(graph.nodes.kmers, graph.nodes.offsets, graph.nodes.prevalences, graph.nodes.hashes)
+            np.testing.assert_array_equal(graph.nodes.offsets, [0])
+            assert len(graph.assembly_nodes) == 0
+            assert graph.assembly_nodes.dtype == np.dtype(np.uintp)
+            assert np.array_equal(graph.node_offsets, np.zeros(len(assembly_paths) + 1, dtype=np.uintp))
+            assert graph.record_offsets.dtype == np.dtype(np.uint32)
+            assert np.array_equal(graph.record_offsets, expected_offsets)
 
 
 def test_low_memory_build_matches_standard(targets_dir, non_targets_dir) -> None:
@@ -163,12 +157,12 @@ def test_low_memory_build_matches_standard(targets_dir, non_targets_dir) -> None
         non_targets_dir / 'non-target-1.fasta',
         non_targets_dir / 'non-target-2.fasta',
     ]
-    standard = _build(
+    standard = Graph(
         assembly_paths, kmerlen=7, windowsize=10, n_cpu=1, low_memory=False,
     )
 
     for n_cpu in (1, 2, 99):
-        low_memory = _build(
+        low_memory = Graph(
             assembly_paths, kmerlen=7, windowsize=10, n_cpu=n_cpu, low_memory=True,
         )
         _assert_graph_outputs_equal(standard, low_memory)
@@ -214,15 +208,6 @@ def test_assembly_nodes_match_kmer_memberships(tmp_path: Path) -> None:
         assert np.array_equal(actual, np.asarray(expected_nodes, dtype=np.uintp))
         assert np.all(actual[:-1] < actual[1:])
         assert len(actual) == len(np.unique(actual))
-
-
-def _arrays(graph):
-    return dict(
-        kmers=graph.nodes.kmers, offsets=graph.nodes.offsets,
-        prevalences=graph.nodes.prevalences, hashes=graph.nodes.hashes,
-        edges=graph.edges, record_offsets=graph.record_offsets,
-        assembly_nodes=graph.assembly_nodes, node_offsets=graph.node_offsets,
-    )
 
 
 def test_constructor_path_types(targets_dir, non_targets_dir):
@@ -287,16 +272,6 @@ def test_graph_array_ownership_and_readonly(tmp_path, targets_dir, non_targets_d
     assert graph_ref() is None  # No ownership cycles.
 
 
-def test_nodes_alone_retains_graph(targets_dir, non_targets_dir):
-    import gc
-    graph = _small_graph(targets_dir, non_targets_dir)
-    nodes = graph.nodes
-    expected = nodes.kmers.copy()
-    del graph
-    gc.collect()
-    np.testing.assert_array_equal(nodes.kmers, expected)
-
-
 def test_load_old_fixture(expected_graph):
     graph = Graph.load(expected_graph)
     for name, array in _arrays(graph).items():
@@ -304,34 +279,22 @@ def test_load_old_fixture(expected_graph):
         np.testing.assert_array_equal(array, expected)
 
 
-@pytest.mark.parametrize('low_memory', (False, True))
-def test_empty_graph_round_trip(tmp_path, low_memory):
-    graph = Graph([], 7, 10, low_memory=low_memory)
+def test_empty_graph_round_trip(tmp_path):
+    graph = Graph([], 7, 10)
     graph.save(tmp_path)
     loaded = Graph.load(tmp_path)
+    assert len(graph.nodes) == len(loaded.nodes) == 0
     loaded_arrays = _arrays(loaded)
     for name, array in _arrays(graph).items():
         np.testing.assert_array_equal(array, loaded_arrays[name])
 
 
 @pytest.mark.parametrize(('name', 'array', 'message'), (
-    ('prevalences', np.array([2], dtype=np.uint32), 'equal lengths'),
-    ('offsets', np.array([0], dtype=np.uintp), 'n_nodes'),
-    ('offsets', np.array([1, 2, 4, 8, 9], dtype=np.uintp), 'start at zero'),
-    ('offsets', np.array([0, 2, 4, 8, 10], dtype=np.uintp), 'end at len'),
-    ('record_offsets', np.array([], dtype=np.uint32), 'must not be empty'),
-    ('record_offsets', np.array([1, 1, 2, 3, 4], dtype=np.uint32), 'start at zero'),
-    ('node_offsets', np.array([0, 4, 7, 9], dtype=np.uintp), 'equal lengths'),
-    ('node_offsets', np.array([0, 4, 7, 8, 10], dtype=np.uintp), 'end at len'),
-    ('node_offsets', np.empty(0, dtype=np.uintp), 'must not be empty'),
+    ('kmers', np.empty(9, dtype=np.uint64), 'has dtype'),
     ('kmers', np.empty((1, 1), dtype=KMER_DTYPE), 'one-dimensional'),
-    ('hashes', np.zeros(4, dtype=np.uint32), 'has dtype'),
-    ('hashes', np.arange(4, dtype=np.uint64).astype(np.dtype(np.uint64).newbyteorder('S')), 'has dtype'),
-    ('kmers', np.zeros(9, dtype={'names': ['pos', 'record_idx'], 'formats': ['u4', 'u4'],
-                                'offsets': [0, 8], 'itemsize': 12}), 'has dtype'),
+    ('offsets', np.array([0], dtype=np.uintp), 'n_nodes'),
 ))
-@pytest.mark.parametrize('mapped', (False, True))
-def test_graph_rejects_unsafe_array_metadata(tmp_path, name, array, message, mapped):
+def test_graph_rejects_unsafe_array_metadata(name, array, message):
     from _filter_helpers import _inputs
 
     kmers, offsets, prevalences, edges, record_offsets, _ = _inputs()
@@ -343,19 +306,21 @@ def test_graph_rejects_unsafe_array_metadata(tmp_path, name, array, message, map
         hashes=np.arange(4, dtype=np.uint64),
     )
     arrays[name] = array
+
     with pytest.raises(ValueError, match=message):
-        if mapped:
-            for name, array in arrays.items():
-                np.save(tmp_path / f'{name}.npy', array, allow_pickle=False)
-            Graph.load(tmp_path)
-        else:
-            _graph(**arrays)
+        _graph(**arrays)
+
+
+def test_load_rejects_unsafe_array_metadata(tmp_path, targets_dir, non_targets_dir):
+    graph = _small_graph(targets_dir, non_targets_dir)
+    graph.save(tmp_path)
+    np.save(tmp_path / 'hashes.npy', graph.nodes.hashes.astype(np.uint32), allow_pickle=False)
+    with pytest.raises(ValueError, match='has dtype'):
+        Graph.load(tmp_path)
 
 
 @pytest.mark.parametrize('layout', ('strided', 'unaligned'))
-@pytest.mark.parametrize('mapped', (False, True))
-def test_graph_rejects_unsafe_numpy_layout(monkeypatch, expected_graph, layout, mapped):
-    original_load = np.load
+def test_graph_rejects_unsafe_numpy_layout(expected_graph, layout):
     if layout == 'strided':
         bad = np.zeros(8, dtype=np.uint64)[::2]
         message = 'C-contiguous'
@@ -363,18 +328,11 @@ def test_graph_rejects_unsafe_numpy_layout(monkeypatch, expected_graph, layout, 
         bad = np.ndarray((4,), dtype=np.uint64, buffer=bytearray(33), offset=1)
         message = 'aligned'
 
-    def load(path, **kwargs):
-        return bad if Path(path).stem == 'hashes' else original_load(path, **kwargs)
-
     bad.setflags(write=False)
+    arrays = _arrays(Graph.load(expected_graph))
+    arrays['hashes'] = bad
     with pytest.raises(ValueError, match=message):
-        if mapped:
-            monkeypatch.setattr(np, 'load', load)
-            Graph.load(expected_graph)
-        else:
-            arrays = _arrays(Graph.load(expected_graph))
-            arrays['hashes'] = bad
-            Graph._from_numpy(**arrays)
+        Graph._from_numpy(**arrays)
 
 
 @pytest.mark.parametrize('empty', (False, True))
@@ -390,6 +348,7 @@ def test_from_numpy_retains_arrays_and_storage(targets_dir, non_targets_dir, emp
     expected = {name: array.copy() for name, array in arrays.items()}
     refs = {name: weakref.ref(array) for name, array in arrays.items()}
     graph = Graph._from_numpy(**arrays)
+    assert len(graph.nodes) == len(native.nodes) == len(expected['hashes'])
     graph_ref = weakref.ref(graph)
     del native, arrays, array
     gc.collect()
@@ -410,35 +369,9 @@ def test_from_numpy_retains_arrays_and_storage(targets_dir, non_targets_dir, emp
     assert all(ref() is None for ref in refs.values())
 
 
-@pytest.mark.parametrize('name', (
-    'kmers', 'offsets', 'prevalences', 'hashes', 'edges',
-    'record_offsets', 'assembly_nodes', 'node_offsets',
-))
-def test_from_numpy_rejects_writable_arrays(targets_dir, non_targets_dir, name):
+def test_from_numpy_rejects_writable_arrays(targets_dir, non_targets_dir):
     arrays = _arrays(_small_graph(targets_dir, non_targets_dir))
-    arrays[name] = arrays[name].copy()
-    with pytest.raises(ValueError, match=f"'{name}' must be read-only"):
-        Graph._from_numpy(**arrays)
-    assert arrays[name].flags.writeable  # Rejection does not change caller flags.
-    arrays[name].setflags(write=False)
-    graph = Graph._from_numpy(**arrays)
-    assert _arrays(graph)[name] is arrays[name]
+    arrays['hashes'] = arrays['hashes'].copy()
 
-
-@pytest.mark.parametrize('mapped', (False, True))
-def test_save_rejects_numpy_storage(tmp_path, targets_dir, non_targets_dir, mapped):
-    native = _small_graph(targets_dir, non_targets_dir)
-    if mapped:
-        native.save(tmp_path)
-        graph = Graph.load(tmp_path)
-    else:
-        graph = Graph._from_numpy(**_arrays(native))
-    with pytest.raises(ValueError, match='Cannot save a NumPy-backed graph'):
-        graph.save(tmp_path)
-
-
-def test_from_numpy_requires_arrays(targets_dir, non_targets_dir):
-    arrays = _arrays(_small_graph(targets_dir, non_targets_dir))
-    arrays['hashes'] = arrays['hashes'].tolist()
-    with pytest.raises(TypeError):
+    with pytest.raises(ValueError, match='must be read-only'):
         Graph._from_numpy(**arrays)

@@ -8,6 +8,15 @@ KMER_DTYPE = np.dtype([('pos', np.uint32), ('record_idx', np.uint32)])
 EDGE_DTYPE = np.dtype([('first', np.uintp), ('second', np.uintp), ('weight', np.uintp)])
 
 
+def _arrays(graph):
+    return dict(
+        kmers=graph.nodes.kmers, offsets=graph.nodes.offsets,
+        prevalences=graph.nodes.prevalences, hashes=graph.nodes.hashes,
+        edges=graph.edges, record_offsets=graph.record_offsets,
+        assembly_nodes=graph.assembly_nodes, node_offsets=graph.node_offsets,
+    )
+
+
 def _graph(kmers, offsets, prevalences, edges, record_offsets,
            assembly_nodes, node_offsets, *, hashes=None):
     """Construct a synthetic graph from read-only NumPy arrays."""

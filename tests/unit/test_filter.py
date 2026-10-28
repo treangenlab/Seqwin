@@ -6,7 +6,7 @@ import pytest
 from seqwin.core import FilteredGraph, Signature
 from seqwin.core._native import _filter_native
 
-from _filter_helpers import EDGE_DTYPE, KMER_DTYPE, _filter, _graph, _inputs, _paths
+from _filter_helpers import EDGE_DTYPE, KMER_DTYPE, _arrays, _filter, _graph, _inputs, _paths
 
 
 def _signature_values(signature):
@@ -286,7 +286,6 @@ def test_target_counts_include_non_target_only_nodes_and_exclude_isolated_nodes(
 @pytest.mark.parametrize('mapped', (False, True))
 def test_built_and_numpy_filter_results_match(tmp_path, targets_dir, non_targets_dir, mapped):
     from seqwin.core import Graph
-    from test_build import _arrays
 
     paths = [str(path) for directory in (targets_dir, non_targets_dir)
              for path in sorted(directory.glob('*.fasta'))]

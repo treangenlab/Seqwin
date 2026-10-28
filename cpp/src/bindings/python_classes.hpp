@@ -26,6 +26,10 @@ struct NodesNumpy {
     pybind11::array offsets;
     pybind11::array prevalences;
     pybind11::array hashes;
+
+    std::size_t size() const noexcept {
+        return hashes.size();
+    }
 };
 
 /**
@@ -61,10 +65,16 @@ public:
     /** Return NumPy-backed storage, or nullptr for a native graph. */
     const GraphNumpy* numpy() const noexcept;
 
-    /** Return a non-owning graph view for downstream C++ processing. */
+    /**
+     * Return a unified, non-owning graph view for downstream C++ processing,
+     * independent of the underlying storage backend.
+     */
     GraphView view() const;
 
-    /** Save native graph arrays as NumPy files. */
+    /**
+     * Save a native graph as a directory of NumPy arrays (`.npy` files).
+     * Existing files are overwritten.
+     */
     void save(const pybind11::object& path) const;
 
     /**
@@ -73,7 +83,10 @@ public:
      */
     static GraphPython from_numpy(GraphNumpy arrays);
 
-    /** Load a graph from NumPy files using read-only memory mapping. */
+    /**
+     * Load a graph from NumPy files using read-only memory mapping.
+     * Delegates to `from_numpy()` for array validation and graph construction.
+     */
     static GraphPython load(const pybind11::object& path);
 
 private:

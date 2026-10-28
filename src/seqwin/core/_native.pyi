@@ -22,6 +22,9 @@ _METADATA_NAMES: tuple[str, ...]
 class Nodes:
     """Parallel arrays representing nodes in the final k-mer graph.
     """
+    def __len__(self) -> int:
+        """Number of graph nodes."""
+        ...
     @property
     def kmers(self) -> NDArray[np.void]:
         """K-mer occurrences grouped by node, ordered by record index and position.
@@ -137,10 +140,11 @@ class Graph:
         """Cumulative offsets into `assembly_nodes` by assembly, including the final sentinel."""
         ...
     def save(self, path: str | Path) -> None:
-        """Save a native minimizer graph as a directory of NumPy arrays. Existing files are overwritten.
+        """Save a native graph as a directory of NumPy arrays (`.npy` files).
+        Existing files are overwritten.
 
         Args:
-            path (str | Path): Path to the graph directory.
+            path (str | Path): Existing directory for the graph files.
         """
         ...
     @staticmethod
@@ -155,16 +159,19 @@ class Graph:
         assembly_nodes: NDArray[np.uintp],
         node_offsets: NDArray[np.uintp],
     ) -> Graph:
+        """Construct a graph backed by read-only NumPy arrays.
+        Array contents must remain unchanged during graph operations.
+        """
         ...
     @staticmethod
     def load(path: str | Path) -> Graph:
-        """Load a memory-mapped minimizer graph.
+        """Load a graph from NumPy files using read-only memory mapping.
 
         Args:
-            path (str | Path): Path to the graph directory.
+            path (str | Path): Directory containing the graph's NumPy arrays (`.npy` files).
 
         Returns:
-            Graph: A graph backed by the saved NumPy array files.
+            Graph: A graph backed by read-only NumPy memory maps.
         """
         ...
 

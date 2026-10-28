@@ -48,7 +48,7 @@ def _build_graph(assemblies: Assemblies, config: Config) -> Graph:
     )
 
     logger.info(f' - Found {len(graph.nodes.kmers)} minimizers')
-    logger.info(f' - Found {len(graph.nodes.hashes)} nodes (unique minimizers)')
+    logger.info(f' - Found {len(graph.nodes)} nodes (unique minimizers)')
     logger.info(f' - Found {len(graph.edges)} weighted edges')
 
     print_time_delta(time()-tik)

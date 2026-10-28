@@ -96,7 +96,7 @@ void validate_offsets(
 
 void validate_graph(const seqwin::bindings::GraphNumpy& graph) {
     const auto& nodes = graph.nodes;
-    const auto n_nodes = nodes.hashes.size();
+    const auto n_nodes = nodes.size();
     if (nodes.prevalences.size() != n_nodes) {
         throw std::invalid_argument("Graph arrays 'prevalences' and 'hashes' must have equal lengths");
     }
@@ -252,6 +252,7 @@ GraphPython GraphPython::load(const py::object& path) {
 
 void bind_python_graph(py::module_& module) {
     py::class_<NodesNumpy>(module, "Nodes")
+        .def("__len__", &NodesNumpy::size)
         .def_readonly("kmers", &NodesNumpy::kmers)
         .def_readonly("offsets", &NodesNumpy::offsets)
         .def_readonly("prevalences", &NodesNumpy::prevalences)
