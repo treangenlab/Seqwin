@@ -44,7 +44,7 @@ PYBIND11_MODULE(_native, m) {
     m.attr("_METADATA_NAMES") = std::move(names);
 
     m.def("_filter_native",
-        [](const seqwin::bindings::GraphPy& graph,
+        [](const seqwin::bindings::GraphPython& graph,
            const std::vector<std::string>& assembly_paths,
            NumpyArray<bool> is_targets,
            std::optional<NumpyArray<double>> jaccard,

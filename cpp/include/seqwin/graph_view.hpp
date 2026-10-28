@@ -61,7 +61,7 @@ struct GraphView {
 /**
  * @brief View an owning graph without copying its arrays or transferring ownership.
  *
- * The graph's arrays must remain valid for the lifetime of the view.
+ * The graph's arrays must remain valid and unchanged for the lifetime of the view.
  */
 inline GraphView make_view(const Graph& graph) noexcept
 {

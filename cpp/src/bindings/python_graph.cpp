@@ -17,10 +17,9 @@ namespace py = pybind11;
 namespace {
 
 /**
- * @brief Expose a native C++ array as a read-only, zero-copy NumPy array.
+ * @brief Create a read-only, zero-copy NumPy view of a native array.
  *
- * The NumPy array accesses the original C++ buffer directly and
- * keeps `owner` alive to prevent the buffer from being freed.
+ * It also keeps `owner` alive to prevent the native buffer from being freed.
  */
 template <typename Container>
 py::array to_numpy(
@@ -44,7 +43,7 @@ py::array to_numpy(
  * @brief Create a non-owning C++ array view over a NumPy array.
  */
 template <typename T>
-seqwin::ArrayView<T> numpy_to_view(const py::array& array) {
+seqwin::ArrayView<T> view_numpy(const py::array& array) {
     return {
         static_cast<const T*>(array.data()),
         static_cast<std::size_t>(array.size())
@@ -52,16 +51,10 @@ seqwin::ArrayView<T> numpy_to_view(const py::array& array) {
 }
 
 template <typename T>
-py::array load_numpy(
-    const py::object& directory,
+void validate_numpy(
+    const py::array& array,
     const char* name
 ) {
-    const auto path = directory.attr("joinpath")(std::string(name) + ".npy");
-    py::array array = py::module_::import("numpy").attr("load")(
-        path,
-        py::arg("mmap_mode") = "r",
-        py::arg("allow_pickle") = false
-    ).template cast<py::array>();
     const std::string label = std::string("Graph array '") + name + "'";
 
     if (array.ndim() != 1) {
@@ -79,67 +72,66 @@ py::array load_numpy(
             ", expected " + py::str(py::dtype::of<T>()).cast<std::string>()
         );
     }
-    if (
-        reinterpret_cast<std::uintptr_t>(array.data()) % alignof(T) != 0
-    ) {
+    if (reinterpret_cast<std::uintptr_t>(array.data()) % alignof(T) != 0) {
         throw std::invalid_argument(label + " must be aligned");
     }
-    return array;
+    if (array.writeable()) {
+        throw std::invalid_argument(label + " must be read-only");
+    }
 }
 
 template <typename T>
 void validate_offsets(
-    seqwin::ArrayView<T> offsets,
+    const py::array& offsets,
     const char* name
 ) {
     const std::string label = std::string("Graph array '") + name + "'";
-    if (offsets.empty()) {
+    if (offsets.size() == 0) {
         throw std::invalid_argument(label + " must not be empty");
     }
-    if (offsets[0] != 0) {
+    if (offsets.unchecked<T, 1>()(0) != 0) {
         throw std::invalid_argument(label + " must start at zero");
     }
 }
 
-void validate_graph(const seqwin::GraphView& graph) {
+void validate_graph(const seqwin::bindings::GraphNumpy& graph) {
     const auto& nodes = graph.nodes;
-    const auto n_nodes = nodes.size();
+    const auto n_nodes = nodes.hashes.size();
     if (nodes.prevalences.size() != n_nodes) {
         throw std::invalid_argument("Graph arrays 'prevalences' and 'hashes' must have equal lengths");
     }
     if (nodes.offsets.size() != n_nodes + 1) {
         throw std::invalid_argument("Graph array 'offsets' length must equal n_nodes + 1");
     }
-    validate_offsets(nodes.offsets, "offsets");
-    if (nodes.offsets[n_nodes] != nodes.kmers.size()) {
+    validate_offsets<std::size_t>(nodes.offsets, "offsets");
+    if (nodes.offsets.unchecked<std::size_t, 1>()(n_nodes) != nodes.kmers.size()) {
         throw std::invalid_argument("Graph array 'offsets' must end at len(kmers)");
     }
-    validate_offsets(graph.record_offsets, "record_offsets");
-    validate_offsets(graph.node_offsets, "node_offsets");
+    validate_offsets<std::uint32_t>(graph.record_offsets, "record_offsets");
+    validate_offsets<std::size_t>(graph.node_offsets, "node_offsets");
     if (graph.node_offsets.size() != graph.record_offsets.size()) {
         throw std::invalid_argument("Graph arrays 'node_offsets' and 'record_offsets' must have equal lengths");
     }
     const auto n_assemblies = graph.node_offsets.size() - 1;
-    if (graph.node_offsets[n_assemblies] != graph.assembly_nodes.size()) {
+    if (graph.node_offsets.unchecked<std::size_t, 1>()(n_assemblies) != graph.assembly_nodes.size()) {
         throw std::invalid_argument("Graph array 'node_offsets' must end at len(assembly_nodes)");
     }
 }
 
 /**
- * @brief Expose a native or memory-mapped graph array as a NumPy array.
+ * @brief Expose a native or NumPy-backed array to Python.
  *
- * Return the original NumPy memmap for mapped storage,
- * or a read-only, zero-copy NumPy array for native storage.
+ * Return a NumPy view for native storage, or the original NumPy array for NumPy-backed storage.
  */
 template <typename Container>
-py::array expose_array(
+py::array to_python(
     const py::object& owner,
     Container seqwin::Graph::* native_member,
-    py::array seqwin::bindings::GraphMemmap::* memmap_member
+    py::array seqwin::bindings::GraphNumpy::* numpy_member
 ) {
-    const auto& graph = owner.cast<const seqwin::bindings::GraphPy&>();
-    if (const auto* memmap = graph.memmap()) {
-        return memmap->*memmap_member;
+    const auto& graph = owner.cast<const seqwin::bindings::GraphPython&>();
+    if (const auto* numpy = graph.numpy()) {
+        return numpy->*numpy_member;
     }
     return to_numpy(graph.native()->*native_member, owner);
 }
@@ -153,38 +145,38 @@ constexpr const char* graph_array_names[] = {
 
 namespace seqwin::bindings {
 
-GraphView make_view(const GraphMemmap& graph) {
+GraphView make_view(const GraphNumpy& graph) {
     return {
         {
-            numpy_to_view<Kmer>(graph.nodes.kmers),
-            numpy_to_view<std::size_t>(graph.nodes.offsets),
-            numpy_to_view<std::uint32_t>(graph.nodes.prevalences),
-            numpy_to_view<std::uint64_t>(graph.nodes.hashes)
+            view_numpy<Kmer>(graph.nodes.kmers),
+            view_numpy<std::size_t>(graph.nodes.offsets),
+            view_numpy<std::uint32_t>(graph.nodes.prevalences),
+            view_numpy<std::uint64_t>(graph.nodes.hashes)
         },
-        numpy_to_view<Edge>(graph.edges),
-        numpy_to_view<std::uint32_t>(graph.record_offsets),
-        numpy_to_view<std::size_t>(graph.assembly_nodes),
-        numpy_to_view<std::size_t>(graph.node_offsets)
+        view_numpy<Edge>(graph.edges),
+        view_numpy<std::uint32_t>(graph.record_offsets),
+        view_numpy<std::size_t>(graph.assembly_nodes),
+        view_numpy<std::size_t>(graph.node_offsets)
     };
 }
 
-GraphPy::GraphPy(Graph&& graph)
+GraphPython::GraphPython(Graph&& graph)
     : storage_(std::move(graph))
 {}
 
-GraphPy::GraphPy(GraphMemmap&& graph)
+GraphPython::GraphPython(GraphNumpy&& graph)
     : storage_(std::move(graph))
 {}
 
-const Graph* GraphPy::native() const noexcept {
+const Graph* GraphPython::native() const noexcept {
     return std::get_if<Graph>(&storage_);
 }
 
-const GraphMemmap* GraphPy::memmap() const noexcept {
-    return std::get_if<GraphMemmap>(&storage_);
+const GraphNumpy* GraphPython::numpy() const noexcept {
+    return std::get_if<GraphNumpy>(&storage_);
 }
 
-GraphView GraphPy::view() const {
+GraphView GraphPython::view() const {
     return std::visit(
         [](const auto& graph) {
             return make_view(graph);
@@ -193,9 +185,9 @@ GraphView GraphPy::view() const {
     );
 }
 
-void GraphPy::save(const py::object& path) const {
-    if (memmap()) {
-        throw std::invalid_argument("Cannot save a memory-mapped graph");
+void GraphPython::save(const py::object& path) const {
+    if (numpy()) {
+        throw std::invalid_argument("Cannot save a NumPy-backed graph");
     }
     const auto directory = py::module_::import("pathlib").attr("Path")(path);
     const auto& graph = *native();
@@ -220,33 +212,53 @@ void GraphPy::save(const py::object& path) const {
     }
 }
 
-GraphPy GraphPy::load(const py::object& path) {
+GraphPython GraphPython::from_numpy(GraphNumpy graph) {
+    validate_numpy<Kmer>(graph.nodes.kmers, "kmers");
+    validate_numpy<std::size_t>(graph.nodes.offsets, "offsets");
+    validate_numpy<std::uint32_t>(graph.nodes.prevalences, "prevalences");
+    validate_numpy<std::uint64_t>(graph.nodes.hashes, "hashes");
+    validate_numpy<Edge>(graph.edges, "edges");
+    validate_numpy<std::uint32_t>(graph.record_offsets, "record_offsets");
+    validate_numpy<std::size_t>(graph.assembly_nodes, "assembly_nodes");
+    validate_numpy<std::size_t>(graph.node_offsets, "node_offsets");
+
+    validate_graph(graph);
+    return GraphPython{std::move(graph)};
+}
+
+GraphPython GraphPython::load(const py::object& path) {
     const auto directory = py::module_::import("pathlib").attr("Path")(path);
-    GraphMemmap graph{
-        {
-            load_numpy<Kmer>(directory, "kmers"),
-            load_numpy<std::size_t>(directory, "offsets"),
-            load_numpy<std::uint32_t>(directory, "prevalences"),
-            load_numpy<std::uint64_t>(directory, "hashes")
-        },
-        load_numpy<Edge>(directory, "edges"),
-        load_numpy<std::uint32_t>(directory, "record_offsets"),
-        load_numpy<std::size_t>(directory, "assembly_nodes"),
-        load_numpy<std::size_t>(directory, "node_offsets")
+    const auto numpy_load = py::module_::import("numpy").attr("load");
+    const auto load = [&](const char* name) {
+        return numpy_load(
+            directory.attr("joinpath")(std::string(name) + ".npy"),
+            py::arg("mmap_mode") = "r",
+            py::arg("allow_pickle") = false
+        ).cast<py::array>();
     };
-    validate_graph(make_view(graph));
-    return GraphPy(std::move(graph));
+    return GraphPython::from_numpy({
+        {
+            load("kmers"),
+            load("offsets"),
+            load("prevalences"),
+            load("hashes")
+        },
+        load("edges"),
+        load("record_offsets"),
+        load("assembly_nodes"),
+        load("node_offsets")
+    });
 }
 
 void bind_python_graph(py::module_& module) {
-    py::class_<NodesPy>(module, "Nodes")
-        .def_readonly("kmers", &NodesPy::kmers)
-        .def_readonly("offsets", &NodesPy::offsets)
-        .def_readonly("prevalences", &NodesPy::prevalences)
-        .def_readonly("hashes", &NodesPy::hashes)
+    py::class_<NodesNumpy>(module, "Nodes")
+        .def_readonly("kmers", &NodesNumpy::kmers)
+        .def_readonly("offsets", &NodesNumpy::offsets)
+        .def_readonly("prevalences", &NodesNumpy::prevalences)
+        .def_readonly("hashes", &NodesNumpy::hashes)
         .attr("__module__") = public_module;
 
-    py::class_<GraphPy>(module, "Graph")
+    py::class_<GraphPython>(module, "Graph")
         .def(py::init(
             [](const py::sequence& assembly_paths,
                std::size_t kmerlen,
@@ -264,7 +276,7 @@ void bind_python_graph(py::module_& module) {
                     py::gil_scoped_release release;
                     graph = build(paths, kmerlen, windowsize, n_cpu, low_memory);
                 }
-                return GraphPy(std::move(graph));
+                return GraphPython(std::move(graph));
             }),
             py::arg("assembly_paths"),
             py::arg("kmerlen"),
@@ -273,12 +285,12 @@ void bind_python_graph(py::module_& module) {
             py::arg("low_memory") = false
         )
         .def_property_readonly("nodes", [](py::object self) {
-            const auto& graph = self.cast<const GraphPy&>();
-            if (const auto* memmap = graph.memmap()) {
-                return memmap->nodes;
+            const auto& graph = self.cast<const GraphPython&>();
+            if (const auto* numpy = graph.numpy()) {
+                return numpy->nodes;
             }
             const auto& nodes = graph.native()->nodes;
-            return NodesPy{
+            return NodesNumpy{
                 to_numpy(nodes.kmers, self),
                 to_numpy(nodes.offsets, self),
                 to_numpy(nodes.prevalences, self),
@@ -286,19 +298,52 @@ void bind_python_graph(py::module_& module) {
             };
         })
         .def_property_readonly("edges", [](py::object self) {
-            return expose_array(self, &Graph::edges, &GraphMemmap::edges);
+            return to_python(self, &Graph::edges, &GraphNumpy::edges);
         })
         .def_property_readonly("record_offsets", [](py::object self) {
-            return expose_array(self, &Graph::record_offsets, &GraphMemmap::record_offsets);
+            return to_python(self, &Graph::record_offsets, &GraphNumpy::record_offsets);
         })
         .def_property_readonly("assembly_nodes", [](py::object self) {
-            return expose_array(self, &Graph::assembly_nodes, &GraphMemmap::assembly_nodes);
+            return to_python(self, &Graph::assembly_nodes, &GraphNumpy::assembly_nodes);
         })
         .def_property_readonly("node_offsets", [](py::object self) {
-            return expose_array(self, &Graph::node_offsets, &GraphMemmap::node_offsets);
+            return to_python(self, &Graph::node_offsets, &GraphNumpy::node_offsets);
         })
-        .def("save", &GraphPy::save, py::arg("path"))
-        .def_static("load", &GraphPy::load, py::arg("path"))
+        .def("save", &GraphPython::save, py::arg("path"))
+        .def_static("_from_numpy",
+            [](py::array kmers,
+               py::array offsets,
+               py::array prevalences,
+               py::array hashes,
+               py::array edges,
+               py::array record_offsets,
+               py::array assembly_nodes,
+               py::array node_offsets
+            ) {
+                return GraphPython::from_numpy({
+                    {
+                        std::move(kmers),
+                        std::move(offsets),
+                        std::move(prevalences),
+                        std::move(hashes)
+                    },
+                    std::move(edges),
+                    std::move(record_offsets),
+                    std::move(assembly_nodes),
+                    std::move(node_offsets)
+                });
+            },
+            py::kw_only(),
+            py::arg("kmers").noconvert(),
+            py::arg("offsets").noconvert(),
+            py::arg("prevalences").noconvert(),
+            py::arg("hashes").noconvert(),
+            py::arg("edges").noconvert(),
+            py::arg("record_offsets").noconvert(),
+            py::arg("assembly_nodes").noconvert(),
+            py::arg("node_offsets").noconvert()
+        )
+        .def_static("load", &GraphPython::load, py::arg("path"))
         .attr("__module__") = public_module;
 }
 

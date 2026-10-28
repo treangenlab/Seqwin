@@ -13,12 +13,15 @@ namespace seqwin::bindings {
 inline constexpr char public_module[] = "seqwin.core";
 
 /**
- * @brief NumPy node arrays exposed through the Python graph API.
+ * @brief NumPy arrays representing graph nodes.
  *
- * For native graphs, they are read-only, zero-copy views of the native buffers.
- * For memory-mapped graphs, they are the original NumPy memmaps.
+ * Serves two roles:
+ * 1. Node storage within `GraphNumpy`.
+ * 2. Python-exposed `Nodes` class for both storage backends.
+ * For native storage, arrays are NumPy views of native buffers.
+ * For NumPy-backed storage, they reference the original NumPy arrays.
  */
-struct NodesPy {
+struct NodesNumpy {
     pybind11::array kmers;
     pybind11::array offsets;
     pybind11::array prevalences;
@@ -26,10 +29,12 @@ struct NodesPy {
 };
 
 /**
- * @brief Read-only memory-mapped NumPy arrays backing a graph.
+ * @brief Graph storage backed by user-provided, read-only NumPy arrays.
+ *
+ * Arrays may be ordinary arrays or memory-mapped arrays.
  */
-struct GraphMemmap {
-    NodesPy nodes;
+struct GraphNumpy {
+    NodesNumpy nodes;
     pybind11::array edges;
     pybind11::array record_offsets;
     pybind11::array assembly_nodes;
@@ -37,25 +42,24 @@ struct GraphMemmap {
 };
 
 /**
- * @brief View a memory-mapped graph without copying its arrays.
+ * @brief View a NumPy-backed graph without copying its arrays.
  *
- * The graph's memory maps must remain valid for the lifetime of the view.
+ * The graph's arrays must remain valid and unchanged for the lifetime of the view.
  */
-GraphView make_view(const GraphMemmap& graph);
+GraphView make_view(const GraphNumpy& graph);
 
 /**
- * @brief Provide the Python-facing graph over native or memory-mapped storage.
+ * @brief Provide the Python-facing graph over native or NumPy-backed storage.
  */
-class GraphPy {
+class GraphPython {
 public:
-    explicit GraphPy(Graph&& graph);
-    explicit GraphPy(GraphMemmap&& graph);
+    explicit GraphPython(Graph&& graph);
 
-    /** Return native storage, or nullptr for a memory-mapped graph. */
+    /** Return native storage, or nullptr for a NumPy-backed graph. */
     const Graph* native() const noexcept;
 
-    /** Return memory-mapped storage, or nullptr for a native graph. */
-    const GraphMemmap* memmap() const noexcept;
+    /** Return NumPy-backed storage, or nullptr for a native graph. */
+    const GraphNumpy* numpy() const noexcept;
 
     /** Return a non-owning graph view for downstream C++ processing. */
     GraphView view() const;
@@ -63,11 +67,18 @@ public:
     /** Save native graph arrays as NumPy files. */
     void save(const pybind11::object& path) const;
 
-    /** Load a graph backed by read-only NumPy memory maps. */
-    static GraphPy load(const pybind11::object& path);
+    /**
+     * Construct a graph backed by read-only NumPy arrays.
+     * Validates array metadata, read-only status, and basic graph invariants.
+     */
+    static GraphPython from_numpy(GraphNumpy arrays);
+
+    /** Load a graph from NumPy files using read-only memory mapping. */
+    static GraphPython load(const pybind11::object& path);
 
 private:
-    std::variant<Graph, GraphMemmap> storage_;
+    explicit GraphPython(GraphNumpy&& graph);
+    std::variant<Graph, GraphNumpy> storage_;
 };
 
 void bind_python_graph(pybind11::module_& module);

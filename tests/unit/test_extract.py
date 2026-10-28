@@ -28,7 +28,6 @@ def _extract_signature(tmp_path, *, target_records, edge_data):
         assembly_nodes.extend(i for i, node_hash in enumerate(hashes) if node_hash in present)
         node_offsets.append(len(assembly_nodes))
     graph = _graph(
-        tmp_path,
         kmers=np.array(kmers, dtype=KMER_DTYPE),
         offsets=np.array([*offsets, len(kmers)], dtype=np.uintp),
         prevalences=np.array(prevalences, dtype=np.uint32),
@@ -118,7 +117,7 @@ def test_signature_extraction_rejects_invalid_final_node_range(tmp_path, final_s
     assembly_nodes = np.array([0, 1, 2, 3, 0, 1, 2, 2, 2], dtype=np.uintp)
     node_offsets = np.array([0, 4, 7, 8, 9], dtype=np.uintp)
 
-    graph = _graph(tmp_path, kmers, offsets, prevalences, edges, record_offsets, assembly_nodes, node_offsets)
+    graph = _graph(kmers, offsets, prevalences, edges, record_offsets, assembly_nodes, node_offsets)
     with pytest.raises(ValueError, match=message):
         _filter_native(
             graph, _paths(tmp_path), targets, None, 5, 10, 2.0, 5, 0, None,
@@ -137,7 +136,6 @@ def test_native_csv_escaping_and_fasta_wrapping(tmp_path, record_id):
     fasta_path = tmp_path / 'signatures.fasta'
     csv_path = tmp_path / 'signatures.csv'
     graph = _graph(
-        tmp_path,
         kmers,
         offsets,
         prevalences,

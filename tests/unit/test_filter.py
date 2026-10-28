@@ -35,7 +35,7 @@ def _filter_distinct_weights(tmp_path, edge_weight_th):
     targets = np.array([True, True, True, True, False], dtype=np.bool_)
     edge_w_th_mul = np.nextafter(edge_weight_th / 2.8, np.inf)
     graph = _graph(
-        tmp_path, kmers, offsets, prevalences, edges, record_offsets, assembly_nodes, node_offsets,
+        kmers, offsets, prevalences, edges, record_offsets, assembly_nodes, node_offsets,
     )
     return _filter_native(
         graph,
@@ -166,7 +166,6 @@ def _filter_target_support(tmp_path, support, edge_data, total_tar, n_cpu):
     # The integer pruning threshold is 1; weight-1 edges must be rejected.
     edge_w_th_mul = 1.5 / ((1.0 - .9) * total_tar)
     graph = _graph(
-        tmp_path,
         np.array(kmers, dtype=KMER_DTYPE),
         np.array([*offsets, len(kmers)], dtype=np.uintp),
         np.array(prevalences, dtype=np.uint32),
@@ -211,7 +210,7 @@ def test_original_indices_are_preserved_after_isolated_node_removal(tmp_path):
     assembly_nodes = np.array([0, 1, 2, 3, 0, 1, 2, 2, 2], dtype=np.uintp)
     node_offsets = np.array([0, 4, 7, 8, 9], dtype=np.uintp)
     graph = _graph(
-        tmp_path, kmers, offsets, prevalences, edges, record_offsets, assembly_nodes, node_offsets,
+        kmers, offsets, prevalences, edges, record_offsets, assembly_nodes, node_offsets,
     )
     result = _filter_native(
         graph,
@@ -270,7 +269,7 @@ def test_target_counts_include_non_target_only_nodes_and_exclude_isolated_nodes(
     offsets = np.append(offsets, np.uintp(len(kmers)))
     prevalences = np.append(prevalences, np.uint32(2))
     graph = _graph(
-        tmp_path, kmers, offsets, prevalences, edges, record_offsets, assembly_nodes, node_offsets,
+        kmers, offsets, prevalences, edges, record_offsets, assembly_nodes, node_offsets,
     )
     filtered, _ = _filter_native(
         graph,
@@ -284,14 +283,22 @@ def test_target_counts_include_non_target_only_nodes_and_exclude_isolated_nodes(
     assert filtered.edges.tolist() == [(0, 1, 1), (1, 2, 1), (2, 4, 1)]
 
 
-def test_built_and_mapped_filter_results_match(tmp_path, targets_dir, non_targets_dir):
+@pytest.mark.parametrize('mapped', (False, True))
+def test_built_and_numpy_filter_results_match(tmp_path, targets_dir, non_targets_dir, mapped):
     from seqwin.core import Graph
+    from test_build import _arrays
 
     paths = [str(path) for directory in (targets_dir, non_targets_dir)
              for path in sorted(directory.glob('*.fasta'))]
     graph = Graph(paths, 17, 10)
-    graph.save(tmp_path)
-    loaded = Graph.load(tmp_path)
+    if mapped:
+        graph.save(tmp_path)
+        loaded = Graph.load(tmp_path)
+    else:
+        arrays = {name: array.copy() for name, array in _arrays(graph).items()}
+        for array in arrays.values():
+            array.setflags(write=False)
+        loaded = Graph._from_numpy(**arrays)
     targets = np.array([True, True, False, False], dtype=np.bool_)
     results = [
         _filter_native(
@@ -302,15 +309,15 @@ def test_built_and_mapped_filter_results_match(tmp_path, targets_dir, non_target
         )
         for value in (graph, loaded)
     ]
-    original, mapped = results
-    np.testing.assert_array_equal(original[0].nodes, mapped[0].nodes)
-    np.testing.assert_array_equal(original[0].edges, mapped[0].edges)
-    assert original[0].subgraphs == mapped[0].subgraphs
+    original, numpy_backed = results
+    np.testing.assert_array_equal(original[0].nodes, numpy_backed[0].nodes)
+    np.testing.assert_array_equal(original[0].edges, numpy_backed[0].edges)
+    assert original[0].subgraphs == numpy_backed[0].subgraphs
     assert original[1]
-    assert list(map(_signature_values, original[1])) == list(map(_signature_values, mapped[1]))
+    assert list(map(_signature_values, original[1])) == list(map(_signature_values, numpy_backed[1]))
     for name in ('total_tar', 'total_neg', 'e_absence_tar', 'e_presence_neg',
                  'penalty_th', 'edge_weight_th', 'min_nodes', 'max_nodes'):
-        assert getattr(original[0], name) == getattr(mapped[0], name)
+        assert getattr(original[0], name) == getattr(numpy_backed[0], name)
 
 
 def test_filter_rejects_unaligned_jaccard(tmp_path):

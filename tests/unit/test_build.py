@@ -245,6 +245,7 @@ def test_graph_array_ownership_and_readonly(tmp_path, targets_dir, non_targets_d
         mapped_arrays = {}
 
         def load(path, **kwargs):
+            assert kwargs == dict(mmap_mode='r', allow_pickle=False)
             array = original_load(path, **kwargs)
             mapped_arrays[Path(path).stem] = array
             return array
@@ -329,7 +330,8 @@ def test_empty_graph_round_trip(tmp_path, low_memory):
     ('kmers', np.zeros(9, dtype={'names': ['pos', 'record_idx'], 'formats': ['u4', 'u4'],
                                 'offsets': [0, 8], 'itemsize': 12}), 'has dtype'),
 ))
-def test_load_rejects_unsafe_array_metadata(tmp_path, name, array, message):
+@pytest.mark.parametrize('mapped', (False, True))
+def test_graph_rejects_unsafe_array_metadata(tmp_path, name, array, message, mapped):
     from _filter_helpers import _inputs
 
     kmers, offsets, prevalences, edges, record_offsets, _ = _inputs()
@@ -342,11 +344,17 @@ def test_load_rejects_unsafe_array_metadata(tmp_path, name, array, message):
     )
     arrays[name] = array
     with pytest.raises(ValueError, match=message):
-        _graph(tmp_path, **arrays)
+        if mapped:
+            for name, array in arrays.items():
+                np.save(tmp_path / f'{name}.npy', array, allow_pickle=False)
+            Graph.load(tmp_path)
+        else:
+            _graph(**arrays)
 
 
 @pytest.mark.parametrize('layout', ('strided', 'unaligned'))
-def test_load_rejects_unsafe_numpy_layout(monkeypatch, expected_graph, layout):
+@pytest.mark.parametrize('mapped', (False, True))
+def test_graph_rejects_unsafe_numpy_layout(monkeypatch, expected_graph, layout, mapped):
     original_load = np.load
     if layout == 'strided':
         bad = np.zeros(8, dtype=np.uint64)[::2]
@@ -358,6 +366,79 @@ def test_load_rejects_unsafe_numpy_layout(monkeypatch, expected_graph, layout):
     def load(path, **kwargs):
         return bad if Path(path).stem == 'hashes' else original_load(path, **kwargs)
 
-    monkeypatch.setattr(np, 'load', load)
+    bad.setflags(write=False)
     with pytest.raises(ValueError, match=message):
-        Graph.load(expected_graph)
+        if mapped:
+            monkeypatch.setattr(np, 'load', load)
+            Graph.load(expected_graph)
+        else:
+            arrays = _arrays(Graph.load(expected_graph))
+            arrays['hashes'] = bad
+            Graph._from_numpy(**arrays)
+
+
+@pytest.mark.parametrize('empty', (False, True))
+def test_from_numpy_retains_arrays_and_storage(targets_dir, non_targets_dir, empty):
+    import gc
+    import weakref
+
+    native = Graph([], 7, 10) if empty else _small_graph(targets_dir, non_targets_dir)
+    # Views also exercise retention of a NumPy base object after input deletion.
+    arrays = {name: array.copy().view() for name, array in _arrays(native).items()}
+    for array in arrays.values():
+        array.setflags(write=False)
+    expected = {name: array.copy() for name, array in arrays.items()}
+    refs = {name: weakref.ref(array) for name, array in arrays.items()}
+    graph = Graph._from_numpy(**arrays)
+    graph_ref = weakref.ref(graph)
+    del native, arrays, array
+    gc.collect()
+    returned = _arrays(graph)
+    for name, array in returned.items():
+        assert array is refs[name]()
+        assert array is _arrays(graph)[name]
+        assert not array.flags.writeable
+        if array.size:
+            assert np.shares_memory(array, array.base)
+    del graph
+    gc.collect()
+    assert graph_ref() is None
+    for name, array in returned.items():
+        np.testing.assert_array_equal(array, expected[name])
+    del returned, array
+    gc.collect()
+    assert all(ref() is None for ref in refs.values())
+
+
+@pytest.mark.parametrize('name', (
+    'kmers', 'offsets', 'prevalences', 'hashes', 'edges',
+    'record_offsets', 'assembly_nodes', 'node_offsets',
+))
+def test_from_numpy_rejects_writable_arrays(targets_dir, non_targets_dir, name):
+    arrays = _arrays(_small_graph(targets_dir, non_targets_dir))
+    arrays[name] = arrays[name].copy()
+    with pytest.raises(ValueError, match=f"'{name}' must be read-only"):
+        Graph._from_numpy(**arrays)
+    assert arrays[name].flags.writeable  # Rejection does not change caller flags.
+    arrays[name].setflags(write=False)
+    graph = Graph._from_numpy(**arrays)
+    assert _arrays(graph)[name] is arrays[name]
+
+
+@pytest.mark.parametrize('mapped', (False, True))
+def test_save_rejects_numpy_storage(tmp_path, targets_dir, non_targets_dir, mapped):
+    native = _small_graph(targets_dir, non_targets_dir)
+    if mapped:
+        native.save(tmp_path)
+        graph = Graph.load(tmp_path)
+    else:
+        graph = Graph._from_numpy(**_arrays(native))
+    with pytest.raises(ValueError, match='Cannot save a NumPy-backed graph'):
+        graph.save(tmp_path)
+
+
+def test_from_numpy_requires_arrays(targets_dir, non_targets_dir):
+    arrays = _arrays(_small_graph(targets_dir, non_targets_dir))
+    arrays['hashes'] = arrays['hashes'].tolist()
+    with pytest.raises(TypeError):
+        Graph._from_numpy(**arrays)

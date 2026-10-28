@@ -137,11 +137,24 @@ class Graph:
         """Cumulative offsets into `assembly_nodes` by assembly, including the final sentinel."""
         ...
     def save(self, path: str | Path) -> None:
-        """Save the minimizer graph as a directory of NumPy arrays. Existing files are overwritten.
+        """Save a native minimizer graph as a directory of NumPy arrays. Existing files are overwritten.
 
         Args:
             path (str | Path): Path to the graph directory.
         """
+        ...
+    @staticmethod
+    def _from_numpy(
+        *,
+        kmers: NDArray[np.void],
+        offsets: NDArray[np.uintp],
+        prevalences: NDArray[np.uint32],
+        hashes: NDArray[np.uint64],
+        edges: NDArray[np.void],
+        record_offsets: NDArray[np.uint32],
+        assembly_nodes: NDArray[np.uintp],
+        node_offsets: NDArray[np.uintp],
+    ) -> Graph:
         ...
     @staticmethod
     def load(path: str | Path) -> Graph:

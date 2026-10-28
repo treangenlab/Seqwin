@@ -1,6 +1,3 @@
-from pathlib import Path
-from tempfile import mkdtemp
-
 import numpy as np
 
 from seqwin.core import Graph
@@ -11,10 +8,9 @@ KMER_DTYPE = np.dtype([('pos', np.uint32), ('record_idx', np.uint32)])
 EDGE_DTYPE = np.dtype([('first', np.uintp), ('second', np.uintp), ('weight', np.uintp)])
 
 
-def _graph(tmp_path, kmers, offsets, prevalences, edges, record_offsets,
+def _graph(kmers, offsets, prevalences, edges, record_offsets,
            assembly_nodes, node_offsets, *, hashes=None):
-    """Load synthetic arrays using the public eight-file persistence interface."""
-    path = Path(mkdtemp(dir=tmp_path, prefix='graph-'))
+    """Construct a synthetic graph from read-only NumPy arrays."""
     if hashes is None:
         hashes = np.arange(len(prevalences), dtype=np.uint64)
     arrays = dict(
@@ -22,9 +18,9 @@ def _graph(tmp_path, kmers, offsets, prevalences, edges, record_offsets,
         edges=edges, record_offsets=record_offsets, assembly_nodes=assembly_nodes,
         node_offsets=node_offsets,
     )
-    for name, array in arrays.items():
-        np.save(path / f'{name}.npy', array, allow_pickle=False)
-    return Graph.load(path)
+    for array in arrays.values():
+        array.setflags(write=False)
+    return Graph._from_numpy(**arrays)
 
 
 def _paths(tmp_path, n_assemblies=4, *, sequence_length=12):
@@ -66,7 +62,7 @@ def _filter(tmp_path, *, penalty_th=0.3, jaccard=None, n_cpu=1, targets=None,
     assembly_nodes = np.array([0, 1, 2, 3, 0, 1, 2, 2, 2], dtype=np.uintp)
     node_offsets = np.array([0, 4, 7, 8, 9], dtype=np.uintp)
     graph = _graph(
-        tmp_path, kmers, offsets, prevalences, edges, record_offsets, assembly_nodes, node_offsets,
+        kmers, offsets, prevalences, edges, record_offsets, assembly_nodes, node_offsets,
     )
     result = _filter_native(
         graph,
