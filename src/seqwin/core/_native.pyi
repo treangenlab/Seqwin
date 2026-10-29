@@ -54,11 +54,17 @@ class Graph:
     >>> graph = Graph(
     ...     assembly_paths = ['asm1.fasta', 'asm2.fasta'],
     ...     kmerlen = 21,
-    ...     windowsize = 200,
-    ...     n_cpu = 4,
-    ...     low_memory = False
+    ...     windowsize = 200
     ... )
+    >>> graph_dir = Path('graph')
+    >>> graph_dir.mkdir(exist_ok=True)
+    >>> graph.save(graph_dir)
+    >>> loaded = Graph.load(graph_dir)
+    >>> len(loaded.nodes) == len(graph.nodes)
+    True
     ```
+    `Graph.save()` writes the native graph to NumPy `.npy` files in an existing directory.
+    `Graph.load()` loads these files using read-only memory mapping.
 
     Nodes:
         Each node represents a unique k-mer hash. Nodes are ordered by ascending hash.
@@ -159,8 +165,10 @@ class Graph:
         assembly_nodes: NDArray[np.uintp],
         node_offsets: NDArray[np.uintp],
     ) -> Graph:
-        """Construct a graph backed by read-only NumPy arrays.
-        Array contents must remain unchanged during graph operations.
+        """Construct a graph backed by NumPy arrays without copying.
+
+        Input arrays may be writable, but they are treated as read-only.
+        Callers must not modify their contents while the graph is in use.
         """
         ...
     @staticmethod

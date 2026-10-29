@@ -1,3 +1,5 @@
+#include "bindings/python_bindings.hpp"
+
 #include <cstdint>
 #include <optional>
 #include <stdexcept>
@@ -15,20 +17,9 @@
 
 namespace py = pybind11;
 
-namespace {
-
-template <typename T>
-using NumpyArray = py::array_t<T, py::array::c_style>;
-
-template <typename Array>
-std::size_t require_1d_size(const Array& array, const char* name) {
-    if (array.ndim() != 1) {
-        throw std::invalid_argument(std::string(name) + " must be one-dimensional");
-    }
-    return static_cast<std::size_t>(array.shape(0));
-}
-
-}  // namespace
+using seqwin::bindings::NumpyArray;
+using seqwin::bindings::validate_numpy;
+using seqwin::bindings::view_numpy;
 
 PYBIND11_MODULE(_native, m) {
     PYBIND11_NUMPY_DTYPE(seqwin::Kmer, pos, record_idx);
@@ -64,9 +55,8 @@ PYBIND11_MODULE(_native, m) {
            const std::optional<std::string>& csv_path
         ) {
             const auto graph_view = graph.view();
-            const seqwin::ArrayView<bool> is_targets_view(
-                is_targets.data(), require_1d_size(is_targets, "is_targets")
-            );
+            validate_numpy<bool>(is_targets, "is_targets");
+            const auto is_targets_view = view_numpy<bool>(is_targets);
 
             const double* jaccard_ptr = nullptr;
             std::size_t jaccard_rows = 0;

@@ -233,6 +233,13 @@ def test_filtered_arrays_keep_native_owner_alive(tmp_path):
     edges = filtered.edges
     assert nodes.base is filtered
     assert edges.base is filtered
+    for array, repeated in ((nodes, filtered.nodes), (edges, filtered.edges)):
+        assert np.shares_memory(array, repeated)
+        assert not array.flags.writeable
+        with pytest.raises(ValueError):
+            array.setflags(write=True)
+        with pytest.raises(ValueError):
+            array[0] = array[0]
     del filtered
     np.testing.assert_array_equal(nodes['idx'], [0, 1, 2, 3])
     assert edges.tolist() == [(0, 1, 1), (1, 2, 1), (2, 3, 1)]
