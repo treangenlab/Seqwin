@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
@@ -13,6 +14,11 @@
 namespace py = pybind11;
 
 namespace seqwin::bindings {
+
+/**
+ * @brief Normalize a sequence of paths using Python's `os.fspath()` protocol.
+ */
+std::vector<std::string> normalize_paths(const py::handle& assembly_paths);
 
 template <typename T>
 using NumpyArray = py::array_t<T, py::array::c_style>;

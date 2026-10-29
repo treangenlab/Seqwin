@@ -206,11 +206,7 @@ void bind_python_graph(py::module_& module) {
                std::size_t n_cpu,
                bool low_memory
             ) {
-                std::vector<std::string> paths;
-                paths.reserve(assembly_paths.size());
-                for (const auto& path : assembly_paths) {
-                    paths.push_back(py::str(path).cast<std::string>());
-                }
+                const auto paths = normalize_paths(assembly_paths);
                 Graph graph;
                 {
                     py::gil_scoped_release release;

@@ -5,6 +5,7 @@ Classes:
 --------
 - Graph
 - Nodes
+- AssemblyPaths
 - FilteredGraph
 - SubgraphLoc
 - Signature
@@ -183,6 +184,18 @@ class Graph:
         """
         ...
 
+class AssemblyPaths:
+    """A reusable collection of assembly paths for native C++ calls.
+
+    Paths are normalized using `os.fspath()` and stored as C++ strings, avoiding repeated conversions.
+    """
+    def __init__(self, assembly_paths: Sequence[str | Path]) -> None:
+        """Normalize and store assembly paths for native C++ calls."""
+        ...
+    def __len__(self) -> int:
+        """Number of assembly paths."""
+        ...
+
 class FilteredGraph:
     """Includes filtered graph arrays, low-penalty subgraphs, and calculated values.
 
@@ -293,10 +306,9 @@ class Signature:
         """Number of target assemblies containing the representative."""
         ...
 
-
 def _filter_native(
     graph: Graph,
-    assembly_paths: Sequence[str],
+    assembly_paths: Sequence[str | Path] | AssemblyPaths,
     is_targets: NDArray[np.bool_],
     jaccard: NDArray[np.float64] | None,
     kmerlen: int,

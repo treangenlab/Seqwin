@@ -1,9 +1,10 @@
 import pickle
+from pathlib import Path
 
 import numpy as np
 import pytest
 
-from seqwin.core import FilteredGraph, Signature
+from seqwin.core import AssemblyPaths, FilteredGraph, Signature
 from seqwin.core._native import _filter_native
 
 from _filter_helpers import EDGE_DTYPE, KMER_DTYPE, _arrays, _filter, _graph, _inputs, _paths
@@ -330,3 +331,71 @@ def test_filter_rejects_unaligned_jaccard(tmp_path):
     jaccard = np.ndarray((4, 4), dtype=np.float64, buffer=bytearray(129), offset=1)
     with pytest.raises(ValueError, match='aligned'):
         _filter(tmp_path, jaccard=jaccard)
+
+
+class _CountingPath:
+    def __init__(self, path):
+        self.path = path
+        self.calls = 0
+
+    def __fspath__(self):
+        self.calls += 1
+        return self.path
+
+    def __str__(self):
+        raise AssertionError('Paths must use __fspath__, not __str__')
+
+
+def _assembly_path_graph():
+    kmers, offsets, prevalences, edges, record_offsets, _ = _inputs()
+    return _graph(
+        kmers, offsets, prevalences, edges, record_offsets,
+        np.array([0, 1, 2, 3, 0, 1, 2, 2, 2], dtype=np.uintp),
+        np.array([0, 4, 7, 8, 9], dtype=np.uintp),
+    )
+
+
+def _filter_assembly_paths(paths, targets=None, **output_paths):
+    if targets is None:
+        targets = _inputs()[-1]
+    return _filter_native(
+        _assembly_path_graph(), paths, targets,
+        None, 5, 10, .9, 5, 0, None, .2, 0, 1, None, 1.5, 1, **output_paths,
+    )
+
+
+def test_filter_accepts_assembly_paths(tmp_path):
+    paths = _paths(tmp_path)
+    for i, path in enumerate(paths):
+        Path(path).write_text(f'>record-{i}\n' + 'ACGT'[i] * 12 + '\n')
+    paths.reverse()
+
+    expected_fasta = tmp_path / 'expected.fasta'
+    expected = _filter_assembly_paths(
+        paths, fasta_path=str(expected_fasta), csv_path=str(tmp_path / 'expected.csv'),
+    )
+
+    mixed = tuple(Path(path) if i % 2 else path for i, path in enumerate(paths))
+    for i, assembly_paths in enumerate((mixed, AssemblyPaths(mixed))):
+        actual_fasta = tmp_path / f'actual-{i}.fasta'
+        actual = _filter_assembly_paths(
+            assembly_paths, fasta_path=str(actual_fasta), csv_path=str(tmp_path / f'actual-{i}.csv'),
+        )
+
+        np.testing.assert_array_equal(actual[0].nodes, expected[0].nodes)
+        assert actual[0].subgraphs == expected[0].subgraphs
+        assert list(map(_signature_values, actual[1])) == list(map(_signature_values, expected[1]))
+        assert actual_fasta.read_text() == expected_fasta.read_text()
+
+
+def test_assembly_paths_reused_without_normalizing_again(tmp_path):
+    inputs = [_CountingPath(path) for path in _paths(tmp_path)]
+    paths = AssemblyPaths(inputs)
+
+    assert len(paths) == len(inputs)
+    assert all(path.calls == 1 for path in inputs)
+
+    for mask in ([True, True, False, False], [False, True, True, False]):
+        _filter_assembly_paths(paths, np.array(mask, dtype=np.bool_))
+
+    assert all(path.calls == 1 for path in inputs)
