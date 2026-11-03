@@ -13,11 +13,12 @@ Usage:
 
 Classes:
 --------
-- Nodes
 - Graph
+- Nodes
+- AssemblyPaths
 - FilteredGraph
 - SubgraphLoc
 - Signature
 """
 
-from ._native import Nodes, Graph, FilteredGraph, SubgraphLoc, Signature
+from ._native import Graph, Nodes, AssemblyPaths, FilteredGraph, SubgraphLoc, Signature

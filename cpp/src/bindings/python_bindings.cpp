@@ -1,3 +1,5 @@
+#include "bindings/python_bindings.hpp"
+
 #include <cstdint>
 #include <optional>
 #include <stdexcept>
@@ -15,20 +17,58 @@
 
 namespace py = pybind11;
 
-namespace {
+namespace seqwin::bindings {
 
-template <typename T>
-using NumpyArray = py::array_t<T, py::array::c_style>;
-
-template <typename Array>
-std::size_t require_1d_size(const Array& array, const char* name) {
-    if (array.ndim() != 1) {
-        throw std::invalid_argument(std::string(name) + " must be one-dimensional");
+std::vector<std::string> normalize_paths(const py::handle& assembly_paths) {
+    if (
+        py::isinstance<py::str>(assembly_paths) ||
+        py::isinstance<py::bytes>(assembly_paths) ||
+        !py::isinstance<py::sequence>(assembly_paths)
+    ) {
+        throw py::type_error("assembly_paths must be a sequence of str or os.PathLike[str] paths");
     }
-    return static_cast<std::size_t>(array.shape(0));
+    const auto sequence = py::reinterpret_borrow<py::sequence>(assembly_paths);
+    std::vector<std::string> paths;
+    paths.reserve(sequence.size());
+    for (const auto& path : sequence) {
+        auto normalized = py::reinterpret_steal<py::object>(PyOS_FSPath(path.ptr()));
+        if (!normalized) {
+            throw py::error_already_set();
+        }
+        paths.push_back(normalized.cast<std::string>());
+    }
+    return paths;
 }
 
-}  // namespace
+} // namespace seqwin::bindings
+
+namespace {
+
+/**
+ * @brief A reusable collection of assembly paths for native C++ calls.
+ *
+ * Paths are normalized using `os.fspath()` and stored as C++ strings,
+ * avoiding repeated conversions.
+ */
+class AssemblyPaths {
+public:
+    explicit AssemblyPaths(const py::sequence& paths)
+        : paths_(seqwin::bindings::normalize_paths(paths))
+    {}
+
+    const std::vector<std::string>& paths() const noexcept {
+        return paths_;
+    }
+
+private:
+    std::vector<std::string> paths_;
+};
+
+} // namespace
+
+using seqwin::bindings::NumpyArray;
+using seqwin::bindings::validate_numpy;
+using seqwin::bindings::view_numpy;
 
 PYBIND11_MODULE(_native, m) {
     PYBIND11_NUMPY_DTYPE(seqwin::Kmer, pos, record_idx);
@@ -36,6 +76,13 @@ PYBIND11_MODULE(_native, m) {
     PYBIND11_NUMPY_DTYPE(seqwin::Edge, first, second, weight);
 
     seqwin::bindings::bind_python_classes(m);
+
+    py::class_<AssemblyPaths>(m, "AssemblyPaths")
+        .def(py::init<const py::sequence&>(), py::arg("assembly_paths"))
+        .def("__len__", [](const AssemblyPaths& paths) {
+            return paths.paths().size();
+        })
+        .attr("__module__") = seqwin::bindings::public_module;
 
     py::tuple names(seqwin::METADATA_NAMES.size());
     for (std::size_t i = 0; i < seqwin::METADATA_NAMES.size(); ++i) {
@@ -45,7 +92,7 @@ PYBIND11_MODULE(_native, m) {
 
     m.def("_filter_native",
         [](const seqwin::bindings::GraphPython& graph,
-           const std::vector<std::string>& assembly_paths,
+           py::object assembly_paths,
            NumpyArray<bool> is_targets,
            std::optional<NumpyArray<double>> jaccard,
            std::size_t kmerlen,
@@ -64,9 +111,14 @@ PYBIND11_MODULE(_native, m) {
            const std::optional<std::string>& csv_path
         ) {
             const auto graph_view = graph.view();
-            const seqwin::ArrayView<bool> is_targets_view(
-                is_targets.data(), require_1d_size(is_targets, "is_targets")
-            );
+
+            std::vector<std::string> normalized_paths;
+            const auto& paths = py::isinstance<AssemblyPaths>(assembly_paths)
+                ? assembly_paths.cast<const AssemblyPaths&>().paths()
+                : (normalized_paths = seqwin::bindings::normalize_paths(assembly_paths));
+
+            validate_numpy<bool>(is_targets, "is_targets");
+            const auto is_targets_view = view_numpy<bool>(is_targets);
 
             const double* jaccard_ptr = nullptr;
             std::size_t jaccard_rows = 0;
@@ -82,6 +134,7 @@ PYBIND11_MODULE(_native, m) {
                 jaccard_rows = static_cast<std::size_t>(jaccard->shape(0));
                 jaccard_cols = static_cast<std::size_t>(jaccard->shape(1));
             }
+
             seqwin::FilterConfig config{
                 kmerlen,
                 windowsize,
@@ -104,7 +157,7 @@ PYBIND11_MODULE(_native, m) {
                 py::gil_scoped_release release;
                 out = seqwin::filter(
                     graph_view,
-                    assembly_paths,
+                    paths,
                     is_targets_view,
                     jaccard_ptr,
                     jaccard_rows,
@@ -112,7 +165,6 @@ PYBIND11_MODULE(_native, m) {
                     config
                 );
             }
-
             return py::make_tuple(std::move(out.first), std::move(out.second));
         },
         py::arg("graph"),

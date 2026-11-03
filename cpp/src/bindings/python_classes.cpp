@@ -1,4 +1,5 @@
 #include "bindings/python_classes.hpp"
+#include "bindings/python_bindings.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -68,16 +69,20 @@ Container bytes_to_array(const py::bytes& value, const char* name) {
     if (!is_little_endian()) {
         throw std::runtime_error("Seqwin pickle format requires a little-endian platform");
     }
-    const std::string bytes = value;
-    if (bytes.size() % sizeof(T) != 0) {
+    char* bytes = nullptr;
+    py::ssize_t size = 0;
+    if (PyBytes_AsStringAndSize(value.ptr(), &bytes, &size) != 0) {
+        throw py::error_already_set();
+    }
+    if (size % sizeof(T) != 0) {
         throw std::runtime_error(
             std::string("Invalid FilteredGraph pickle: ") + name +
             " byte length is not a multiple of the record size"
         );
     }
-    Container result(bytes.size() / sizeof(T));
-    if (!bytes.empty()) {
-        std::memcpy(result.data(), bytes.data(), bytes.size());
+    Container result(size / sizeof(T));
+    if (size != 0) {
+        std::memcpy(result.data(), bytes, size);
     }
     return result;
 }
@@ -91,22 +96,12 @@ void bind_python_classes(py::module_& module) {
 
     py::class_<FilteredGraph>(module, "FilteredGraph")
         .def_property_readonly("nodes", [](py::object self) {
-            auto& filtered = self.cast<FilteredGraph&>();
-            return py::array_t<FilteredNode>(
-                {static_cast<py::ssize_t>(filtered.nodes.size())},
-                {static_cast<py::ssize_t>(sizeof(FilteredNode))},
-                filtered.nodes.data(),
-                self
-            );
+            const auto& filtered = self.cast<const FilteredGraph&>();
+            return to_numpy(filtered.nodes, self);
         })
         .def_property_readonly("edges", [](py::object self) {
-            auto& filtered = self.cast<FilteredGraph&>();
-            return py::array_t<Edge>(
-                {static_cast<py::ssize_t>(filtered.edges.size())},
-                {static_cast<py::ssize_t>(sizeof(Edge))},
-                filtered.edges.data(),
-                self
-            );
+            const auto& filtered = self.cast<const FilteredGraph&>();
+            return to_numpy(filtered.edges, self);
         })
         .def_readonly("subgraphs", &FilteredGraph::subgraphs)
         .def_readonly("total_tar", &FilteredGraph::total_tar)

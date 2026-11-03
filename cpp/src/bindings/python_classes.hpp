@@ -33,7 +33,7 @@ struct NodesNumpy {
 };
 
 /**
- * @brief Graph storage backed by user-provided, read-only NumPy arrays.
+ * @brief Graph storage backed by user-provided NumPy arrays.
  *
  * Arrays may be ordinary arrays or memory-mapped arrays.
  */
@@ -54,6 +54,8 @@ GraphView make_view(const GraphNumpy& graph);
 
 /**
  * @brief Provide the Python-facing graph over native or NumPy-backed storage.
+ *
+ * Native algorithms access graph arrays through read-only views.
  */
 class GraphPython {
 public:
@@ -78,8 +80,8 @@ public:
     void save(const pybind11::object& path) const;
 
     /**
-     * Construct a graph backed by read-only NumPy arrays.
-     * Validates array metadata, read-only status, and basic graph invariants.
+     * Construct a graph backed by NumPy arrays without copying.
+     * Validates array metadata and basic graph invariants.
      */
     static GraphPython from_numpy(GraphNumpy arrays);
 

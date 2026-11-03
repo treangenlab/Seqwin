@@ -83,7 +83,7 @@ def _filter_graph(
 
     filtered, signatures = _filter_native(
         graph=graph,
-        assembly_paths=list(map(str, assemblies.paths)),
+        assembly_paths=assemblies.paths,
         is_targets=assemblies.is_targets,
         jaccard=jaccard,
         kmerlen=config.kmerlen,

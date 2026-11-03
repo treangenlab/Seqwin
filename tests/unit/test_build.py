@@ -289,12 +289,12 @@ def test_empty_graph_round_trip(tmp_path):
         np.testing.assert_array_equal(array, loaded_arrays[name])
 
 
-@pytest.mark.parametrize(('name', 'array', 'message'), (
-    ('kmers', np.empty(9, dtype=np.uint64), 'has dtype'),
-    ('kmers', np.empty((1, 1), dtype=KMER_DTYPE), 'one-dimensional'),
-    ('offsets', np.array([0], dtype=np.uintp), 'n_nodes'),
+@pytest.mark.parametrize(('name', 'array', 'exception', 'message'), (
+    ('kmers', np.empty(9, dtype=np.uint64), TypeError, 'incompatible function arguments'),
+    ('kmers', np.empty((1, 1), dtype=KMER_DTYPE), ValueError, 'one-dimensional'),
+    ('offsets', np.array([0], dtype=np.uintp), ValueError, 'n_nodes'),
 ))
-def test_graph_rejects_unsafe_array_metadata(name, array, message):
+def test_graph_rejects_unsafe_array_metadata(name, array, exception, message):
     from _filter_helpers import _inputs
 
     kmers, offsets, prevalences, edges, record_offsets, _ = _inputs()
@@ -307,7 +307,7 @@ def test_graph_rejects_unsafe_array_metadata(name, array, message):
     )
     arrays[name] = array
 
-    with pytest.raises(ValueError, match=message):
+    with pytest.raises(exception, match=message):
         _graph(**arrays)
 
 
@@ -323,15 +323,15 @@ def test_load_rejects_unsafe_array_metadata(tmp_path, targets_dir, non_targets_d
 def test_graph_rejects_unsafe_numpy_layout(expected_graph, layout):
     if layout == 'strided':
         bad = np.zeros(8, dtype=np.uint64)[::2]
-        message = 'C-contiguous'
+        exception, message = TypeError, 'incompatible function arguments'
     else:
         bad = np.ndarray((4,), dtype=np.uint64, buffer=bytearray(33), offset=1)
-        message = 'aligned'
+        exception, message = ValueError, 'aligned'
 
     bad.setflags(write=False)
     arrays = _arrays(Graph.load(expected_graph))
     arrays['hashes'] = bad
-    with pytest.raises(ValueError, match=message):
+    with pytest.raises(exception, match=message):
         Graph._from_numpy(**arrays)
 
 
@@ -343,20 +343,17 @@ def test_from_numpy_retains_arrays_and_storage(targets_dir, non_targets_dir, emp
     native = Graph([], 7, 10) if empty else _small_graph(targets_dir, non_targets_dir)
     # Views also exercise retention of a NumPy base object after input deletion.
     arrays = {name: array.copy().view() for name, array in _arrays(native).items()}
-    for array in arrays.values():
-        array.setflags(write=False)
     expected = {name: array.copy() for name, array in arrays.items()}
     refs = {name: weakref.ref(array) for name, array in arrays.items()}
     graph = Graph._from_numpy(**arrays)
     assert len(graph.nodes) == len(native.nodes) == len(expected['hashes'])
     graph_ref = weakref.ref(graph)
-    del native, arrays, array
+    del native, arrays
     gc.collect()
     returned = _arrays(graph)
     for name, array in returned.items():
         assert array is refs[name]()
         assert array is _arrays(graph)[name]
-        assert not array.flags.writeable
         if array.size:
             assert np.shares_memory(array, array.base)
     del graph
@@ -367,11 +364,3 @@ def test_from_numpy_retains_arrays_and_storage(targets_dir, non_targets_dir, emp
     del returned, array
     gc.collect()
     assert all(ref() is None for ref in refs.values())
-
-
-def test_from_numpy_rejects_writable_arrays(targets_dir, non_targets_dir):
-    arrays = _arrays(_small_graph(targets_dir, non_targets_dir))
-    arrays['hashes'] = arrays['hashes'].copy()
-
-    with pytest.raises(ValueError, match='must be read-only'):
-        Graph._from_numpy(**arrays)
