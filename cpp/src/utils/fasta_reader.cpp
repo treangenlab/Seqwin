@@ -15,7 +15,10 @@
 namespace seqwin::internal {
 namespace {
 
-constexpr std::size_t gz_read_buf_size = 1U << 16;
+/** Size of each decompressed chunk read from zlib (256 KiB). */
+constexpr std::size_t gz_read_buf_size = 1U << 18;
+/** Size of zlib's internal I/O buffer (128 KiB). */
+constexpr unsigned gz_internal_buf_size = 1U << 17;
 
 bool ends_with(std::string_view text, std::string_view suffix)
 {
@@ -42,13 +45,13 @@ std::vector<FastaRecord> read_fasta_core(NextLine&& next_line)
 {
     std::vector<FastaRecord> records;
 
-    std::string line;
+    std::string_view line;
     FastaRecord current;
     bool have_current = false;
 
     while (next_line(line)) {
         if (!line.empty() && line.back() == '\r') {
-            line.pop_back();
+            line.remove_suffix(1);
         }
 
         if (line.empty() || is_ascii_whitespace_only(line)) {
@@ -71,7 +74,7 @@ std::vector<FastaRecord> read_fasta_core(NextLine&& next_line)
 
         const auto first_ws = line.find_first_of(" \t\n\r\f\v");
         if (first_ws == std::string::npos) {
-            current.sequence.append(line);
+            current.sequence.append(line.data(), line.size());
             continue;
         }
 
@@ -101,8 +104,13 @@ std::vector<FastaRecord> read_plain_fasta(const std::string& assembly_path)
         throw std::runtime_error("Unable to open FASTA: " + assembly_path);
     }
 
-    return read_fasta_core([&in](std::string& line) -> bool {
-        return static_cast<bool>(std::getline(in, line));
+    std::string line_storage;
+    return read_fasta_core([&in, &line_storage](std::string_view& line) -> bool {
+        if (!std::getline(in, line_storage)) {
+            return false;
+        }
+        line = line_storage;
+        return true;
     });
 }
 
@@ -123,7 +131,11 @@ std::vector<FastaRecord> read_gz_fasta(const std::string& assembly_path)
     };
 
     std::unique_ptr<gzFile_s, GzCloser> gz(reinterpret_cast<gzFile_s*>(raw_gz));
+    if (gzbuffer(reinterpret_cast<gzFile>(gz.get()), gz_internal_buf_size) != 0) {
+        throw std::runtime_error("Unable to configure gzip buffer: " + assembly_path);
+    }
 
+    std::array<char, gz_read_buf_size> buf;
     std::string carry;
     std::size_t line_start = 0;
     std::size_t search_start = 0;
@@ -134,7 +146,6 @@ std::vector<FastaRecord> read_gz_fasta(const std::string& assembly_path)
             return;
         }
 
-        std::array<char, gz_read_buf_size> buf{};
         int bytes = gzread(
             reinterpret_cast<gzFile>(gz.get()),
             buf.data(),
@@ -154,23 +165,23 @@ std::vector<FastaRecord> read_gz_fasta(const std::string& assembly_path)
         carry.append(buf.data(), static_cast<std::size_t>(bytes));
     };
 
-    auto records = read_fasta_core([&](std::string& line) -> bool {
+    auto records = read_fasta_core([&](std::string_view& line) -> bool {
         for (;;) {
+            if (line_start > gz_read_buf_size && line_start >= carry.size() / 2) {
+                carry.erase(0, line_start);
+                search_start -= line_start;
+                line_start = 0;
+            }
+
             const std::size_t nl = carry.find('\n', search_start);
             if (nl != std::string::npos) {
                 std::size_t end = nl;
                 if (end > line_start && carry[end - 1] == '\r') {
                     --end;
                 }
-                line.assign(carry.data() + line_start, end - line_start);
+                line = std::string_view(carry.data() + line_start, end - line_start);
                 line_start = nl + 1;
                 search_start = line_start;
-
-                if (line_start > gz_read_buf_size && line_start >= carry.size() / 2) {
-                    carry.erase(0, line_start);
-                    search_start -= line_start;
-                    line_start = 0;
-                }
                 return true;
             }
 
@@ -182,7 +193,10 @@ std::vector<FastaRecord> read_gz_fasta(const std::string& assembly_path)
                     if (end > line_start && carry[end - 1] == '\r') {
                         --end;
                     }
-                    line.assign(carry.data() + line_start, end - line_start);
+                    line = std::string_view(
+                        carry.data() + line_start,
+                        end - line_start
+                    );
                     line_start = carry.size();
                     search_start = line_start;
                     return true;
