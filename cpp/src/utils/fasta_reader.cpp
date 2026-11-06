@@ -20,14 +20,15 @@ constexpr std::size_t gz_read_buf_size = 1U << 18;
 /** Size of zlib's internal I/O buffer (128 KiB). */
 constexpr unsigned gz_internal_buf_size = 1U << 17;
 
-bool ends_with(std::string_view text, std::string_view suffix)
-{
+bool ends_with(
+    std::string_view text,
+    std::string_view suffix
+) {
     return text.size() >= suffix.size() &&
            text.substr(text.size() - suffix.size()) == suffix;
 }
 
-std::string extract_id(std::string_view header)
-{
+std::string extract_id(std::string_view header) {
     const std::size_t id_end = header.find_first_of(" \t\n\r\f\v");
     if (id_end == std::string_view::npos) {
         return std::string(header);
@@ -35,14 +36,12 @@ std::string extract_id(std::string_view header)
     return std::string(header.substr(0, id_end));
 }
 
-bool is_ascii_whitespace_only(std::string_view text)
-{
+bool is_ascii_whitespace_only(std::string_view text) {
     return text.find_first_not_of(" \t\n\r\f\v") == std::string_view::npos;
 }
 
 template<typename NextLine>
-std::vector<FastaRecord> read_fasta_core(NextLine&& next_line)
-{
+std::vector<FastaRecord> read_fasta_core(NextLine&& next_line) {
     std::vector<FastaRecord> records;
 
     std::string_view line;
@@ -97,8 +96,7 @@ std::vector<FastaRecord> read_fasta_core(NextLine&& next_line)
     return records;
 }
 
-std::vector<FastaRecord> read_plain_fasta(const std::string& assembly_path)
-{
+std::vector<FastaRecord> read_plain_fasta(const std::string& assembly_path) {
     std::ifstream in(assembly_path);
     if (!in) {
         throw std::runtime_error("Unable to open FASTA: " + assembly_path);
@@ -114,8 +112,7 @@ std::vector<FastaRecord> read_plain_fasta(const std::string& assembly_path)
     });
 }
 
-std::vector<FastaRecord> read_gz_fasta(const std::string& assembly_path)
-{
+std::vector<FastaRecord> read_gz_fasta(const std::string& assembly_path) {
     gzFile raw_gz = gzopen(assembly_path.c_str(), "rb");
     if (raw_gz == nullptr) {
         throw std::runtime_error("Unable to open gzip FASTA: " + assembly_path);
@@ -218,8 +215,7 @@ std::vector<FastaRecord> read_gz_fasta(const std::string& assembly_path)
 
 } // namespace
 
-std::vector<FastaRecord> read_fasta(const std::string& assembly_path)
-{
+std::vector<FastaRecord> read_fasta(const std::string& assembly_path) {
     if (ends_with(assembly_path, ".gz")) {
         return read_gz_fasta(assembly_path);
     }
