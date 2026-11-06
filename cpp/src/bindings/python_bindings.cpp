@@ -11,9 +11,10 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
+#include "bindings/python_classes.hpp"
 #include "seqwin/filter.hpp"
 #include "seqwin/graph.hpp"
-#include "bindings/python_classes.hpp"
+#include "utils/fasta_reader.hpp"
 
 namespace py = pybind11;
 
@@ -75,7 +76,11 @@ PYBIND11_MODULE(_native, m) {
     PYBIND11_NUMPY_DTYPE(seqwin::FilteredNode, idx, n_tar, n_neg, penalty);
     PYBIND11_NUMPY_DTYPE(seqwin::Edge, first, second, weight);
 
-    seqwin::bindings::bind_python_classes(m);
+    py::tuple names(seqwin::METADATA_NAMES.size());
+    for (std::size_t i = 0; i < seqwin::METADATA_NAMES.size(); ++i) {
+        names[i] = py::str(std::string(seqwin::METADATA_NAMES[i]));
+    }
+    m.attr("_METADATA_NAMES") = std::move(names);
 
     py::class_<AssemblyPaths>(m, "AssemblyPaths")
         .def(py::init<const py::sequence&>(), py::arg("assembly_paths"))
@@ -84,11 +89,31 @@ PYBIND11_MODULE(_native, m) {
         })
         .attr("__module__") = seqwin::bindings::public_module;
 
-    py::tuple names(seqwin::METADATA_NAMES.size());
-    for (std::size_t i = 0; i < seqwin::METADATA_NAMES.size(); ++i) {
-        names[i] = py::str(std::string(seqwin::METADATA_NAMES[i]));
-    }
-    m.attr("_METADATA_NAMES") = std::move(names);
+    py::class_<seqwin::internal::FastaRecord>(m, "FastaRecord")
+        .def_readonly("id", &seqwin::internal::FastaRecord::id)
+        .def_readonly("sequence", &seqwin::internal::FastaRecord::sequence)
+        .attr("__module__") = seqwin::bindings::public_module;
+
+    seqwin::bindings::bind_python_classes(m);
+
+    m.def("read_fasta",
+        [](const py::object& path) {
+            auto normalized = py::reinterpret_steal<py::object>(PyOS_FSPath(path.ptr()));
+            if (!normalized) {
+                throw py::error_already_set();
+            }
+            const auto assembly_path = normalized.cast<std::string>();
+
+            std::vector<seqwin::internal::FastaRecord> records;
+            {
+                py::gil_scoped_release release;
+                records = seqwin::internal::read_fasta(assembly_path);
+            }
+            return records;
+        },
+        py::arg("path")
+    );
+    m.attr("read_fasta").attr("__module__") = seqwin::bindings::public_module;
 
     m.def("_filter_native",
         [](const seqwin::bindings::GraphPython& graph,
