@@ -24,16 +24,18 @@ class AssemblyPaths:
         ...
 
 class FastaRecord:
+    """A FASTA record."""
     @property
     def id(self) -> str:
+        """FASTA record ID."""
         ...
     @property
     def sequence(self) -> str:
+        """FASTA record sequence."""
         ...
 
 class Nodes:
-    """Parallel arrays representing nodes in the final k-mer graph.
-    """
+    """Parallel arrays representing nodes in the final k-mer graph."""
     def __len__(self) -> int:
         """Number of graph nodes."""
         ...
