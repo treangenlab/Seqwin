@@ -26,9 +26,10 @@ from dataclasses import dataclass, field, fields, replace
 
 import pandas as pd
 
+from .core import read_fasta
 from .core._native import _METADATA_NAMES
 from .ncbi import blast
-from .utils import print_time_delta, log_and_raise, load_fasta, mp_wrapper
+from .utils import print_time_delta, log_and_raise, mp_wrapper
 from .config import BLASTCONFIG
 
 logger = logging.getLogger(__name__)
@@ -260,7 +261,7 @@ def eval_signatures_seqwin(
     FASTA records and CSV rows must match in count, header, length, and order.
     The CSV is replaced only after evaluation and serialization succeed.
     """
-    records = load_fasta(fasta_path)
+    records = read_fasta(fasta_path)
     with csv_path.open(encoding='utf-8', newline='') as source:
         reader = csv.reader(source)
         if tuple(next(reader, ())) != _METADATA_NAMES:

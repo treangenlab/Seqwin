@@ -1,14 +1,5 @@
 """
 Type declarations for the Seqwin C++ extension
-
-Classes:
---------
-- Graph
-- Nodes
-- AssemblyPaths
-- FilteredGraph
-- SubgraphLoc
-- Signature
 """
 
 from collections.abc import Sequence
@@ -20,9 +11,31 @@ from numpy.typing import NDArray
 # Columns in the signature metadata CSV.
 _METADATA_NAMES: tuple[str, ...]
 
-class Nodes:
-    """Parallel arrays representing nodes in the final k-mer graph.
+class AssemblyPaths:
+    """A reusable collection of assembly paths for native C++ calls.
+
+    Paths are normalized using `os.fspath()` and stored as C++ strings, avoiding repeated conversions.
     """
+    def __init__(self, assembly_paths: Sequence[str | Path]) -> None:
+        """Normalize and store assembly paths for native C++ calls."""
+        ...
+    def __len__(self) -> int:
+        """Number of assembly paths."""
+        ...
+
+class FastaRecord:
+    """A FASTA record."""
+    @property
+    def id(self) -> str:
+        """FASTA record ID."""
+        ...
+    @property
+    def sequence(self) -> str:
+        """FASTA record sequence."""
+        ...
+
+class Nodes:
+    """Parallel arrays representing nodes in the final k-mer graph."""
     def __len__(self) -> int:
         """Number of graph nodes."""
         ...
@@ -184,18 +197,6 @@ class Graph:
         """
         ...
 
-class AssemblyPaths:
-    """A reusable collection of assembly paths for native C++ calls.
-
-    Paths are normalized using `os.fspath()` and stored as C++ strings, avoiding repeated conversions.
-    """
-    def __init__(self, assembly_paths: Sequence[str | Path]) -> None:
-        """Normalize and store assembly paths for native C++ calls."""
-        ...
-    def __len__(self) -> int:
-        """Number of assembly paths."""
-        ...
-
 class FilteredGraph:
     """Includes filtered graph arrays, low-penalty subgraphs, and calculated values.
 
@@ -305,6 +306,10 @@ class Signature:
     def n_tar(self) -> int:
         """Number of target assemblies containing the representative."""
         ...
+
+def read_fasta(path: str | Path) -> list[FastaRecord]:
+    """Read records from a plain-text or gzip-compressed FASTA file."""
+    ...
 
 def _filter_native(
     graph: Graph,

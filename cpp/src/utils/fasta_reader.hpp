@@ -6,8 +6,13 @@
 
 namespace seqwin::internal {
 
+/**
+ * @brief A FASTA record.
+ */
 struct FastaRecord {
+    /** FASTA record ID. */
     std::string id;
+    /** FASTA record sequence. */
     std::string sequence;
 };
 

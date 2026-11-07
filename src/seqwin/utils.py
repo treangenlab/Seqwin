@@ -6,8 +6,7 @@ Utilities
 __author__ = 'Michael X. Wang'
 __license__ = 'GPL 3.0'
 
-import sys, gzip, shutil, logging, datetime, subprocess, shlex, multiprocessing
-from dataclasses import dataclass
+import sys, shutil, logging, datetime, subprocess, shlex, multiprocessing
 from pathlib import Path
 from time import time
 from enum import Enum
@@ -29,12 +28,6 @@ class StartMethod(str, Enum):
 _START_METHOD = (
     StartMethod.spawn if sys.platform == 'win32' else StartMethod.fork
 )
-
-
-@dataclass(frozen=True, slots=True)
-class FastaRecord:
-    id: str
-    sequence: str
 
 
 def print_time_delta(seconds: float) -> None:
@@ -326,35 +319,3 @@ def load_paths_txt(paths_txt: Path) -> list[Path]:
             logger.error(f' - File not found, skipped: {path}')
 
     return paths_list
-
-
-def load_fasta(path: Path) -> list[FastaRecord]:
-    """Parse an assembly file in FASTA format and return its sequences in uppercase.
-    Gzip files are supported (file name should end with .gz).
-
-    Args:
-        path (Path): Path to the FASTA file. If the file is gzipped, the extension should be .gz.
-
-    Returns:
-        list[FastaRecord]: FASTA records in the same order as they appear in the file.
-    """
-    if path.suffix == GZIP_EXT:
-        with gzip.open(path, 'rt', encoding='utf-8') as fasta:
-            content = fasta.read()
-    else:
-        content = path.read_text(encoding='utf-8')
-
-    if not content.startswith('>'):
-        log_and_raise(ValueError, f"FASTA file must start with '>', in: {path}")
-
-    records = list()
-    for record in content.split('>')[1:]: # skip the first empty string
-        header, sep, sequence = record.partition('\n')
-        record_id = header.split(' ')[0]
-        if not sep:
-            logger.warning(f' - {record_id[:30]} has no sequence, in: {path}')
-        records.append(FastaRecord(
-            record_id,
-            sequence.replace('\n', '').upper()
-        ))
-    return records

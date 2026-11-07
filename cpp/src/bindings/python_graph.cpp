@@ -15,9 +15,8 @@
 
 namespace py = pybind11;
 
+namespace seqwin::bindings {
 namespace {
-
-using seqwin::bindings::to_numpy;
 
 template <typename T>
 void validate_offsets(
@@ -33,7 +32,7 @@ void validate_offsets(
     }
 }
 
-void validate_graph(const seqwin::bindings::GraphNumpy& graph) {
+void validate_graph(const GraphNumpy& graph) {
     const auto& nodes = graph.nodes;
     const auto n_nodes = nodes.size();
     if (nodes.prevalences.size() != n_nodes) {
@@ -66,9 +65,9 @@ template <typename Container>
 py::array to_python(
     const py::object& owner,
     Container seqwin::Graph::* native_member,
-    py::array seqwin::bindings::GraphNumpy::* numpy_member
+    py::array GraphNumpy::* numpy_member
 ) {
-    const auto& graph = owner.cast<const seqwin::bindings::GraphPython&>();
+    const auto& graph = owner.cast<const GraphPython&>();
     if (const auto* numpy = graph.numpy()) {
         return numpy->*numpy_member;
     }
@@ -81,8 +80,6 @@ constexpr const char* graph_array_names[] = {
 };
 
 } // namespace
-
-namespace seqwin::bindings {
 
 GraphView make_view(const GraphNumpy& graph) {
     return {
