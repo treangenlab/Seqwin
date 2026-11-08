@@ -11,13 +11,45 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
+#include "bindings/python_classes.hpp"
 #include "seqwin/filter.hpp"
 #include "seqwin/graph.hpp"
-#include "bindings/python_classes.hpp"
+#include "utils/fasta_reader.hpp"
 
 namespace py = pybind11;
 
 namespace seqwin::bindings {
+namespace {
+
+std::string normalize_path(const py::handle& path) {
+    auto normalized = py::reinterpret_steal<py::object>(PyOS_FSPath(path.ptr()));
+    if (!normalized) {
+        throw py::error_already_set();
+    }
+    return normalized.cast<std::string>();
+}
+
+/**
+ * @brief A reusable collection of assembly paths for native C++ calls.
+ *
+ * Paths are normalized using `os.fspath()` and stored as C++ strings,
+ * avoiding repeated conversions.
+ */
+class AssemblyPaths {
+public:
+    explicit AssemblyPaths(const py::sequence& paths)
+        : paths_(normalize_paths(paths))
+    {}
+
+    const std::vector<std::string>& paths() const noexcept {
+        return paths_;
+    }
+
+private:
+    std::vector<std::string> paths_;
+};
+
+} // namespace
 
 std::vector<std::string> normalize_paths(const py::handle& assembly_paths) {
     if (
@@ -31,58 +63,19 @@ std::vector<std::string> normalize_paths(const py::handle& assembly_paths) {
     std::vector<std::string> paths;
     paths.reserve(sequence.size());
     for (const auto& path : sequence) {
-        auto normalized = py::reinterpret_steal<py::object>(PyOS_FSPath(path.ptr()));
-        if (!normalized) {
-            throw py::error_already_set();
-        }
-        paths.push_back(normalized.cast<std::string>());
+        paths.push_back(normalize_path(path));
     }
     return paths;
 }
 
 } // namespace seqwin::bindings
 
-namespace {
-
-/**
- * @brief A reusable collection of assembly paths for native C++ calls.
- *
- * Paths are normalized using `os.fspath()` and stored as C++ strings,
- * avoiding repeated conversions.
- */
-class AssemblyPaths {
-public:
-    explicit AssemblyPaths(const py::sequence& paths)
-        : paths_(seqwin::bindings::normalize_paths(paths))
-    {}
-
-    const std::vector<std::string>& paths() const noexcept {
-        return paths_;
-    }
-
-private:
-    std::vector<std::string> paths_;
-};
-
-} // namespace
-
-using seqwin::bindings::NumpyArray;
-using seqwin::bindings::validate_numpy;
-using seqwin::bindings::view_numpy;
+using namespace seqwin::bindings;
 
 PYBIND11_MODULE(_native, m) {
     PYBIND11_NUMPY_DTYPE(seqwin::Kmer, pos, record_idx);
     PYBIND11_NUMPY_DTYPE(seqwin::FilteredNode, idx, n_tar, n_neg, penalty);
     PYBIND11_NUMPY_DTYPE(seqwin::Edge, first, second, weight);
-
-    seqwin::bindings::bind_python_classes(m);
-
-    py::class_<AssemblyPaths>(m, "AssemblyPaths")
-        .def(py::init<const py::sequence&>(), py::arg("assembly_paths"))
-        .def("__len__", [](const AssemblyPaths& paths) {
-            return paths.paths().size();
-        })
-        .attr("__module__") = seqwin::bindings::public_module;
 
     py::tuple names(seqwin::METADATA_NAMES.size());
     for (std::size_t i = 0; i < seqwin::METADATA_NAMES.size(); ++i) {
@@ -90,8 +83,37 @@ PYBIND11_MODULE(_native, m) {
     }
     m.attr("_METADATA_NAMES") = std::move(names);
 
+    py::class_<AssemblyPaths>(m, "AssemblyPaths")
+        .def(py::init<const py::sequence&>(), py::arg("assembly_paths"))
+        .def("__len__", [](const AssemblyPaths& paths) {
+            return paths.paths().size();
+        })
+        .attr("__module__") = public_module;
+
+    py::class_<seqwin::internal::FastaRecord>(m, "FastaRecord")
+        .def_readonly("id", &seqwin::internal::FastaRecord::id)
+        .def_readonly("sequence", &seqwin::internal::FastaRecord::sequence)
+        .attr("__module__") = public_module;
+
+    bind_python_classes(m);
+
+    m.def("read_fasta",
+        [](const py::object& path) {
+            const auto assembly_path = normalize_path(path);
+
+            std::vector<seqwin::internal::FastaRecord> records;
+            {
+                py::gil_scoped_release release;
+                records = seqwin::internal::read_fasta(assembly_path);
+            }
+            return records;
+        },
+        py::arg("path")
+    );
+    m.attr("read_fasta").attr("__module__") = public_module;
+
     m.def("_filter_native",
-        [](const seqwin::bindings::GraphPython& graph,
+        [](const GraphPython& graph,
            py::object assembly_paths,
            NumpyArray<bool> is_targets,
            std::optional<NumpyArray<double>> jaccard,
@@ -112,10 +134,10 @@ PYBIND11_MODULE(_native, m) {
         ) {
             const auto graph_view = graph.view();
 
-            std::vector<std::string> normalized_paths;
+            std::vector<std::string> normalized;
             const auto& paths = py::isinstance<AssemblyPaths>(assembly_paths)
                 ? assembly_paths.cast<const AssemblyPaths&>().paths()
-                : (normalized_paths = seqwin::bindings::normalize_paths(assembly_paths));
+                : (normalized = normalize_paths(assembly_paths));
 
             validate_numpy<bool>(is_targets, "is_targets");
             const auto is_targets_view = view_numpy<bool>(is_targets);

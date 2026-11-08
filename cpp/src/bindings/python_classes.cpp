@@ -18,6 +18,7 @@
 
 namespace py = pybind11;
 
+namespace seqwin::bindings {
 namespace {
 
 // Define an explicit, versioned binary format
@@ -88,8 +89,6 @@ Container bytes_to_array(const py::bytes& value, const char* name) {
 }
 
 } // namespace
-
-namespace seqwin::bindings {
 
 void bind_python_classes(py::module_& module) {
     bind_python_graph(module);

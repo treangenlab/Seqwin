@@ -2,23 +2,24 @@
 Seqwin core
 ===========
 
-Core classes of Seqwin.
-
-Usage:
-------
-```python
->>> from seqwin.core import Graph
->>> help(Graph)
-```
+Core classes and functions of Seqwin.
 
 Classes:
 --------
-- Graph
-- Nodes
 - AssemblyPaths
+- FastaRecord
+- Nodes
+- Graph
 - FilteredGraph
 - SubgraphLoc
 - Signature
+
+Functions:
+----------
+- read_fasta
 """
 
-from ._native import Graph, Nodes, AssemblyPaths, FilteredGraph, SubgraphLoc, Signature
+from ._native import (
+    AssemblyPaths, FastaRecord, Nodes, Graph, FilteredGraph, SubgraphLoc, Signature,
+    read_fasta,
+)
