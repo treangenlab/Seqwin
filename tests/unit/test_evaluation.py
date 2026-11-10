@@ -1,6 +1,7 @@
 import csv
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -71,21 +72,40 @@ def test_failed_evaluation_preserves_csv(monkeypatch, tmp_path):
     assert csv.read_bytes() == before
 
 
-@pytest.mark.parametrize('n_cpu', (1, 2))
-def test_hits_keep_optimal_alignment_and_input_order(monkeypatch, n_cpu):
-    # Query 0 has no hits. Query 1 has two alignments in the same assembly.
-    hits = pd.DataFrame([
-        (1, BLASTCONFIG.header_sep.join(['0', next(k for k, v in BLASTCONFIG.str2bool.items() if v), 'record']), 10, 2, 1, 0),
-        (1, BLASTCONFIG.header_sep.join(['0', next(k for k, v in BLASTCONFIG.str2bool.items() if v), 'record']), 20, 4, 0, 0),
-    ], columns=['qseqid', 'sseqid', 'bitscore', 'nident', 'mismatch', 'gaps'])
+def test_hits_keep_optimal_alignment_and_input_order(monkeypatch):
+    # Query 0 has no hits. Query 1 has repeats and tied non-target bitscores.
+    tar = next(k for k, v in BLASTCONFIG.str2bool.items() if v)
+    neg = next(k for k, v in BLASTCONFIG.str2bool.items() if not v)
+    hits = np.array([
+        (2, BLASTCONFIG.header_sep.join(['0', tar, 'other']), 15, 3, 1, 0),
+        (1, BLASTCONFIG.header_sep.join(['0', tar, 'record']), 10, 2, 1, 0),
+        (1, BLASTCONFIG.header_sep.join(['2', neg, 'first']), 20, 3, 1, 1),
+        (1, BLASTCONFIG.header_sep.join(['0', tar, 'record']), 20, 4, 0, 0),
+        (1, BLASTCONFIG.header_sep.join(['2', neg, 'tied']), 20, 1, 3, 0),
+        (1, BLASTCONFIG.header_sep.join(['1', tar, 'record']), 10, 2, 2, 0),
+        (1, BLASTCONFIG.header_sep.join(['3', neg, 'record']), 10, 2, 1, 0),
+    ], dtype=[
+        ('qseqid', np.int64), ('sseqid', object), ('bitscore', np.float64),
+        ('nident', np.int64), ('mismatch', np.int64), ('gaps', np.int64),
+    ])
     monkeypatch.setattr(evaluation, 'blast', lambda *args, **kwargs: hits.copy())
-    metrics = evaluation.eval_signatures(['AAAA', 'CCCC'], Path(BLASTCONFIG.title_all), 1, 1, n_cpu)
-    assert metrics[0].blast is None
+    metrics = evaluation.eval_signatures(['AAAA', 'CCCC', 'GGGG'], Path(BLASTCONFIG.title_all), 3, 3, 1)
+    assert metrics[0].blast.size == 0
     assert all(getattr(metrics[0], name) == 0.0 for name in evaluation._METRIC_NAMES)
-    assert metrics[1].conservation == 1.0
-    assert metrics[1].avg_repeats_tar == 2
-    assert metrics[1].avg_pident_tar == .75
-    assert metrics[1].blast.bitscore.tolist() == [20]
+    assert metrics[1].conservation == .5
+    assert metrics[1].f_tar_hits == pytest.approx(2 / 3)
+    assert metrics[1].avg_repeats_tar == 1.5
+    assert metrics[1].avg_pident_tar == .625
+    assert metrics[1].divergence == .25
+    assert metrics[1].f_neg_hits == pytest.approx(2 / 3)
+    assert metrics[1].avg_repeats_neg == 1.5
+    assert metrics[1].avg_pident_neg == .5
+    assert metrics[1].blast['bitscore'].tolist() == [20, 10, 20, 10]
+    assert metrics[1].blast['record_id'].tolist() == ['record', 'record', 'first', 'record']
+    assert metrics[1].blast['n_hits'].tolist() == [2, 1, 2, 1]
+    assert metrics[1].blast['avg_nident'].tolist() == [3, 2, 2, 2]
+    assert metrics[2].conservation == .25
+    assert metrics[2].blast['record_id'].tolist() == ['other']
 
 
 def test_csv_rewrite_preserves_metadata_strings_and_escaping(monkeypatch, tmp_path):
