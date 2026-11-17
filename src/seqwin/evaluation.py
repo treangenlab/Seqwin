@@ -21,36 +21,52 @@ import csv, logging
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from time import time
-from itertools import repeat
-from dataclasses import dataclass, field, fields, replace
+from dataclasses import dataclass, field, fields
+from collections.abc import Sequence
 
-import pandas as pd
+import numpy as np
+from numpy.typing import NDArray
 
 from .core import read_fasta
 from .core._native import _METADATA_NAMES
-from .ncbi import blast
-from .utils import print_time_delta, log_and_raise, mp_wrapper
+from .ncbi import blast, _get_blast_dtype
+from .utils import print_time_delta, log_and_raise
 from .config import BLASTCONFIG
 
 logger = logging.getLogger(__name__)
+
+_BLAST_DTYPE = _get_blast_dtype(BLASTCONFIG.columns)
+_KEPT_COLUMNS = list(name for name in _BLAST_DTYPE.names if name not in ('qseqid', 'sseqid'))
+_SUBJECT_DTYPE = np.dtype([('assembly_idx', np.int64), ('is_target', bool), ('record_id', object)])
+_SUBJECT_COLUMNS = list(_SUBJECT_DTYPE.names)
+# dtype of SignatureMetrics.blast
+_BEST_DTYPE = np.dtype(
+    list((name, _BLAST_DTYPE[name]) for name in _KEPT_COLUMNS) +
+    _SUBJECT_DTYPE.descr +
+    [('n_hits', np.int64), ('avg_nident', np.float64)]
+)
 
 
 @dataclass(slots=True, frozen=True)
 class SignatureMetrics:
     """
-    Metrics of a signature, calculated from its BLAST alignments against target / non-target assemblies.
-    Metrics default to zero when no BLAST hits are found.
+    Metrics of a signature, calculated from its BLAST hits against target / non-target assemblies.
+    Metrics default to zero for signatures with no BLAST hits.
 
     Attributes:
         conservation (float): Average fraction of identical bases between the signature and target assemblies.
+            Calculated from the best alignment in each assembly.
         f_tar_hits (float): Fraction of target assemblies with a BLAST hit.
         divergence (float): Average fraction of mismatches and gaps between the signature and non-target assemblies.
+            Calculated from the best alignment in each assembly. Assemblies without hits contribute zero.
         f_neg_hits (float): Fraction of non-target assemblies with a BLAST hit.
-        avg_repeats_tar (float): Average number of repeats of this signature in target assemblies.
-        avg_pident_tar (float): Average percentage of identical bases of all repeats in target assemblies.
-        avg_repeats_neg (float): Average number of repeats of this signature in non-target assemblies.
-        avg_pident_neg (float): Average percentage of identical bases of all repeats in non-target assemblies.
-        blast (pd.DataFrame | None): BLAST alignments used to calculate the scalar metrics.
+        avg_repeats_tar (float): Average number of repeats across target assemblies with hits.
+        avg_pident_tar (float): Average fraction of identical bases, first averaged across repeats
+            within each target assembly, then across target assemblies with hits.
+        avg_repeats_neg (float): Average number of repeats across non-target assemblies with hits.
+        avg_pident_neg (float): Average fraction of identical bases, first averaged across repeats
+            within each non-target assembly, then across non-target assemblies with hits.
+        blast (NDArray[np.void]): Structured array containing the best alignment per assembly.
     """
     conservation: float = 0.0
     f_tar_hits: float = 0.0
@@ -60,96 +76,106 @@ class SignatureMetrics:
     avg_pident_tar: float = 0.0
     avg_repeats_neg: float = 0.0
     avg_pident_neg: float = 0.0
-    blast: pd.DataFrame | None = field(default=None, repr=False, compare=False)
+    blast: NDArray[np.void] = field(
+        default_factory=lambda: np.empty(0, dtype=_BEST_DTYPE), repr=False, compare=False
+    )
 
 # Scalar metrics (excluding 'blast')
 _METRIC_NAMES = tuple(f.name for f in fields(SignatureMetrics) if f.name != 'blast')
 
 
-def _get_avg_ident(blast_out: pd.DataFrame, query_len: int, n: int) -> float:
-    """Given a list of BLAST hits, calculate the average sequence identity between the query and all subjects.
-    The denominator (`n`) is the number of subject sequences that are expected to include the query sequence.
-    Note that `n` might not be the same as `len(blast_out)`, since some subjects may have no hit.
-
-    Args:
-        blast_out (pd.DataFrame): Each row should be a BLAST hit of the query, with column
-            'nident' (number of identical matches).
-        query_len (int): Length of the query sequence.
-        n (int): The number of subjects that are expected to include the query sequence.
-
-    Returns:
-        float: Conservation.
-    """
-    return sum(blast_out['nident']) / query_len / n
-
-
-def _get_avg_dist(blast_out: pd.DataFrame, query_len: int, n: int) -> float:
-    """Given a list of BLAST hits, calculate the average distance between the query and all subjects.
-    The denominator (`n`) is the number of subject sequences that are expected to include the query sequence.
-    Note that `n` might not be the same as `len(blast_out)`, since some subjects may have no hit.
-
-    Args:
-        blast_out (pd.DataFrame): Each row should be a BLAST hit of the query, with columns,
-            1. 'mismatch': number of mismatches.
-            2. 'gaps': total number of gaps in BOTH query and subject (might cause inaccuracy).
-        query_len (int): Length of the query sequence.
-        n (int): The number of subjects that are expected to include the query sequence.
-
-    Returns:
-        float: Divergence.
-    """
-    return sum(blast_out['mismatch'] + blast_out['gaps']) / query_len / n
-
-
 def _get_metrics(
-    blast_out: pd.DataFrame | None, marker_len: int, total_tar: int, total_neg: int
-) -> SignatureMetrics:
-    """Calculate the metrics of a marker based on its BLAST hits in all assemblies.
-    - Conservation is calculated with `_get_avg_ident()` on target assemblies.
-    - Divergence is calculated with `_get_avg_dist()` on non-target assemblies.
+    best: NDArray[np.void],
+    indices: NDArray[np.int64],
+    lengths: NDArray[np.int64],
+    total_tar: int,
+    total_neg: int,
+) -> list[SignatureMetrics]:
+    """Calculate the metrics of all signatures based on their BLAST hits.
 
     Args:
-        blast_out (pd.DataFrame | None): Each row is the best BLAST hit of the marker in an assembly.
-            Required columns: `['is_target', 'nident', 'mismatch', 'gaps', 'n_hits', 'avg_nident']`.
-            `None` if the marker has no blast hit in any assembly.
-        marker_len (int): Marker length.
+        best (NDArray[np.void]): Best alignment per signature/assembly pair, including repeat statistics.
+        indices (NDArray[np.int64]): Signature index corresponding to each row of `best`, sorted in ascending order.
+        lengths (NDArray[np.int64]): Length of each signature.
         total_tar (int): Number of target assemblies.
         total_neg (int): Number of non-target assemblies.
 
     Returns:
-        SignatureMetrics: Signature metrics.
+        list[SignatureMetrics]: Metrics and BLAST hits of each signature.
     """
-    if blast_out is None: # no blast hit in any assembly
-        return SignatureMetrics()
+    n_seqs = len(lengths)
+    offsets = np.searchsorted(indices, np.arange(n_seqs + 1)) # offsets into best by signature
+    counts_both = np.diff(offsets) # including both target and non-target assemblies
+    nonempty = counts_both != 0
+    starts = offsets[:-1][nonempty]
 
-    metrics = {} # SignatureMetrics is frozen
+    def grouped_sum(values: NDArray) -> NDArray:
+        result = np.zeros(n_seqs)
+        if starts.size:
+            result[nonempty] = np.add.reduceat(values, starts)
+        return result
 
     # calculate sensitivity
-    df_tar = blast_out[blast_out['is_target'] == True]
-    if len(df_tar) > 0:
-        metrics['conservation'] = _get_avg_ident(df_tar, marker_len, total_tar)
-        metrics['f_tar_hits'] = len(df_tar) / total_tar
-        metrics['avg_repeats_tar'] = df_tar['n_hits'].mean()
-        metrics['avg_pident_tar'] = df_tar['avg_nident'].mean() / marker_len
+    mask = best['is_target']
+    nident = grouped_sum(np.where(mask, best['nident'], 0))
+    counts = grouped_sum(mask)
+    n_hits = grouped_sum(np.where(mask, best['n_hits'], 0))
+    avg_nident = grouped_sum(np.where(mask, best['avg_nident'], 0))
+    conservation = np.divide(
+        nident, lengths * total_tar, out=np.zeros(n_seqs), where=(lengths != 0) & (total_tar != 0)
+    )
+    f_tar_hits = np.divide(
+        counts, total_tar, out=np.zeros(n_seqs), where=total_tar != 0
+    )
+    avg_repeats_tar = np.divide(
+        n_hits, counts, out=np.zeros(n_seqs), where=counts != 0
+    )
+    avg_pident_tar = np.divide(
+        avg_nident, counts * lengths, out=np.zeros(n_seqs), where=(counts != 0) & (lengths != 0)
+    )
 
     # calculate specificity
-    df_neg = blast_out[blast_out['is_target'] == False]
-    if len(df_neg) > 0:
-        metrics['divergence'] = _get_avg_dist(df_neg, marker_len, total_neg)
-        metrics['f_neg_hits'] = len(df_neg) / total_neg
-        metrics['avg_repeats_neg'] = df_neg['n_hits'].mean()
-        metrics['avg_pident_neg'] = df_neg['avg_nident'].mean() / marker_len
+    mask = ~mask
+    diff = grouped_sum(np.where(mask, best['mismatch'] + best['gaps'], 0))
+    counts = counts_both - counts
+    n_hits = grouped_sum(np.where(mask, best['n_hits'], 0))
+    avg_nident = grouped_sum(np.where(mask, best['avg_nident'], 0))
+    divergence = np.divide(
+        diff, lengths * total_neg, out=np.zeros(n_seqs), where=(lengths != 0) & (total_neg != 0)
+    )
+    f_neg_hits = np.divide(
+        counts, total_neg, out=np.zeros(n_seqs), where=total_neg != 0
+    )
+    avg_repeats_neg = np.divide(
+        n_hits, counts, out=np.zeros(n_seqs), where=counts != 0
+    )
+    avg_pident_neg = np.divide(
+        avg_nident, counts * lengths, out=np.zeros(n_seqs), where=(counts != 0) & (lengths != 0)
+    )
 
-    return SignatureMetrics(**metrics)
+    return list(
+        SignatureMetrics(
+            conservation=float(conservation[i]),
+            f_tar_hits=float(f_tar_hits[i]),
+            divergence=float(divergence[i]),
+            f_neg_hits=float(f_neg_hits[i]),
+            avg_repeats_tar=float(avg_repeats_tar[i]),
+            avg_pident_tar=float(avg_pident_tar[i]),
+            avg_repeats_neg=float(avg_repeats_neg[i]),
+            avg_pident_neg=float(avg_pident_neg[i]),
+            blast=best[offsets[i]:offsets[i+1]]
+        )
+        for i in range(n_seqs)
+    )
 
 
 def eval_signatures(
-    all_seqs: list[str], blastdb: Path, total_tar: int, total_neg: int, n_cpu: int=1
+    seq_list: Sequence[str], blastdb: Path, total_tar: int, total_neg: int, n_cpu: int=1
 ) -> list[SignatureMetrics]:
     """BLAST check each signature sequence against all / non-target assemblies, and calculate the metrics of each signature.
 
     Args:
-        all_seqs (list[str]): A list of signature sequences.
+        seq_list (Sequence[str]): A list of signature sequences.
         blastdb (Path): Path to a BLAST database generated by Seqwin (e.g., `seqwin-out/blastdb/`).
         total_tar (int): Number of target assemblies.
         total_neg (int): Number of non-target assemblies.
@@ -159,10 +185,8 @@ def eval_signatures(
         list[SignatureMetrics]: Metrics and BLAST hits of each signature.
     """
     if blastdb.name == BLASTCONFIG.title_neg_only:
-        neg_only = True
         logger.info(' - BLAST checking signatures against non-target assemblies...')
     elif blastdb.name == BLASTCONFIG.title_all:
-        neg_only = False
         logger.info(' - BLAST checking signatures against all assemblies...')
     else:
         log_and_raise(
@@ -170,79 +194,50 @@ def eval_signatures(
             f'Invalid BLAST database title. Must be "{BLASTCONFIG.title_all}" or "{BLASTCONFIG.title_neg_only}"'
         )
     tik = time()
-    n_seqs = len(all_seqs)
-
-    # blast check all markers against all / non-target assemblies
+    n_seqs = len(seq_list)
     blast_out = blast(
-        all_seqs,
+        seq_list,
         db=blastdb,
         task=BLASTCONFIG.task,
         columns=BLASTCONFIG.columns,
         n_cpu=n_cpu,
         batch_size=BLASTCONFIG.batch_size,
     )
-    if len(blast_out) == 0:
-        log_and_raise(RuntimeError, 'No BLAST hit found')
-    # blast_out.to_pickle('blast_out.pkl')
+    if blast_out.dtype != _BLAST_DTYPE:
+        raise TypeError(f'Unexpected BLAST output dtype: {blast_out.dtype}; expected {_BLAST_DTYPE}')
 
-    #---------- extract BLAST hits of each marker ----------#
     logger.info(' - Formatting BLAST output...')
     # get assembly id and record id, see Assemblies.makeblastdb()
-    blast_out[['assembly_idx', 'is_target', 'record_id']] = blast_out['sseqid'].str.split(
-        BLASTCONFIG.header_sep, expand=True
-    )
-    blast_out.drop(columns='sseqid', inplace=True)
-    # unlike pd.read_csv() in blast(), df.str.split() does not do auto type conversion
-    blast_out['assembly_idx'] = blast_out['assembly_idx'].astype(int)
-    blast_out['is_target'] = blast_out['is_target'].map(BLASTCONFIG.str2bool)
+    subjects = np.fromiter((
+        (int(assembly_idx), BLASTCONFIG.str2bool[is_target], record_id)
+        for assembly_idx, is_target, record_id in (
+            subject.split(BLASTCONFIG.header_sep, 2) for subject in blast_out['sseqid']
+        )
+    ), dtype=_SUBJECT_DTYPE, count=len(blast_out))
 
     # keep the best alignment (highest bitscore) for each assembly
-    blast_out.sort_values(
-        by=['qseqid', 'assembly_idx', 'bitscore'],
-        ascending=[True, True, False], inplace=True
-    )
-    blast_out = blast_out.groupby(
-        by=['qseqid', 'assembly_idx'], as_index=True, sort=False
-    )
+    order = np.lexsort((-blast_out['bitscore'], subjects['assembly_idx'], blast_out['qseqid']))
+    blast_out = blast_out[order]
+    subjects = subjects[order]
+    # group by signature and assembly
+    starts = np.flatnonzero(np.r_[
+        len(blast_out) > 0, # starts should be empty when blast_out is empty
+        (blast_out['qseqid'][1:] != blast_out['qseqid'][:-1]) |
+        (subjects['assembly_idx'][1:] != subjects['assembly_idx'][:-1])
+    ])
+
+    # construct the compacted table (best alignments only)
+    best = np.empty(len(starts), dtype=_BEST_DTYPE)
+    np.take(blast_out[_KEPT_COLUMNS], starts, out=best[_KEPT_COLUMNS])
+    np.take(subjects, starts, out=best[_SUBJECT_COLUMNS])
     # also keep nident of other less optimal alignments
-    nident = blast_out['nident'].agg(
-        n_hits='count',
-        avg_nident='mean'
-    )
-    blast_out = blast_out.head(1)
-    nident.reset_index(drop=True, inplace=True)
-    blast_out.reset_index(drop=True, inplace=True)
-    blast_out = pd.concat([blast_out, nident], axis=1)
+    best['n_hits'] = np.diff(np.r_[starts, len(blast_out)])
+    best['avg_nident'] = np.add.reduceat(blast_out['nident'], starts) / best['n_hits']
 
-    # output a df for each query sequence (some markers might have no BLAST hit)
-    all_blast = [None] * n_seqs
-    for i, g in blast_out.groupby('qseqid', sort=False):
-        g.drop(columns='qseqid', inplace=True)
-        g.reset_index(drop=True, inplace=True)
-        all_blast[i] = g
-    #---------- extract BLAST hits of each marker ----------#
-
-    if not neg_only: # check for markers with no BLAST hit
-        for i, b in enumerate(all_blast):
-            if b is None:
-                logger.warning(f'Signature at index {i} (0-based) has no BLAST hit in any assembly ({all_seqs[i][:10]}...)')
-
-    # calculate conservation and divergence for each marker based on its blast output
     logger.info(' - Evaluating each signature...')
-    metrics_args = zip(
-        all_blast,
-        map(len, all_seqs),
-        repeat(total_tar, n_seqs),
-        repeat(total_neg, n_seqs),
-    )
-    metrics = mp_wrapper(
-        _get_metrics, metrics_args, n_cpu, n_jobs=n_seqs
-    )
-    # add BLAST dataframes after to avoid multiprocessing round-trip
-    metrics = list(
-        replace(m, blast=blast_out)
-        for m, blast_out in zip(metrics, all_blast, strict=True)
-    )
+    indices = blast_out['qseqid'][starts]
+    lengths = np.fromiter(map(len, seq_list), dtype=np.int64, count=n_seqs)
+    metrics = _get_metrics(best, indices, lengths, total_tar, total_neg)
 
     print_time_delta(time()-tik)
     return metrics

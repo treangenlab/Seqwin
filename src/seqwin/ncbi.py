@@ -7,7 +7,7 @@ NCBI
 
 Dependencies:
 -------------
-- pandas
+- numpy
 - blast
 - ncbi-datasets-cli
 - .utils
@@ -30,38 +30,38 @@ Attributes:
 __author__ = 'Michael X. Wang'
 __license__ = 'GPL 3.0'
 
-import shutil, json, logging, zipfile
+import shutil, json, logging, zipfile, csv
 from pathlib import Path
-from time import time
 from enum import Enum
 from io import StringIO
 from collections.abc import Sequence
 
 logger = logging.getLogger(__name__)
 
-import pandas as pd
+import numpy as np
+from numpy.typing import NDArray
 
 from .utils import log_and_raise, file_to_write, list_dir, run_cmd
 
 _ZIP_EXT = '.zip' # File extension of NCBI genome package. ['.zip']
-_BLAST_COL = ( # Default columns to be included in the BLAST tsv output
-    'qseqid', # 1. query or source (e.g., gene) sequence id
-    'sseqid', # 2. subject or target (e.g., reference genome) sequence id
-    'length', # 3. alignment length
-    'pident', # 4. percentage of identical matches (= nident / length)
-    'nident', # 5. number of identical matches (= length - mismatch - gaps)
-    'mismatch', # 6. number of mismatches
-    'gapopen', # 7. number of gap openings
-    'gaps', # 8. total number of gaps
-    'qstart', # 9. start of alignment in query
-    'qend', # 10. end of alignment in query
-    'sstart', # 11. start of alignment in subject
-    'send', # 12. end of alignment in subject
-    'evalue', # 13. expect value
-    'bitscore', # 14. bit score
-    'qseq', # 15. aligned part of query sequence
-    'sseq', # 16. aligned part of subject sequence
-)
+_BLAST_COLUMNS = { # Default columns to be included in the BLAST tsv output
+    'qseqid': np.int64, # 1. query or source (e.g., gene) sequence id
+    'sseqid': object, # 2. subject or target (e.g., reference genome) sequence id
+    'length': np.int64, # 3. alignment length
+    'pident': np.float64, # 4. percentage of identical matches (= nident / length)
+    'nident': np.int64, # 5. number of identical matches (= length - mismatch - gaps)
+    'mismatch': np.int64, # 6. number of mismatches
+    'gapopen': np.int64, # 7. number of gap openings
+    'gaps': np.int64, # 8. total number of gaps
+    'qstart': np.int64, # 9. start of alignment in query
+    'qend': np.int64, # 10. end of alignment in query
+    'sstart': np.int64, # 11. start of alignment in subject
+    'send': np.int64, # 12. end of alignment in subject
+    'evalue': np.float64, # 13. expect value
+    'bitscore': np.float64, # 14. bit score
+    'qseq': object, # 15. aligned part of query sequence
+    'sseq': object, # 16. aligned part of subject sequence
+}
 _MAX_REHYDRATE_WORKERS = 8 # Maximum number of CPUs for `datasets rehydrate` (avoid request bursts)
 _MAX_HSPS = '1000' # Maximum number of HSPs per subject sequence to save for each query. ['1000']
 _MAX_TARGET_SEQS = '50000' # Maximum number of aligned sequences to keep. ['50000']
@@ -314,6 +314,18 @@ def download_taxon(
     return assembly_paths
 
 
+def _get_blast_dtype(columns: Sequence[str] | None) -> np.dtype:
+    """Construct the structured dtype for the requested BLAST fields.
+    """
+    if columns is None:
+        columns = tuple(_BLAST_COLUMNS)
+    if len(columns) == 0 or len(set(columns)) != len(columns):
+        log_and_raise(ValueError, 'BLAST columns must be non-empty and unique')
+    if any(column not in _BLAST_COLUMNS for column in columns):
+        log_and_raise(ValueError, f'Unsupported BLAST columns: {columns}')
+    return np.dtype([(column, _BLAST_COLUMNS[column]) for column in columns])
+
+
 def _get_blast_outfmt(columns: Sequence[str]) -> str:
     """Given the columns to be included in the BLAST TSV output, get the value to be provided to
     the -outfmt argument of the blastn command. See `blastn -help` for more info.
@@ -334,22 +346,22 @@ def _blast_batch(
     taxids: str | None,
     neg_taxids: str | None,
     n_cpu: int
-) -> pd.DataFrame:
-    """Run BLAST on a list of sequences and return a DataFrame of the tabular output.
+) -> NDArray[np.void]:
+    """Run BLAST on a list of sequences and return a structured array of the tabular output.
 
     Args:
         seq_idx (Sequence[int]): Indices of the input sequences.
         seq_list (Sequence[str]): A list of sequences for BLAST.
         db (Path): Path to the BLAST database.
         task (str): Preset BLAST tasks ('blastn', 'blastn-short', 'megablast').
-        columns (Sequence[str]): Columns to be included in the DataFrame output.
+        columns (Sequence[str]): Columns to be included in the structured array output.
         outfmt (str): Output of `_get_blast_outfmt()`.
         taxids (str | None): Only search for these taxonomy IDs and their descendants.
         neg_taxids (str | None): Do NOT search for these taxonomy IDs and their descendants.
         n_cpu (int): Number of processes to run in parallel.
 
     Returns:
-        pd.DataFrame: A DataFrame of the tabular output.
+        NDArray[np.void]: A structured array of the tabular output, empty when no hits are found.
     """
     # create input fasta for blast
     blast_in = ''.join(
@@ -376,8 +388,13 @@ def _blast_batch(
         *args, stdin=blast_in # input fasta as stdin
     ).stdout
 
-    # convert BLAST output into a df. pd.read_csv() does auto type conversion (e.g., 'qseqid' as int)
-    return pd.read_csv(StringIO(blast_out), sep='\t', header=None, names=columns, index_col=False)
+    dtype = _get_blast_dtype(columns)
+    def records():
+        for row in csv.reader(StringIO(blast_out), delimiter='\t'):
+            if len(row) != len(dtype.names):
+                log_and_raise(ValueError, f'Expected {len(dtype.names)} BLAST fields, got {len(row)}')
+            yield tuple(row)
+    return np.fromiter(records(), dtype=dtype)
 
 
 def blast(
@@ -389,8 +406,8 @@ def blast(
     neg_taxids: Sequence[int] | None = None,
     n_cpu: int = 1,
     batch_size: int = 1000
-) -> pd.DataFrame:
-    """Run BLAST on a list of sequences and return a DataFrame of the tabular output.
+) -> NDArray[np.void]:
+    """Run BLAST on a list of sequences and return a structured array of the tabular output.
     - -max_hsps is set to 1000.
     - -max_target_seqs is set to 50000.
     - To avoid having too many query sequences in a single BLAST run, each run only takes a batch
@@ -400,14 +417,14 @@ def blast(
         seq_list (Sequence[str]): A list of sequences for BLAST.
         db (Path): Path to the BLAST database.
         task (str): Preset BLAST tasks ('blastn', 'blastn-short', 'megablast'). ['blastn']
-        columns (Sequence[str] | None): Columns to be included in the DataFrame output. None to use default columns. [None]
+        columns (Sequence[str] | None): Columns to be included in the structured array output. None to use default columns. [None]
         taxids (Sequence[int] | None): Only search for these taxonomy IDs and their descendants. [None]
         neg_taxids (Sequence[int] | None): Do NOT search for these taxonomy IDs and their descendants. [None]
         n_cpu (int, optional): Number of processes to run in parallel. [1]
         batch_size (int, optional): Number of query sequences in a single BLAST run. [1000]
 
     Returns:
-        pd.DataFrame: A DataFrame of the tabular output, with default columns,
+        NDArray[np.void]: A structured array of the tabular output, with default columns,
             1. 'qseqid': query or source (e.g., gene) sequence id.
             2. 'sseqid': subject or target (e.g., reference genome) sequence id.
             3. 'length': alignment length.
@@ -432,9 +449,7 @@ def blast(
     seq_idx = list(range(tot_seq)) # indices have to be set in advance (before batches)
 
     # convert inputs to blastn CLI compatible formats
-    if columns is None:
-        # use default columns (including sequences)
-        columns = _BLAST_COL
+    columns = _get_blast_dtype(columns).names
     outfmt = _get_blast_outfmt(columns) # value for blastn -outfmt
     if taxids is not None:
         taxids = ','.join(map(str, taxids))
@@ -445,8 +460,7 @@ def blast(
     # run blast on batches of sequences
     logger.info(f' - Running blastn on {len(seq_list)} sequences, with batch size of {batch_size} (threads={n_cpu})...')
     batch_start = 0
-    blast_out: list[pd.DataFrame] = list()
-
+    blast_out = list()
     while batch_start < tot_seq:
         logger.info(f' - {batch_start}/{tot_seq}')
         batch_stop = batch_start + batch_size
@@ -458,8 +472,7 @@ def blast(
         ))
         batch_start = batch_stop
 
-    # concat output dfs
     if len(blast_out) == 1:
         return blast_out[0]
     else:
-        return pd.concat(blast_out, axis=0, ignore_index=True)
+        return np.concatenate(blast_out)

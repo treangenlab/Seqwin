@@ -6,14 +6,12 @@ Assembly distance estimation with `Mash <https://doi.org/10.1186/s13059-016-0997
 
 Dependencies:
 ------------
-- pandas
 - mash
 - .utils
 
 Functions:
 ----------
 - sketch
-- dist
 - get_jaccard
 """
 
@@ -22,18 +20,14 @@ __license__ = 'GPL 3.0'
 
 import logging, subprocess
 from pathlib import Path
-from io import StringIO
 from collections.abc import Iterable, Generator
 
 logger = logging.getLogger(__name__)
-
-import pandas as pd
 
 from .utils import log_and_raise, file_to_write, run_cmd
 
 _MASH_SKETCH_EXT = '.msh' # File extension of Mash output. [.msh]
 _STDIN = Path('/dev/stdin')
-_DIST_COL = ('ref', 'query', 'dist', 'pval', 'jaccard') # output columns of `mash dist`
 
 
 def sketch(
@@ -90,7 +84,7 @@ def sketch(
     elif out_path.suffix == _MASH_SKETCH_EXT:
         # remove .msh from out_path, or there will be two of them
         real_out_path = out_path
-        out_path.with_suffix('')
+        out_path = out_path.with_suffix('')
     else:
         real_out_path = out_path.with_name(out_path.name + _MASH_SKETCH_EXT)
     # check if file exists
@@ -101,40 +95,6 @@ def sketch(
     run_cmd(*args, stdin=stdin, raise_error=True)
     logger.info(f' - Mash sketch file saved as {real_out_path}')
     return real_out_path
-
-
-def dist(
-    ref_path: Path,
-    query_path: Path | None = None,
-    n_cpu: int = 1
-) -> pd.DataFrame:
-    """Run `mash dist {ref_path} {query_path}` and parse the TSV output as a pandas DataFrame.
-    Note: high memory usage when the number of assemblies in the sketch file is large.
-
-    Args:
-        ref_path (Path): Path to the reference sketch file. It could include multiple sketches, merged with the 'mash paste' command.
-        query_path (Path | None, optional): Path to the query sketch. If None, query ref_path against itself. [None]
-        n_cpu (int, optional): Number of processes to run in parallel. [1]
-
-    Returns:
-        pd.DataFrame: Tabular output of `mash dist`, each row is an assembly pair,
-            with columns ['ref', 'query', 'dist', 'pval', 'jaccard', 'shared', 'total'].
-    """
-    if query_path is None:
-        query_path = ref_path
-
-    logger.info(' - Calculating Mash distances of assembly pairs...')
-    cmd_out = run_cmd(
-        'mash', 'dist',
-        '-p', str(n_cpu),
-        ref_path,
-        query_path
-    )
-    # parse stdout; pd.read_csv() does auto type conversion
-    df = pd.read_csv(StringIO(cmd_out.stdout), sep='\t', header=None, names=_DIST_COL, index_col=False)
-    df[['shared', 'total']] = df['jaccard'].str.split('/', expand=True).astype('int64')
-    df['jaccard'] = df['shared'] / df['total']
-    return df
 
 
 def get_jaccard(

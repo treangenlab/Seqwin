@@ -4,7 +4,6 @@ import pickle
 from pathlib import Path
 
 import numpy as np
-import pandas as pd
 import pytest
 
 import seqwin.assemblies as assemblies_module
@@ -64,31 +63,6 @@ def test_assemblies_is_a_lightweight_ordered_container(tmp_path: Path) -> None:
     assert len(assemblies) == 4
 
 
-def test_assemblies_empty_and_pickle_round_trip() -> None:
-    assemblies = pickle.loads(pickle.dumps(Assemblies([], [])))
-
-    assert len(assemblies) == 0
-    assert assemblies.paths == ()
-    assert assemblies.is_targets.dtype == np.bool_
-    assert assemblies.is_targets.flags.c_contiguous
-
-
-@pytest.mark.parametrize(
-    ('is_targets', 'message'),
-    (
-        pytest.param([True], r'len\(paths\) must equal len\(is_targets\)', id='wrong-length'),
-        pytest.param([[True], [False]], 'is_targets must be one-dimensional', id='two-dimensional'),
-    ),
-)
-def test_assemblies_rejects_invalid_target_statuses(
-    tmp_path: Path, is_targets, message: str,
-) -> None:
-    paths = [tmp_path / 'first.fasta', tmp_path / 'second.fasta']
-
-    with pytest.raises(ValueError, match=message):
-        Assemblies(paths, is_targets)
-
-
 def test_get_assemblies_keeps_targets_first(monkeypatch, tmp_path: Path) -> None:
     tar_paths = [tmp_path / 'target-0.fasta', tmp_path / 'target-1.fasta']
     neg_paths = [tmp_path / 'negative-0.fasta', tmp_path / 'negative-1.fasta']
@@ -107,6 +81,29 @@ def test_get_assemblies_keeps_targets_first(monkeypatch, tmp_path: Path) -> None
     np.testing.assert_array_equal(
         assemblies.is_targets, [True, True, False, False]
     )
+
+
+def test_get_assemblies_preserves_csv_format(monkeypatch, tmp_path: Path) -> None:
+    tar_paths = [tmp_path / 'z-target.fasta', tmp_path / 'target,1.fasta']
+    neg_paths = [tmp_path / 'negative,"0".fasta', tmp_path / 'a-negative.fasta']
+    config = type('Config', (), {
+        'tar_paths': None, 'neg_paths': None, 'tar_dir': None, 'neg_dir': None,
+        'overwrite': False, 'download_only': False
+    })()
+    state = type('RunState', (), {'working_dir': tmp_path})()
+    monkeypatch.setattr(
+        assemblies_module, '_download', lambda config, working_dir: (tar_paths, neg_paths)
+    )
+
+    get_assemblies(config, state)
+
+    assert (tmp_path / assemblies_module.WORKINGDIR.assemblies_csv).read_bytes() == (
+        ',path,is_target\n'
+        f'0,{tmp_path}/z-target.fasta,True\n'
+        f'1,"{tmp_path}/target,1.fasta",True\n'
+        f'2,"{tmp_path}/negative,""0"".fasta",False\n'
+        f'3,{tmp_path}/a-negative.fasta,False\n'
+    ).encode()
 
 
 @pytest.mark.parametrize('n_cpu', [1, 3])

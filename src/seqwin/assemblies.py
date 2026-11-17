@@ -16,7 +16,7 @@ Functions:
 __author__ = 'Michael X. Wang'
 __license__ = 'GPL 3.0'
 
-import gzip, logging, subprocess
+import csv, gzip, logging, subprocess
 import multiprocessing as mp
 from pathlib import Path
 from time import time
@@ -26,7 +26,6 @@ from collections.abc import Sequence
 logger = logging.getLogger(__name__)
 
 import numpy as np
-import pandas as pd
 from numpy.typing import NDArray
 
 from .ncbi import download_taxon
@@ -401,10 +400,11 @@ def get_assemblies(config: Config, state: RunState) -> Assemblies:
     # save assemblies as csv
     assemblies_path = working_dir / WORKINGDIR.assemblies_csv
     file_to_write(assemblies_path, overwrite)
-    pd.DataFrame({
-        'path': assemblies.paths,
-        'is_target': assemblies.is_targets,
-    }).to_csv(assemblies_path, index=True)
+    with assemblies_path.open('w', newline='') as f:
+        writer = csv.writer(f, lineterminator='\n')
+        writer.writerow(('', 'path', 'is_target'))
+        for idx, (path, is_target) in enumerate(zip(assemblies.paths, assemblies.is_targets)):
+            writer.writerow((idx, path, is_target))
     logger.info(f'Assembly indices and paths saved as {assemblies_path}')
 
     return assemblies

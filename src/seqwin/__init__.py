@@ -20,7 +20,6 @@ Dependencies:
 -------------
 - python >=3.10
 - numpy >=2
-- pandas >=2
 - pydantic
 - typer
 - mash (optional)
