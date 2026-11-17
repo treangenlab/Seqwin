@@ -84,7 +84,7 @@ def sketch(
     elif out_path.suffix == _MASH_SKETCH_EXT:
         # remove .msh from out_path, or there will be two of them
         real_out_path = out_path
-        out_path.with_suffix('')
+        out_path = out_path.with_suffix('')
     else:
         real_out_path = out_path.with_name(out_path.name + _MASH_SKETCH_EXT)
     # check if file exists
