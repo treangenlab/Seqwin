@@ -2,7 +2,6 @@ import csv
 from pathlib import Path
 
 import numpy as np
-import pandas as pd
 import pytest
 
 import seqwin.evaluation as evaluation
@@ -16,16 +15,19 @@ COLUMNS = _METADATA_NAMES
 
 def _files(tmp_path):
     fasta = tmp_path / 'signatures.fasta'
-    csv = tmp_path / 'signatures.csv'
+    csv_path = tmp_path / 'signatures.csv'
     fasta.write_text('>second\nAAAA\n>first\nCCCC\n')
-    pd.DataFrame([
-        ('second', 4, .95, 3, 1), ('first', 4, .85, 2, 2),
-    ], columns=COLUMNS).to_csv(csv, index=False)
-    return fasta, csv
+    with csv_path.open('w', newline='') as output:
+        writer = csv.writer(output)
+        writer.writerow(COLUMNS)
+        writer.writerows([
+            ('second', 4, .95, 3, 1), ('first', 4, .85, 2, 2),
+        ])
+    return fasta, csv_path
 
 
 def test_file_evaluation_preserves_order_and_appends_metrics(monkeypatch, tmp_path):
-    fasta, csv = _files(tmp_path)
+    fasta, csv_path = _files(tmp_path)
     metrics = [SignatureMetrics(conservation=.1), SignatureMetrics(conservation=.8)]
 
     def evaluate(seqs, db, tar, neg, cpu):
@@ -33,11 +35,13 @@ def test_file_evaluation_preserves_order_and_appends_metrics(monkeypatch, tmp_pa
         return metrics
 
     monkeypatch.setattr(evaluation, 'eval_signatures', evaluate)
-    assert eval_signatures_seqwin(fasta, csv, Path('db'), 2, 3) == metrics
-    output = pd.read_csv(csv)
-    assert tuple(output.columns) == (*COLUMNS, *evaluation._METRIC_NAMES)
-    assert output.fasta_header.tolist() == ['second', 'first']
-    assert output.conservation.tolist() == [.1, .8]
+    assert eval_signatures_seqwin(fasta, csv_path, Path('db'), 2, 3) == metrics
+    with csv_path.open(newline='') as source:
+        reader = csv.DictReader(source)
+        output = list(reader)
+    assert tuple(reader.fieldnames) == (*COLUMNS, *evaluation._METRIC_NAMES)
+    assert [row['fasta_header'] for row in output] == ['second', 'first']
+    assert [float(row['conservation']) for row in output] == [.1, .8]
 
 
 @pytest.mark.parametrize(('change', 'message'), [
@@ -45,31 +49,35 @@ def test_file_evaluation_preserves_order_and_appends_metrics(monkeypatch, tmp_pa
     ('length', 'length mismatch at index 0'),
 ])
 def test_file_mismatches_fail_before_evaluation(monkeypatch, tmp_path, change, message):
-    fasta, csv = _files(tmp_path)
-    df = pd.read_csv(csv)
+    fasta, csv_path = _files(tmp_path)
+    with csv_path.open(newline='') as source:
+        rows = list(csv.DictReader(source))
     if change == 'count':
-        df = df.iloc[:1]
+        rows = rows[:1]
     else:
-        df.loc[0, 'fasta_header' if change == 'header' else 'length'] = 'wrong' if change == 'header' else 5
-    df.to_csv(csv, index=False)
-    before = csv.read_bytes()
+        rows[0]['fasta_header' if change == 'header' else 'length'] = 'wrong' if change == 'header' else 5
+    with csv_path.open('w', newline='') as output:
+        writer = csv.DictWriter(output, fieldnames=COLUMNS)
+        writer.writeheader()
+        writer.writerows(rows)
+    before = csv_path.read_bytes()
     monkeypatch.setattr(evaluation, 'eval_signatures', lambda *args: pytest.fail('unexpected evaluation'))
     with pytest.raises(ValueError, match=message):
-        eval_signatures_seqwin(fasta, csv, Path('db'), 1, 1)
-    assert csv.read_bytes() == before
+        eval_signatures_seqwin(fasta, csv_path, Path('db'), 1, 1)
+    assert csv_path.read_bytes() == before
 
 
 def test_failed_evaluation_preserves_csv(monkeypatch, tmp_path):
-    fasta, csv = _files(tmp_path)
-    before = csv.read_bytes()
+    fasta, csv_path = _files(tmp_path)
+    before = csv_path.read_bytes()
 
     def fail(*args):
         raise RuntimeError('BLAST failed')
 
     monkeypatch.setattr(evaluation, 'eval_signatures', fail)
     with pytest.raises(RuntimeError, match='BLAST failed'):
-        eval_signatures_seqwin(fasta, csv, Path('db'), 1, 1)
-    assert csv.read_bytes() == before
+        eval_signatures_seqwin(fasta, csv_path, Path('db'), 1, 1)
+    assert csv_path.read_bytes() == before
 
 
 def test_hits_keep_optimal_alignment_and_input_order(monkeypatch):

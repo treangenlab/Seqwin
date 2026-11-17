@@ -1,3 +1,4 @@
+import csv
 from pathlib import Path
 
 import pytest
@@ -48,7 +49,6 @@ def test_output_directory_overwrite_behavior(tmp_path: Path) -> None:
 def test_signature_output_and_evaluation_lifecycle(
     monkeypatch, tmp_path, targets_txt, non_targets_txt, run_blast, has_blast,
 ):
-    import pandas as pd
     from seqwin.core._native import _METADATA_NAMES
     from seqwin.assemblies import Assemblies
     from seqwin.entry import load
@@ -73,11 +73,12 @@ def test_signature_output_and_evaluation_lifecycle(
         neg_paths=non_targets_txt, run_blast=run_blast, kmerlen=17,
         windowsize=10, min_len=17, max_len=200, n_cpu=1, save_pickle=True,
     ))
-    output = pd.read_csv(seq.state.working_dir / 'signatures.csv')
+    with (seq.state.working_dir / 'signatures.csv').open(newline='') as source:
+        columns = next(csv.reader(source))
     mandatory = _METADATA_NAMES
     assert isinstance(seq.signatures, tuple)
     if run_blast and has_blast:
-        assert tuple(output.columns) == (*mandatory, *_METRIC_NAMES)
+        assert tuple(columns) == (*mandatory, *_METRIC_NAMES)
         assert isinstance(seq.metrics, tuple)
         assert len(seq.metrics) == len(seq.signatures)
         assert calls == [dict(
@@ -85,7 +86,7 @@ def test_signature_output_and_evaluation_lifecycle(
             overwrite=False, n_cpu=1,
         )]
     else:
-        assert tuple(output.columns) == mandatory
+        assert tuple(columns) == mandatory
         assert seq.metrics is None
         assert not calls
     from seqwin.config import WORKINGDIR
