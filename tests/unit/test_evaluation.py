@@ -74,9 +74,11 @@ def test_failed_evaluation_preserves_csv(monkeypatch, tmp_path):
 
 def test_hits_keep_optimal_alignment_and_input_order(monkeypatch):
     # Query 0 has no hits. Query 1 has repeats and tied non-target bitscores.
+    # Query 2 has only target hits. Query 3 has only non-target hits.
     tar = next(k for k, v in BLASTCONFIG.str2bool.items() if v)
     neg = next(k for k, v in BLASTCONFIG.str2bool.items() if not v)
-    hits = np.array([
+    hits = np.zeros(8, dtype=evaluation._BLAST_DTYPE)
+    hits[['qseqid', 'sseqid', 'bitscore', 'nident', 'mismatch', 'gaps']] = [
         (2, BLASTCONFIG.header_sep.join(['0', tar, 'other']), 15, 3, 1, 0),
         (1, BLASTCONFIG.header_sep.join(['0', tar, 'record']), 10, 2, 1, 0),
         (1, BLASTCONFIG.header_sep.join(['2', neg, 'first']), 20, 3, 1, 1),
@@ -84,12 +86,10 @@ def test_hits_keep_optimal_alignment_and_input_order(monkeypatch):
         (1, BLASTCONFIG.header_sep.join(['2', neg, 'tied']), 20, 1, 3, 0),
         (1, BLASTCONFIG.header_sep.join(['1', tar, 'record']), 10, 2, 2, 0),
         (1, BLASTCONFIG.header_sep.join(['3', neg, 'record']), 10, 2, 1, 0),
-    ], dtype=[
-        ('qseqid', np.int64), ('sseqid', object), ('bitscore', np.float64),
-        ('nident', np.int64), ('mismatch', np.int64), ('gaps', np.int64),
-    ])
+        (3, BLASTCONFIG.header_sep.join(['2', neg, 'negative']), 10, 2, 1, 1),
+    ]
     monkeypatch.setattr(evaluation, 'blast', lambda *args, **kwargs: hits.copy())
-    metrics = evaluation.eval_signatures(['AAAA', 'CCCC', 'GGGG'], Path(BLASTCONFIG.title_all), 3, 3, 1)
+    metrics = evaluation.eval_signatures(('AAAA', 'CCCC', 'GGGG', 'TTTT'), Path(BLASTCONFIG.title_all), 3, 3, 1)
     assert metrics[0].blast.size == 0
     assert all(getattr(metrics[0], name) == 0.0 for name in evaluation._METRIC_NAMES)
     assert metrics[1].conservation == .5
@@ -106,6 +106,28 @@ def test_hits_keep_optimal_alignment_and_input_order(monkeypatch):
     assert metrics[1].blast['avg_nident'].tolist() == [3, 2, 2, 2]
     assert metrics[2].conservation == .25
     assert metrics[2].blast['record_id'].tolist() == ['other']
+    assert metrics[3].conservation == 0.0
+    assert metrics[3].f_tar_hits == 0.0
+    assert metrics[3].avg_repeats_tar == 0.0
+    assert metrics[3].avg_pident_tar == 0.0
+    assert metrics[3].divergence == pytest.approx(1 / 6)
+    assert metrics[3].f_neg_hits == pytest.approx(1 / 3)
+    assert metrics[3].avg_repeats_neg == 1
+    assert metrics[3].avg_pident_neg == .5
+    assert metrics[3].blast['record_id'].tolist() == ['negative']
+
+
+def test_empty_blast_output(monkeypatch):
+    monkeypatch.setattr(evaluation, 'blast', lambda *args, **kwargs: np.empty(0, dtype=evaluation._BLAST_DTYPE))
+    seq_list = ('AAAA', 'CCCC')
+    metrics = evaluation.eval_signatures(seq_list, Path(BLASTCONFIG.title_all), 1, 1)
+    assert len(metrics) == len(seq_list)
+    default = SignatureMetrics()
+    for metric in [*metrics, default]:
+        assert all(getattr(metric, name) == 0.0 for name in evaluation._METRIC_NAMES)
+        assert metric.blast.size == 0
+        assert metric.blast.dtype == evaluation._BEST_DTYPE
+    assert default.blast is not SignatureMetrics().blast
 
 
 def test_csv_rewrite_preserves_metadata_strings_and_escaping(monkeypatch, tmp_path):

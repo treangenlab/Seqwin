@@ -22,35 +22,51 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 from time import time
 from dataclasses import dataclass, field, fields
+from collections.abc import Sequence
 
 import numpy as np
 from numpy.typing import NDArray
 
 from .core import read_fasta
 from .core._native import _METADATA_NAMES
-from .ncbi import blast
+from .ncbi import blast, _get_blast_dtype
 from .utils import print_time_delta, log_and_raise
 from .config import BLASTCONFIG
 
 logger = logging.getLogger(__name__)
 
+_BLAST_DTYPE = _get_blast_dtype(BLASTCONFIG.columns)
+_KEPT_COLUMNS = list(name for name in _BLAST_DTYPE.names if name not in ('qseqid', 'sseqid'))
+_SUBJECT_DTYPE = np.dtype([('assembly_idx', np.int64), ('is_target', bool), ('record_id', object)])
+_SUBJECT_COLUMNS = list(_SUBJECT_DTYPE.names)
+# dtype of SignatureMetrics.blast
+_BEST_DTYPE = np.dtype(
+    list((name, _BLAST_DTYPE[name]) for name in _KEPT_COLUMNS) +
+    _SUBJECT_DTYPE.descr +
+    [('n_hits', np.int64), ('avg_nident', np.float64)]
+)
+
 
 @dataclass(slots=True, frozen=True)
 class SignatureMetrics:
     """
-    Metrics of a signature, calculated from its BLAST alignments against target / non-target assemblies.
+    Metrics of a signature, calculated from its BLAST hits against target / non-target assemblies.
     Metrics default to zero for signatures with no BLAST hits.
 
     Attributes:
         conservation (float): Average fraction of identical bases between the signature and target assemblies.
+            Calculated from the best alignment in each assembly.
         f_tar_hits (float): Fraction of target assemblies with a BLAST hit.
         divergence (float): Average fraction of mismatches and gaps between the signature and non-target assemblies.
+            Calculated from the best alignment in each assembly. Assemblies without hits contribute zero.
         f_neg_hits (float): Fraction of non-target assemblies with a BLAST hit.
-        avg_repeats_tar (float): Average number of repeats of this signature in target assemblies.
-        avg_pident_tar (float): Average percentage of identical bases of all repeats in target assemblies.
-        avg_repeats_neg (float): Average number of repeats of this signature in non-target assemblies.
-        avg_pident_neg (float): Average percentage of identical bases of all repeats in non-target assemblies.
-        blast (NDArray[np.void] | None): Best BLAST alignments in each assembly.
+        avg_repeats_tar (float): Average number of repeats across target assemblies with hits.
+        avg_pident_tar (float): Average fraction of identical bases, first averaged across repeats
+            within each target assembly, then across target assemblies with hits.
+        avg_repeats_neg (float): Average number of repeats across non-target assemblies with hits.
+        avg_pident_neg (float): Average fraction of identical bases, first averaged across repeats
+            within each non-target assembly, then across non-target assemblies with hits.
+        blast (NDArray[np.void]): Structured array containing the best alignment per assembly.
     """
     conservation: float = 0.0
     f_tar_hits: float = 0.0
@@ -60,7 +76,9 @@ class SignatureMetrics:
     avg_pident_tar: float = 0.0
     avg_repeats_neg: float = 0.0
     avg_pident_neg: float = 0.0
-    blast: NDArray[np.void] | None = field(default=None, repr=False, compare=False)
+    blast: NDArray[np.void] = field(
+        default_factory=lambda: np.empty(0, dtype=_BEST_DTYPE), repr=False, compare=False
+    )
 
 # Scalar metrics (excluding 'blast')
 _METRIC_NAMES = tuple(f.name for f in fields(SignatureMetrics) if f.name != 'blast')
@@ -86,14 +104,23 @@ def _get_metrics(
         list[SignatureMetrics]: Metrics and BLAST hits of each signature.
     """
     n_seqs = len(lengths)
+    offsets = np.searchsorted(indices, np.arange(n_seqs + 1)) # offsets into best by signature
+    counts_both = np.diff(offsets) # including both target and non-target assemblies
+    nonempty = counts_both != 0
+    starts = offsets[:-1][nonempty]
+
+    def grouped_sum(values: NDArray) -> NDArray:
+        result = np.zeros(n_seqs)
+        if starts.size:
+            result[nonempty] = np.add.reduceat(values, starts)
+        return result
 
     # calculate sensitivity
     mask = best['is_target']
-    indices_mask = indices[mask]
-    nident = np.bincount(indices_mask, weights=best['nident'][mask], minlength=n_seqs)
-    counts = np.bincount(indices_mask, minlength=n_seqs)
-    n_hits = np.bincount(indices_mask, weights=best['n_hits'][mask], minlength=n_seqs)
-    avg_nident = np.bincount(indices_mask, weights=best['avg_nident'][mask], minlength=n_seqs)
+    nident = grouped_sum(np.where(mask, best['nident'], 0))
+    counts = grouped_sum(mask)
+    n_hits = grouped_sum(np.where(mask, best['n_hits'], 0))
+    avg_nident = grouped_sum(np.where(mask, best['avg_nident'], 0))
     conservation = np.divide(
         nident, lengths * total_tar, out=np.zeros(n_seqs), where=(lengths != 0) & (total_tar != 0)
     )
@@ -109,12 +136,10 @@ def _get_metrics(
 
     # calculate specificity
     mask = ~mask
-    indices_mask = indices[mask]
-    best_diff = best['mismatch'] + best['gaps']
-    diff = np.bincount(indices_mask, weights=best_diff[mask], minlength=n_seqs)
-    counts = np.bincount(indices_mask, minlength=n_seqs)
-    n_hits = np.bincount(indices_mask, weights=best['n_hits'][mask], minlength=n_seqs)
-    avg_nident = np.bincount(indices_mask, weights=best['avg_nident'][mask], minlength=n_seqs)
+    diff = grouped_sum(np.where(mask, best['mismatch'] + best['gaps'], 0))
+    counts = counts_both - counts
+    n_hits = grouped_sum(np.where(mask, best['n_hits'], 0))
+    avg_nident = grouped_sum(np.where(mask, best['avg_nident'], 0))
     divergence = np.divide(
         diff, lengths * total_neg, out=np.zeros(n_seqs), where=(lengths != 0) & (total_neg != 0)
     )
@@ -128,7 +153,6 @@ def _get_metrics(
         avg_nident, counts * lengths, out=np.zeros(n_seqs), where=(counts != 0) & (lengths != 0)
     )
 
-    offsets = np.searchsorted(indices, np.arange(n_seqs + 1))
     return list(
         SignatureMetrics(
             conservation=float(conservation[i]),
@@ -146,12 +170,12 @@ def _get_metrics(
 
 
 def eval_signatures(
-    all_seqs: list[str], blastdb: Path, total_tar: int, total_neg: int, n_cpu: int=1
+    seq_list: Sequence[str], blastdb: Path, total_tar: int, total_neg: int, n_cpu: int=1
 ) -> list[SignatureMetrics]:
     """BLAST check each signature sequence against all / non-target assemblies, and calculate the metrics of each signature.
 
     Args:
-        all_seqs (list[str]): A list of signature sequences.
+        seq_list (Sequence[str]): A list of signature sequences.
         blastdb (Path): Path to a BLAST database generated by Seqwin (e.g., `seqwin-out/blastdb/`).
         total_tar (int): Number of target assemblies.
         total_neg (int): Number of non-target assemblies.
@@ -170,25 +194,26 @@ def eval_signatures(
             f'Invalid BLAST database title. Must be "{BLASTCONFIG.title_all}" or "{BLASTCONFIG.title_neg_only}"'
         )
     tik = time()
-    n_seqs = len(all_seqs)
+    n_seqs = len(seq_list)
     blast_out = blast(
-        all_seqs,
+        seq_list,
         db=blastdb,
         task=BLASTCONFIG.task,
         columns=BLASTCONFIG.columns,
         n_cpu=n_cpu,
         batch_size=BLASTCONFIG.batch_size,
     )
+    if blast_out.dtype != _BLAST_DTYPE:
+        raise TypeError(f'Unexpected BLAST output dtype: {blast_out.dtype}; expected {_BLAST_DTYPE}')
 
     logger.info(' - Formatting BLAST output...')
     # get assembly id and record id, see Assemblies.makeblastdb()
-    subject_dtype = [('assembly_idx', np.int64), ('is_target', bool), ('record_id', object)]
     subjects = np.fromiter((
         (int(assembly_idx), BLASTCONFIG.str2bool[is_target], record_id)
         for assembly_idx, is_target, record_id in (
-            subject.split(BLASTCONFIG.header_sep) for subject in blast_out['sseqid']
+            subject.split(BLASTCONFIG.header_sep, 2) for subject in blast_out['sseqid']
         )
-    ), dtype=subject_dtype, count=len(blast_out))
+    ), dtype=_SUBJECT_DTYPE, count=len(blast_out))
 
     # keep the best alignment (highest bitscore) for each assembly
     order = np.lexsort((-blast_out['bitscore'], subjects['assembly_idx'], blast_out['qseqid']))
@@ -202,22 +227,16 @@ def eval_signatures(
     ])
 
     # construct the compacted table (best alignments only)
-    kept_cols = [name for name in blast_out.dtype.names if name not in ('qseqid', 'sseqid')]
-    best = np.empty(
-        len(starts),
-        dtype=[(name, blast_out.dtype[name]) for name in kept_cols] +
-              subject_dtype +
-              [('n_hits', np.int64), ('avg_nident', np.float64)]
-    )
-    np.take(blast_out[kept_cols], starts, out=best[kept_cols])
-    np.take(subjects, starts, out=best[list(subjects.dtype.names)])
+    best = np.empty(len(starts), dtype=_BEST_DTYPE)
+    np.take(blast_out[_KEPT_COLUMNS], starts, out=best[_KEPT_COLUMNS])
+    np.take(subjects, starts, out=best[_SUBJECT_COLUMNS])
     # also keep nident of other less optimal alignments
     best['n_hits'] = np.diff(np.r_[starts, len(blast_out)])
     best['avg_nident'] = np.add.reduceat(blast_out['nident'], starts) / best['n_hits']
 
     logger.info(' - Evaluating each signature...')
     indices = blast_out['qseqid'][starts]
-    lengths = np.fromiter(map(len, all_seqs), dtype=np.int64, count=n_seqs)
+    lengths = np.fromiter(map(len, seq_list), dtype=np.int64, count=n_seqs)
     metrics = _get_metrics(best, indices, lengths, total_tar, total_neg)
 
     print_time_delta(time()-tik)
