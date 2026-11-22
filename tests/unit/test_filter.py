@@ -34,7 +34,7 @@ def _filter_distinct_weights(tmp_path, edge_weight_th):
     assembly_nodes = np.tile(np.arange(4, dtype=np.uintp), 4)
     node_offsets = np.array([0, 4, 8, 12, 16, 16], dtype=np.uintp)
     targets = np.array([True, True, True, True, False], dtype=np.bool_)
-    edge_w_th_mul = np.nextafter(edge_weight_th / 2.8, np.inf)
+    edge_w_th_mul = edge_weight_th / 4
     graph = _graph(
         kmers, offsets, prevalences, edges, record_offsets, assembly_nodes, node_offsets,
     )
@@ -58,7 +58,7 @@ def test_native_filter_preserves_ranges_and_original_indices(tmp_path):
     assert filtered.e_absence_tar is None
     assert filtered.e_presence_neg is None
     assert filtered.penalty_th == .3
-    assert filtered.edge_weight_th == pytest.approx(.42)
+    assert filtered.edge_weight_th == pytest.approx(.6)
     assert filtered.min_nodes == 1 and filtered.max_nodes is None
     np.testing.assert_array_equal(nodes['idx'], [0, 1, 2, 3])
     np.testing.assert_array_equal(nodes['n_tar'], [2, 2, 2, 1])
@@ -125,6 +125,7 @@ def test_automatic_threshold_from_jaccard_and_cap(tmp_path):
     assert result[0].e_presence_neg == pytest.approx(e_presence_neg)
     capped, _ = _filter(tmp_path, penalty_th=None, jaccard=jaccard, penalty_th_cap=.1)
     assert capped[0].penalty_th == .1
+    assert capped[0].edge_weight_th == result[0].edge_weight_th == pytest.approx(.6)
 
 
 @pytest.mark.parametrize(
@@ -165,7 +166,7 @@ def _filter_target_support(tmp_path, support, edge_data, total_tar, n_cpu):
         node_offsets.append(len(assembly_nodes))
     targets = np.arange(5) < total_tar
     # The integer pruning threshold is 1; weight-1 edges must be rejected.
-    edge_w_th_mul = 1.5 / ((1.0 - .9) * total_tar)
+    edge_w_th_mul = 1.5 / total_tar
     graph = _graph(
         np.array(kmers, dtype=KMER_DTYPE),
         np.array([*offsets, len(kmers)], dtype=np.uintp),

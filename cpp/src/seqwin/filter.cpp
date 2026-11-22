@@ -120,10 +120,7 @@ void calculate_thresholds(
     }
 
     // Calculate edge weight threshold
-    // Consider N as the number of assemblies that include a certain k-mer. Since we want k-mers with
-    // penalty lower than penalty_th, based on the definition of penalty, N ≥ (1 - penalty_th) * total_tar.
-    // So edge weight threshold is calculated based on the lower bound of N, times a multiplier < 1.
-    const double edge_weight_th = config.edge_w_th_mul * (1.0 - penalty_th) * filtered.total_tar;
+    const double edge_weight_th = config.edge_w_th_mul * filtered.total_tar;
 
     // Calculate size range of subgraphs
     const std::size_t gap_len = (config.windowsize + 1) / 2;
