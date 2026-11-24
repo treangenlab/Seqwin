@@ -43,7 +43,7 @@ struct SubgraphLoc {
 };
 
 /**
- * @brief A signature is extracted from a low-penalty subgraph, represented by a
+ * @brief A signature is extracted from a subgraph, represented by a
  * consecutive k-mer run (a.k.a. the representative) found in target assemblies.
  *
  * Forward and reversed k-mer orders are treated as the same canonical ordering.
@@ -52,7 +52,7 @@ struct SubgraphLoc {
  * containing the representative.
  */
 struct Signature {
-    /** Index of the low-penalty subgraph that produced the signature. */
+    /** Index of the subgraph that produced the signature. */
     std::size_t subgraph_idx;
     /** Location and metadata of the representative. */
     SubgraphLoc location;

@@ -22,7 +22,6 @@ Dependencies:
 - numpy >=2
 - pydantic
 - typer
-- mash (optional)
 - blast (optional)
 - ncbi-datasets-cli (optional)
 
@@ -35,7 +34,6 @@ Modules:
 - assemblies
 - evaluation
 - ncbi
-- mash
 - utils
 - config
 - entry

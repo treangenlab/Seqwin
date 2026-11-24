@@ -84,7 +84,7 @@ void write_csv_field(std::ostream& out, std::string_view value) {
 }
 
 /**
- * @brief Extract a signature from one low-penalty subgraph.
+ * @brief Extract a signature from one subgraph.
  *
  * Return `std::nullopt` if the signature is invalid.
  */
@@ -103,7 +103,7 @@ std::optional<Signature> extract_worker(
 ) {
     // Collect and position-sort all k-mers included in the subgraph
     std::vector<SubgraphKmer> sg_kmers; // K-mers of the current subgraph
-    // Each node in a low-penalty subgraph should contain roughly total_tar k-mers
+    // Each node in a subgraph should contain roughly total_tar k-mers
     sg_kmers.reserve(2 * total_tar * subgraph.size());
     for (const auto node_idx : subgraph) {
         if (offsets.empty() || node_idx >= offsets.size() - 1) {

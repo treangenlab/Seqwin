@@ -29,7 +29,6 @@ import numpy as np
 from numpy.typing import NDArray
 
 from .ncbi import download_taxon
-from .mash import sketch, get_jaccard
 from .utils import print_time_delta, log_and_raise, mkdir, file_to_write, get_dups, load_paths_txt, GZIP_EXT
 from .config import Config, RunState, WORKINGDIR, BLASTCONFIG
 
@@ -67,31 +66,6 @@ class Assemblies:
     def __len__(self) -> int:
         """Return the number of assemblies."""
         return len(self.paths)
-
-    def mash(self, kmerlen: int, sketchsize: int, out_path: Path, overwrite: bool, n_cpu: int) -> NDArray[np.float64]:
-        """Calculate the Jaccard indices of all assembly pairs with Mash.
-
-        Args:
-            kmerlen (int): K-mer length for `mash sketch`.
-            sketchsize (int): Sketch size for `mash sketch`.
-            out_path (Path): Output path for the Mash sketch file (.msh).
-            overwrite (bool): If True, overwrite the existing Mash sketch file.
-            n_cpu (int): Number of processes to run in parallel.
-
-        Returns:
-            NDArray[np.float64]: A matrix of Jaccard indices of all assembly pairs.
-        """
-        mash_sketch = sketch(
-            self.paths,
-            kmerlen=kmerlen,
-            sketchsize=sketchsize,
-            out_path=out_path,
-            overwrite=overwrite,
-            n_cpu=n_cpu
-        )
-        return np.fromiter(
-            get_jaccard(mash_sketch, n_cpu=n_cpu), dtype=np.float64
-        ).reshape(len(self), len(self))
 
     def makeblastdb(self, prefix: Path, neg_only: bool, overwrite: bool, n_cpu: int) -> Path:
         """Create a BLAST database for all (or non-target) assemblies. Use native Python streaming and multiprocessing.
