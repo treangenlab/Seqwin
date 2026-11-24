@@ -9,7 +9,6 @@ from seqwin.config import Config
 @pytest.mark.parametrize(
     'invalid',
     (
-        pytest.param({'penalty_th': 1.5}, id='penalty-threshold'),
         pytest.param({'stringency': 11}, id='stringency'),
         pytest.param({'min_len': 51, 'max_len': 50}, id='length-order'),
     ),
@@ -44,7 +43,6 @@ def test_json_serialization_contains_important_fields_and_redacts_api_key(
         tar_paths=targets_txt,
         neg_paths=non_targets_txt,
         prefix=tmp_path,
-        run_mash=False,
         run_blast=False,
         n_cpu=2,
         low_memory=True,
@@ -57,7 +55,10 @@ def test_json_serialization_contains_important_fields_and_redacts_api_key(
     assert '"prefix"' in json_text
     assert '"tar_paths"' in json_text
     assert '"neg_paths"' in json_text
-    assert '"run_mash":false' in json_text
+    assert '"n_tar_th":null' in json_text
+    assert '"n_neg_th":null' in json_text
+    assert '"neg_quantile":0.2' in json_text
+    assert '"stringency":5' in json_text
     assert '"run_blast":false' in json_text
     assert '"n_cpu":2' in json_text
     assert '"low_memory":true' in json_text

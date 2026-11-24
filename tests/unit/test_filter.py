@@ -40,8 +40,8 @@ def _filter_distinct_weights(tmp_path, edge_weight_th):
     )
     return _filter_native(
         graph,
-        _paths(tmp_path, 5), targets, None, 5, 10, .3, 5,
-        0, None, .2, edge_w_th_mul, 1, None, 1.5, 1,
+        _paths(tmp_path, 5), targets, 5, 10, None, None, 5, .2,
+        0, None, edge_w_th_mul, 1, None, 1.5, 1,
     )
 
 
@@ -55,15 +55,14 @@ def test_native_filter_preserves_ranges_and_original_indices(tmp_path):
 
     np.testing.assert_array_equal(scored, [2, 2, 4, 1])
     assert filtered.total_tar == 2 and filtered.total_neg == 2
-    assert filtered.e_absence_tar is None
-    assert filtered.e_presence_neg is None
-    assert filtered.penalty_th == .3
+    assert filtered.n_tar_th == 2
+    assert filtered.n_neg_th == 0
+    assert nodes.dtype == np.dtype([('idx', np.uintp), ('n_tar', np.uint32), ('n_neg', np.uint32)])
     assert filtered.edge_weight_th == pytest.approx(.6)
     assert filtered.min_nodes == 1 and filtered.max_nodes is None
     np.testing.assert_array_equal(nodes['idx'], [0, 1, 2, 3])
     np.testing.assert_array_equal(nodes['n_tar'], [2, 2, 2, 1])
     np.testing.assert_array_equal(nodes['n_neg'], [0, 0, 2, 0])
-    np.testing.assert_allclose(nodes['penalty'], [0, 0, 1, .5])
     assert edges.tolist() == [(0, 1, 1), (1, 2, 1), (2, 3, 1)]
     assert subgraphs == [[0, 1]]
     assert len(signatures) == 1
@@ -73,15 +72,11 @@ def test_native_filter_preserves_ranges_and_original_indices(tmp_path):
     assert signature.n_tar == 2
 
 
-def test_automatic_threshold_from_minimizers_and_parallel_equivalence(tmp_path):
-    first, _ = _filter(tmp_path, penalty_th=None, n_cpu=1)
-    parallel, _ = _filter(tmp_path, penalty_th=None, n_cpu=4)
-    expected = .5 * np.sqrt((1 / 14) * (2 / 7))
-    assert first[0].penalty_th == pytest.approx(expected)
-    assert first[0].e_absence_tar == pytest.approx(1 / 14)
-    assert first[0].e_presence_neg == pytest.approx(2 / 7)
-    assert parallel[0].e_absence_tar == pytest.approx(first[0].e_absence_tar)
-    assert parallel[0].e_presence_neg == pytest.approx(first[0].e_presence_neg)
+def test_automatic_thresholds_and_parallel_equivalence(tmp_path):
+    first, _ = _filter(tmp_path, n_cpu=1)
+    parallel, _ = _filter(tmp_path, n_cpu=4)
+    assert first[0].n_tar_th == parallel[0].n_tar_th == 2
+    assert first[0].n_neg_th == parallel[0].n_neg_th == 0
     for left, right in ((first[0].nodes, parallel[0].nodes),
                         (first[0].edges, parallel[0].edges),
                         (first[0].subgraphs, parallel[0].subgraphs)):
@@ -104,28 +99,10 @@ def test_dense_counts_use_smaller_assembly_group_in_parallel(
 ):
     result, _ = _filter(
         tmp_path,
-        targets=np.array(targets, dtype=np.bool_), penalty_th=.5, n_cpu=4,
+        targets=np.array(targets, dtype=np.bool_), n_tar_th=1, n_neg_th=1, n_cpu=4,
     )
     np.testing.assert_array_equal(result[0].nodes['n_tar'], expected_n_tar)
     np.testing.assert_array_equal(result[0].nodes['n_neg'], expected_n_neg)
-
-
-def test_automatic_threshold_from_jaccard_and_cap(tmp_path):
-    jaccard = np.array([
-        [1, .5, .25, 0],
-        [.5, 1, .5, 1],
-        [.25, .5, 1, .75],
-        [0, 1, .75, 1],
-    ], dtype=np.float64)
-    e_absence_tar = 1 / 6
-    e_presence_neg = (.4 + 0 + 2 / 3 + 1) / 4
-    result, _ = _filter(tmp_path, penalty_th=None, jaccard=jaccard, penalty_th_cap=1)
-    assert result[0].penalty_th == pytest.approx(.5 * np.sqrt(e_absence_tar * e_presence_neg))
-    assert result[0].e_absence_tar == pytest.approx(e_absence_tar)
-    assert result[0].e_presence_neg == pytest.approx(e_presence_neg)
-    capped, _ = _filter(tmp_path, penalty_th=None, jaccard=jaccard, penalty_th_cap=.1)
-    assert capped[0].penalty_th == .1
-    assert capped[0].edge_weight_th == result[0].edge_weight_th == pytest.approx(.6)
 
 
 @pytest.mark.parametrize(
@@ -143,49 +120,156 @@ def test_edge_pruning_retains_descending_prefix_with_strict_threshold(
     assert result[0].edges.tolist() == expected
 
 
-def _filter_target_support(tmp_path, support, edge_data, total_tar, n_cpu):
-    # Low-support nodes also occur in every non-target assembly.
+def _filter_counts(tmp_path, counts, edges, total_tar, total_neg, **options):
     occurrences = [
-        tuple(range(count)) + tuple(range(total_tar, 5))
-        if count <= 1 else tuple(range(count))
-        for count in support
+        (*range(n_tar), *range(total_tar, total_tar + n_neg))
+        for n_tar, n_neg in counts
     ]
+    n_assemblies = total_tar + total_neg
     kmers = []
     offsets = []
     prevalences = []
-    for i, records in enumerate(occurrences):
+    for records in occurrences:
         offsets.append(len(kmers))
         prevalences.append(len(records))
         kmers.extend((0, record) for record in records)
     assembly_nodes = []
     node_offsets = [0]
-    for record in range(5):
+    for record in range(n_assemblies):
         assembly_nodes.extend(
             i for i, records in enumerate(occurrences) if record in records
         )
         node_offsets.append(len(assembly_nodes))
-    targets = np.arange(5) < total_tar
-    # The integer pruning threshold is 1; weight-1 edges must be rejected.
-    edge_w_th_mul = 1.5 / total_tar
     graph = _graph(
         np.array(kmers, dtype=KMER_DTYPE),
         np.array([*offsets, len(kmers)], dtype=np.uintp),
         np.array(prevalences, dtype=np.uint32),
-        np.array(edge_data, dtype=EDGE_DTYPE),
-        np.arange(6, dtype=np.uint32),
+        np.array(edges, dtype=EDGE_DTYPE),
+        np.arange(n_assemblies + 1, dtype=np.uint32),
         np.array(assembly_nodes, dtype=np.uintp),
         np.array(node_offsets, dtype=np.uintp),
     )
-    return _filter_native(
-        graph,
-        _paths(tmp_path, 5), targets, None, 5, 10, .9, 5,
-        0, None, .2, edge_w_th_mul, 1, None, 1.5, n_cpu,
+    config = dict(
+        kmerlen=5, windowsize=10, n_tar_th=None, n_neg_th=None, stringency=5,
+        neg_quantile=.2, min_len=0, max_len=None, edge_w_th_mul=0,
+        min_nodes_floor=1, max_nodes_cap=None, consec_kmer_mul=1.5,
+    )
+    config.update(options)
+    filtered, _ = _filter_native(
+        graph, _paths(tmp_path, n_assemblies), np.arange(n_assemblies) < total_tar, **config,
+    )
+    return filtered
+
+
+@pytest.mark.parametrize('n_cpu', (1, 4))
+@pytest.mark.parametrize(('stringency', 'threshold'), ((0, 4), (2, 5), (5, 5), (10, 6)))
+def test_weighted_mean_uses_retained_nodes_only(tmp_path, stringency, threshold, n_cpu):
+    # Each block has weighted mean 96 / 24 = 4. Including isolated node 0 would raise it.
+    block = [(1, 0)] * 8 + [(4, 0), (6, 0), (6, 0)]
+    counts = [(6, 0)] + block * 32
+    edges = [(i, i + 1, 1) for i in range(1, len(counts) - 1)]
+    filtered = _filter_counts(
+        tmp_path, counts, edges, 6, 2, stringency=stringency, n_neg_th=2, n_cpu=n_cpu,
+    )
+    assert filtered.n_tar_th == threshold
+    assert filtered.n_neg_th == 2
+
+
+@pytest.mark.parametrize(('quantile', 'expected'), ((0, 0), (.4, 0), (.41, 1), (.8, 1), (1, 3)))
+def test_nearest_rank_quantile_after_manual_target_override(tmp_path, quantile, expected):
+    # Eligible non-target counts sort to [0, 0, 1, 1, 3]. Node 0 is ineligible.
+    counts = [(2, 4), (4, 3), (3, 1), (4, 0), (3, 0), (4, 1)]
+    edges = [(i, i + 1, 1) for i in range(5)]
+    filtered = _filter_counts(
+        tmp_path, counts, edges, 4, 4, n_tar_th=3, stringency=10, neg_quantile=quantile,
+    )
+    assert filtered.n_tar_th == 3
+    assert filtered.n_neg_th == expected
+
+
+@pytest.mark.parametrize('options', ({'n_tar_th': 3}, {'n_neg_th': 3},
+                                    {'neg_quantile': float('nan')}, {'stringency': -1}))
+def test_native_threshold_validation(tmp_path, options):
+    with pytest.raises(ValueError, match=next(iter(options))):
+        _filter(tmp_path, **options)
+
+
+@pytest.mark.parametrize('options', ({'edge_w_th_mul': 1}, {'stringency': 10}))
+def test_no_retained_or_target_eligible_nodes(tmp_path, options):
+    with pytest.raises(RuntimeError, match='No subgraph met the prevalence thresholds'):
+        _filter_counts(tmp_path, [(1, 0), (2, 1)], [(0, 1, 2)], 4, 2, **options)
+
+
+def test_seeds_must_meet_both_thresholds(tmp_path):
+    filtered = _filter_counts(
+        tmp_path, [(3, 1), (3, 1), (2, 0), (2, 0), (4, 2), (4, 2), (4, 0), (4, 0)],
+        [(0, 1, 1), (2, 3, 1), (4, 5, 1), (6, 7, 1), (1, 6, 1)],
+        4, 2, n_tar_th=3, n_neg_th=1, max_nodes_cap=2,
+    )
+    assert filtered.subgraphs == [[0, 1], [6, 7]]
+
+
+def test_frontier_uses_chebyshev_then_additive_score_then_node_index(tmp_path):
+    # Nodes 3 and 4 tie at (.75, 1.25), followed by 2 at (.75, 1.5), then 1 at (1, 1).
+    filtered = _filter_counts(
+        tmp_path, [(6, 0), (2, 0), (3, 3), (4, 3), (4, 3)], [(0, i, 1) for i in (4, 3, 2, 1)],
+        6, 4, n_tar_th=2, n_neg_th=4,
+    )
+    assert filtered.subgraphs == [[0, 3, 4, 2, 1]]
+
+
+@pytest.mark.parametrize('counts', (
+    [(4, 0), (3, 0), (6, 4)],  # Node 1 exceeds the target absence budget.
+    [(6, 2), (6, 3), (2, 0)],  # Node 1 exceeds the non-target presence budget.
+))
+def test_expansion_continues_without_reconsidering_rejected_neighbors(tmp_path, counts):
+    # Node 1 fails first. Node 2 replenishes the budget and also neighbors node 1.
+    filtered = _filter_counts(
+        tmp_path, counts, [(0, 1, 1), (0, 2, 1), (1, 2, 1)], 6, 4, n_tar_th=4, n_neg_th=2,
+    )
+    assert filtered.subgraphs == [[0, 2]]
+
+
+def test_both_budgets_can_be_spent_to_accept_an_imperfect_node(tmp_path):
+    filtered = _filter_counts(
+        tmp_path, [(6, 0), (2, 4)], [(0, 1, 1)], 6, 4, n_tar_th=4, n_neg_th=2,
+    )
+    assert filtered.subgraphs == [[0, 1]]
+
+
+def test_unsuccessful_expansion_releases_all_encountered_nodes(tmp_path):
+    # Seed 0 cannot afford node 1. Seed 2 can cross node 1 to reach seed 0.
+    filtered = _filter_counts(
+        tmp_path, [(4, 2), (3, 0), (6, 2)], [(0, 1, 1), (1, 2, 1)],
+        6, 2, n_tar_th=4, n_neg_th=2, min_nodes_floor=3,
+    )
+    assert filtered.subgraphs == [[2, 1, 0]]
+
+
+@pytest.mark.parametrize(('n_tar_th', 'n_neg_th', 'expected'), (
+    (4, 1, [[0, 2, 3]]), (3, 0, [[0, 2, 1]]), (4, 0, [[0, 2]]),
+))
+def test_zero_tolerance_frontier(tmp_path, n_tar_th, n_neg_th, expected):
+    filtered = _filter_counts(
+        tmp_path, [(4, 0), (3, 0), (4, 0), (4, 1)], [(0, i, 1) for i in (1, 2, 3)],
+        4, 2, n_tar_th=n_tar_th, n_neg_th=n_neg_th,
+    )
+    assert filtered.subgraphs == expected
+
+
+def _filter_target_support(tmp_path, support, edges, total_tar, n_cpu):
+    # Low-support nodes also occur in every non-target assembly.
+    total_neg = 5 - total_tar
+    counts = [(count, total_neg if count <= 1 else 0) for count in support]
+    return _filter_counts(
+        tmp_path, counts, edges, total_tar, total_neg, n_cpu=n_cpu,
+        n_tar_th=1, n_neg_th=(total_neg + 1) // 2, edge_w_th_mul=1.5 / total_tar,
     )
 
 
 @pytest.mark.parametrize(('total_tar', 'n_cpu'), ((2, 1), (3, 4)))
 def test_edge_pruning_requires_target_support_and_preserves_order(tmp_path, total_tar, n_cpu):
-    filtered, _ = _filter_target_support(
+    filtered = _filter_target_support(
         tmp_path,
         [1, 1, 2, 1, 1, 2, 2, 2],
         [(0, 1, 5), (2, 3, 4), (0, 1, 3), (4, 5, 3), (6, 7, 2), (2, 6, 1)],
@@ -216,7 +300,7 @@ def test_original_indices_are_preserved_after_isolated_node_removal(tmp_path):
     )
     result = _filter_native(
         graph,
-        _paths(tmp_path), targets, None, 5, 10, 1.0, 5, 0, None, .2, .3, 1, None, 1.5, 1,
+        _paths(tmp_path), targets, 5, 10, 2, 2, 5, .2, 0, None, .3, 1, None, 1.5, 1,
     )
 
     filtered, signatures = result
@@ -250,13 +334,13 @@ def test_filtered_arrays_keep_native_owner_alive(tmp_path):
 def test_native_results_pickle_round_trip(tmp_path):
     (filtered, signatures), _ = _filter(tmp_path)
 
+    assert filtered.__getstate__()[0] == 1
     restored = pickle.loads(pickle.dumps(filtered, protocol=5))
     np.testing.assert_array_equal(restored.nodes, filtered.nodes)
     np.testing.assert_array_equal(restored.edges, filtered.edges)
     for name in (
-        'subgraphs', 'total_tar', 'total_neg', 'e_absence_tar',
-        'e_presence_neg', 'penalty_th', 'edge_weight_th', 'min_nodes',
-        'max_nodes',
+        'subgraphs', 'total_tar', 'total_neg', 'n_tar_th', 'n_neg_th',
+        'edge_weight_th', 'min_nodes', 'max_nodes',
     ):
         assert getattr(restored, name) == getattr(filtered, name)
     signature = signatures[0]
@@ -282,13 +366,12 @@ def test_target_counts_include_non_target_only_nodes_and_exclude_isolated_nodes(
     )
     filtered, _ = _filter_native(
         graph,
-        _paths(tmp_path), targets, None, 5, 10, 2.0, 5, 0, None, .2, 0, 1, None, 1.5, 1,
+        _paths(tmp_path), targets, 5, 10, 0, 2, 5, .2, 0, None, 0, 1, None, 1.5, 1,
     )
 
     np.testing.assert_array_equal(filtered.nodes['idx'], [0, 1, 2, 4])
     np.testing.assert_array_equal(filtered.nodes['n_tar'], [2, 2, 2, 0])
     np.testing.assert_array_equal(filtered.nodes['n_neg'], [0, 0, 2, 2])
-    np.testing.assert_allclose(filtered.nodes['penalty'], [0, 0, 1, np.sqrt(2)])
     assert filtered.edges.tolist() == [(0, 1, 1), (1, 2, 1), (2, 4, 1)]
 
 
@@ -310,9 +393,9 @@ def test_built_and_numpy_filter_results_match(tmp_path, targets_dir, non_targets
     targets = np.array([True, True, False, False], dtype=np.bool_)
     results = [
         _filter_native(
-            graph=value, assembly_paths=paths, is_targets=targets, jaccard=None,
-            kmerlen=17, windowsize=10, penalty_th=None, stringency=5,
-            min_len=17, max_len=200, penalty_th_cap=.2, edge_w_th_mul=.3,
+            graph=value, assembly_paths=paths, is_targets=targets,
+            kmerlen=17, windowsize=10, n_tar_th=None, n_neg_th=None, stringency=5, neg_quantile=.2,
+            min_len=17, max_len=200, edge_w_th_mul=.3,
             min_nodes_floor=1, max_nodes_cap=None, consec_kmer_mul=1.5, n_cpu=2,
         )
         for value in (graph, loaded)
@@ -323,15 +406,9 @@ def test_built_and_numpy_filter_results_match(tmp_path, targets_dir, non_targets
     assert original[0].subgraphs == numpy_backed[0].subgraphs
     assert original[1]
     assert list(map(_signature_values, original[1])) == list(map(_signature_values, numpy_backed[1]))
-    for name in ('total_tar', 'total_neg', 'e_absence_tar', 'e_presence_neg',
-                 'penalty_th', 'edge_weight_th', 'min_nodes', 'max_nodes'):
+    for name in ('total_tar', 'total_neg', 'n_tar_th', 'n_neg_th',
+                 'edge_weight_th', 'min_nodes', 'max_nodes'):
         assert getattr(original[0], name) == getattr(numpy_backed[0], name)
-
-
-def test_filter_rejects_unaligned_jaccard(tmp_path):
-    jaccard = np.ndarray((4, 4), dtype=np.float64, buffer=bytearray(129), offset=1)
-    with pytest.raises(ValueError, match='aligned'):
-        _filter(tmp_path, jaccard=jaccard)
 
 
 class _CountingPath:
@@ -361,7 +438,7 @@ def _filter_assembly_paths(paths, targets=None, **output_paths):
         targets = _inputs()[-1]
     return _filter_native(
         _assembly_path_graph(), paths, targets,
-        None, 5, 10, .9, 5, 0, None, .2, 0, 1, None, 1.5, 1, **output_paths,
+        5, 10, 1, 2, 5, .2, 0, None, 0, 1, None, 1.5, 1, **output_paths,
     )
 
 

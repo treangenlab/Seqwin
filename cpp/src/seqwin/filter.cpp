@@ -4,10 +4,8 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <sstream>
 #include <stdexcept>
 #include <string>
-#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -17,108 +15,10 @@
 namespace seqwin {
 namespace {
 
-std::string format_value(double value, int precision)
-{
-    std::ostringstream out;
-    out.precision(precision);
-    out << std::fixed << value;
-    return out.str();
-}
-
-/**
- * @brief Calculate the expected k-mer presence from pairwise Jaccard indices.
- *
- * Definition of presence `f(h)`: for a k-mer `h` in a group of `N` genomes (k-mer sets),
- * the fraction of genomes in a second group of `M` genomes that also contain `h`.
- *
- * Suppose `J` is the pairwise Jaccard matrix between genomes in the two groups, with shape `(M, N)`.
- * Then the expected presence can be calculated as: `E[f(h)] = mean(2J / (1+J))`.
- *
- * Here, the input matrix `jaccard` contains both target and non-target assemblies, with shape
- * `(M+N, M+N)`. The first group is always the target assemblies, and the second group is either
- * targets or non-targets. Both expectations are calculated by traversing the target rows in `jaccard`.
- */
-std::pair<double, double> expected_presence_jaccard(
-    const double* jaccard,
-    ArrayView<bool> is_targets
-) {
-    const std::size_t n = is_targets.size();
-    double sum_tar = 0.0;
-    double sum_neg = 0.0;
-    std::size_t count_tar = 0;
-    std::size_t count_neg = 0;
-    for (std::size_t row = 0; row < n; ++row) {
-        if (!is_targets[row]) {
-            // Always select targets for the first group
-            continue;
-        }
-        for (std::size_t col = 0; col < n; ++col) {
-            const double value = jaccard[row * n + col];
-            if (!std::isfinite(value) || value < 0.0 || value > 1.0) {
-                throw std::invalid_argument("Jaccard values must be finite and between 0 and 1");
-            }
-            const double inc = 2.0 * value / (1.0 + value);
-            if (is_targets[col]) {
-                sum_tar += inc;
-                ++count_tar;
-            } else {
-                sum_neg += inc;
-                ++count_neg;
-            }
-        }
-    }
-    return {
-        1.0 - sum_tar / count_tar,
-        sum_neg / count_neg
-    };
-}
-
 void calculate_thresholds(
-    ArrayView<std::uint32_t> prevalences,
-    ArrayView<bool> is_targets,
-    const double* jaccard,
-    const internal::TargetCounts& target_counts,
     const FilterConfig& config,
-    FilteredGraph& filtered,
-    internal::ThreadPool& pool
+    FilteredGraph& filtered
 ) {
-    double penalty_th;
-    if (config.penalty_th) {
-        penalty_th = *config.penalty_th;
-        internal::log_python(
-            "Penalty threshold is provided (--penalty-th), skip auto estimation", "warning"
-        );
-    } else {
-        // Consider k-mers in target assemblies:
-        double e_absence_tar; // their expected absence in target assemblies
-        double e_presence_neg; // their expected presence in non-target assemblies
-        if (jaccard) {
-            std::tie(e_absence_tar, e_presence_neg) = expected_presence_jaccard(jaccard, is_targets);
-        } else {
-            std::tie(e_absence_tar, e_presence_neg) = internal::expected_presence(
-                prevalences,
-                target_counts,
-                filtered.total_tar,
-                filtered.total_neg,
-                pool
-            );
-        }
-        internal::log_python(" - Expected k-mer absence in targets: " + format_value(e_absence_tar, 5));
-        internal::log_python(" - Expected k-mer presence in non-targets: " + format_value(e_presence_neg, 5));
-        penalty_th = (1.0 - config.stringency / 10.0) * std::sqrt(e_absence_tar * e_presence_neg);
-        internal::log_python(" - Calculated penalty threshold: " + format_value(penalty_th, 5));
-
-        if (penalty_th > config.penalty_th_cap) {
-            penalty_th = config.penalty_th_cap;
-            internal::log_python(
-                " - Calculated penalty threshold is too large (capped at " + format_value(penalty_th, 5) + ")",
-                "warning"
-            );
-        }
-        filtered.e_absence_tar = e_absence_tar;
-        filtered.e_presence_neg = e_presence_neg;
-    }
-
     // Calculate edge weight threshold
     const double edge_weight_th = config.edge_w_th_mul * filtered.total_tar;
 
@@ -140,10 +40,33 @@ void calculate_thresholds(
         );
     }
 
-    filtered.penalty_th = penalty_th;
     filtered.edge_weight_th = edge_weight_th;
     filtered.min_nodes = min_nodes;
     filtered.max_nodes = max_nodes;
+}
+
+std::size_t neg_threshold(
+    const FilteredGraph& filtered,
+    const FilterConfig& config
+) {
+    if (config.n_neg_th) {
+        return *config.n_neg_th;
+    }
+    std::vector<std::uint32_t> counts;
+    for (const auto& node : filtered.nodes) {
+        if (node.n_tar >= filtered.n_tar_th) {
+            counts.push_back(node.n_neg);
+        }
+    }
+    if (counts.empty()) {
+        return 0;
+    }
+    const std::size_t index = std::max<std::size_t>(
+        1,
+        static_cast<std::size_t>(std::ceil(config.neg_quantile * counts.size()))
+    ) - 1;
+    std::nth_element(counts.begin(), counts.begin() + index, counts.end());
+    return counts[index];
 }
 
 } // namespace
@@ -152,9 +75,6 @@ std::pair<FilteredGraph, std::vector<Signature>> filter(
     const GraphView& graph,
     const std::vector<std::string>& assembly_paths,
     ArrayView<bool> is_targets,
-    const double* jaccard,
-    std::size_t jaccard_rows,
-    std::size_t jaccard_cols,
     const FilterConfig& config
 ) {
     const std::size_t n_assemblies = graph.node_offsets.size() - 1;
@@ -163,9 +83,6 @@ std::pair<FilteredGraph, std::vector<Signature>> filter(
     }
     if (is_targets.size() != n_assemblies) {
         throw std::invalid_argument("is_targets length must match the number of assemblies");
-    }
-    if (jaccard && (jaccard_rows != n_assemblies || jaccard_cols != n_assemblies)) {
-        throw std::invalid_argument("Jaccard matrix shape must match the number of assemblies");
     }
     if (config.fasta_path.has_value() != config.csv_path.has_value()) {
         throw std::invalid_argument("Both fasta_path and csv_path are required for signature output");
@@ -185,6 +102,19 @@ std::pair<FilteredGraph, std::vector<Signature>> filter(
         throw std::invalid_argument("is_targets must contain at least one non-target assembly");
     }
 
+    if (config.n_tar_th && *config.n_tar_th > filtered.total_tar) {
+        throw std::invalid_argument("n_tar_th exceeds the number of target assemblies");
+    }
+    if (config.n_neg_th && *config.n_neg_th > filtered.total_neg) {
+        throw std::invalid_argument("n_neg_th exceeds the number of non-target assemblies");
+    }
+    if (!(config.stringency >= 0.0 && config.stringency <= 10.0)) {
+        throw std::invalid_argument("stringency must be between 0 and 10");
+    }
+    if (!(config.neg_quantile >= 0.0 && config.neg_quantile <= 1.0)) {
+        throw std::invalid_argument("neg_quantile must be between 0 and 1");
+    }
+
     internal::log_python(" - Counting target node occurrences...");
     auto target_counts = internal::count_target_nodes(
         graph.nodes.prevalences,
@@ -195,24 +125,14 @@ std::pair<FilteredGraph, std::vector<Signature>> filter(
         filtered.total_neg,
         pool
     );
-    calculate_thresholds(
-        graph.nodes.prevalences,
-        is_targets,
-        jaccard,
-        target_counts,
-        config,
-        filtered,
-        pool
-    );
+    calculate_thresholds(config, filtered);
 
-    internal::log_python(" - Filtering graph and calculating node penalty scores...");
+    internal::log_python(" - Pruning graph and counting node prevalences...");
     auto graph_topology = internal::prune_graph(
         graph.nodes.prevalences,
         graph.edges,
         target_counts,
-        filtered.total_tar,
-        filtered.total_neg,
-        filtered.edge_weight_th,
+        config,
         filtered,
         pool
     );
@@ -226,22 +146,18 @@ std::pair<FilteredGraph, std::vector<Signature>> filter(
         " isolated nodes, " + std::to_string(filtered.nodes.size()) + " nodes left"
     );
 
-    internal::get_subgraphs(
-        graph_topology,
-        filtered.nodes,
-        filtered.penalty_th,
-        filtered.min_nodes,
-        filtered.max_nodes,
-        filtered
-    );
+    filtered.n_neg_th = neg_threshold(filtered, config);
+    internal::log_python(" - Target prevalence threshold: " + std::to_string(filtered.n_tar_th));
+    internal::log_python(" - Non-target prevalence threshold: " + std::to_string(filtered.n_neg_th));
+    internal::get_subgraphs(graph_topology, filtered);
     if (filtered.subgraphs.empty()) {
         throw std::runtime_error(
-            "No low-penalty subgraph was found. Try decrease --stringency, or increase --penalty-th"
+            "No subgraph met the prevalence thresholds and minimum size"
         );
     }
-    internal::log_python(" - Found " + std::to_string(filtered.subgraphs.size()) + " low-penalty subgraphs");
+    internal::log_python(" - Found " + std::to_string(filtered.subgraphs.size()) + " subgraphs");
 
-    internal::log_python(" - Finding a representative for each low-penalty subgraph...");
+    internal::log_python(" - Finding a representative for each subgraph...");
     auto signatures = internal::extract_signatures(
         filtered.subgraphs,
         graph.nodes.kmers,

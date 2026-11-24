@@ -160,20 +160,8 @@ TargetCounts count_target_nodes(
 );
 
 /**
- * @brief For k-mers in target assemblies, calculate their expected absence
- * in target assemblies, and expected presence in non-target assemblies.
- */
-std::pair<double, double> expected_presence(
-    ArrayView<std::uint32_t> prevalences,
-    const TargetCounts& target_counts,
-    std::size_t total_tar,
-    std::size_t total_neg,
-    ThreadPool& pool
-);
-
-/**
- * @brief Remove edges failing weight or target-support thresholds, calculate
- * penalty scores for retained nodes, and construct CSR adjacency lists.
+ * @brief Remove edges failing weight or target-support thresholds, estimate the
+ * target prevalence threshold from retained nodes, and construct CSR adjacency lists.
  *
  * An edge is retained only if its weight is greater than `edge_weight_th` and
  * at least one endpoint occurs in more than `edge_weight_th` target assemblies.
@@ -184,28 +172,22 @@ GraphTopology prune_graph(
     ArrayView<std::uint32_t> prevalences,
     ArrayView<Edge> edges,
     const TargetCounts& target_counts,
-    std::size_t total_tar,
-    std::size_t total_neg,
-    double edge_weight_th,
+    const FilterConfig& config,
     FilteredGraph& filtered,
     ThreadPool& pool
 );
 
 /**
- * @brief Grow disjoint low-penalty subgraphs from eligible seeds.
+ * @brief Grow disjoint subgraphs from eligible seeds.
  * Generated subgraphs are stored directly in `filtered`.
  */
 void get_subgraphs(
     const GraphTopology& graph,
-    const NoInitArray<FilteredNode>& nodes,
-    double penalty_th,
-    std::size_t min_nodes,
-    std::optional<std::size_t> max_nodes,
     FilteredGraph& filtered
 );
 
 /**
- * @brief Extract signatures from low-penalty subgraphs.
+ * @brief Extract signatures from subgraphs.
  */
 std::vector<Signature> extract_signatures(
     const std::vector<Subgraph>& subgraphs,

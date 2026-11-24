@@ -143,24 +143,9 @@ def main(
         help='Window size for minimizer sketch.',
         rich_help_panel='Signature options'
     ),
-    penalty_th: float | None = typer.Option(
-        None, '--penalty-th', show_default=False,
-        help='Node penalty threshold, from 0 to 1. If not provided, Seqwin computes it automatically.',
-        rich_help_panel='Signature options'
-    ),
-    run_mash: bool = typer.Option(
-        False, '--mash', show_default=False,
-        help='Run Mash to estimate node penalty threshold instead of using minimizer sketches. '
-        'This may reduce estimation bias but requires extra running time, especially when the number of input assemblies is large. '
-        'Only used when --penalty-th is not provided.',
-        rich_help_panel='Signature options'
-    ),
     stringency: int = typer.Option(
         5, '--stringency', '-s', show_default=True,
-        help='Controls the sensitivity and specificity of output signatures (0-10). '
-        'Increasing this value generally yields fewer and shorter signatures, while improving their sensitivity and specificity. '
-        'Internally, Seqwin uses this setting to adjust the estimated node penalty threshold. '
-        'Only used when `--penalty-th` is not provided.',
+        help='Sets the minimum target prevalence from the weighted mean (0) to presence in all targets (10).',
         rich_help_panel='Signature options'
     ),
     min_len: int = typer.Option(
@@ -247,8 +232,6 @@ def main(
             save_graph=save_graph,
             kmerlen=kmerlen,
             windowsize=windowsize,
-            penalty_th=penalty_th,
-            run_mash=run_mash,
             stringency=stringency,
             min_len=min_len,
             max_len=max_len,

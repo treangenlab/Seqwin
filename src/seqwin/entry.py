@@ -28,7 +28,7 @@ from .core._native import _filter_native
 from .assemblies import Assemblies, get_assemblies
 from .evaluation import SignatureMetrics, eval_signatures_seqwin
 from .utils import print_time_delta, overwrite_warning, overwrite_error, mkdir, file_to_write
-from .config import Config, RunState, config_logger, HAS_MASH, HAS_BLAST, WORKINGDIR
+from .config import Config, RunState, config_logger, HAS_BLAST, WORKINGDIR
 
 
 def _build_graph(assemblies: Assemblies, config: Config) -> Graph:
@@ -58,23 +58,10 @@ def _build_graph(assemblies: Assemblies, config: Config) -> Graph:
 def _filter_graph(
     graph: Graph, assemblies: Assemblies, config: Config, state: RunState
 ) -> tuple[FilteredGraph, list[Signature]]:
-    """Filter the minimizer graph and extract signatures from low-penalty subgraphs.
+    """Filter the minimizer graph and extract signatures from subgraphs.
     """
     logger.info('Filtering minimizer graph...')
     tik = time()
-
-    jaccard = None
-    if config.penalty_th is None and config.run_mash:
-        if HAS_MASH:
-            jaccard = assemblies.mash(
-                kmerlen=config.kmerlen,
-                sketchsize=config.sketchsize,
-                out_path=state.working_dir / WORKINGDIR.mash,
-                overwrite=config.overwrite,
-                n_cpu=config.n_cpu,
-            )
-        else:
-            logger.error('Mash is not installed. Falling back to minimizer sketches.')
 
     fasta_path = state.working_dir / WORKINGDIR.signatures_fasta
     csv_path = state.working_dir / WORKINGDIR.signatures_csv
@@ -85,14 +72,14 @@ def _filter_graph(
         graph=graph,
         assembly_paths=assemblies.paths,
         is_targets=assemblies.is_targets,
-        jaccard=jaccard,
         kmerlen=config.kmerlen,
         windowsize=config.windowsize,
-        penalty_th=config.penalty_th,
+        n_tar_th=config.n_tar_th,
+        n_neg_th=config.n_neg_th,
         stringency=config.stringency,
+        neg_quantile=config.neg_quantile,
         min_len=config.min_len,
         max_len=config.max_len,
-        penalty_th_cap=config.penalty_th_cap,
         edge_w_th_mul=config.edge_w_th_mul,
         min_nodes_floor=config.min_nodes_floor,
         max_nodes_cap=config.max_nodes_cap,
@@ -103,7 +90,6 @@ def _filter_graph(
     )
 
     print_time_delta(time() - tik)
-    state.jaccard = jaccard
     return filtered, signatures
 
 
