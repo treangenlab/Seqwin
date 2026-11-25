@@ -41,8 +41,8 @@ def _extract_signature(tmp_path, *, target_records, edge_data):
         graph=graph,
         assembly_paths=_paths(tmp_path, len(records), sequence_length=64),
         is_targets=np.array([True] * len(target_records) + [False], dtype=np.bool_),
-        kmerlen=5, windowsize=5, n_tar_th=1, n_neg_th=0, stringency=5, neg_quantile=.2,
-        min_len=0, max_len=None, edge_w_th_mul=0,
+        kmerlen=5, windowsize=5, tar_weight=.5, neg_rank=.2,
+        min_len=0, max_len=None, edge_w_th_mul=0, n_tar_th=1, n_neg_th=0,
         min_nodes_floor=1, max_nodes_cap=None, consec_kmer_mul=2, n_cpu=1,
     )
     signature, = signatures
@@ -120,8 +120,8 @@ def test_signature_extraction_rejects_invalid_final_node_range(tmp_path, final_s
     graph = _graph(kmers, offsets, prevalences, edges, record_offsets, assembly_nodes, node_offsets)
     with pytest.raises(ValueError, match=message):
         _filter_native(
-            graph, _paths(tmp_path), targets, 5, 10, 0, 2, 5, .2, 0, None,
-            0, 1, None, 1.5, 1,
+            graph, _paths(tmp_path), targets, 5, 10, .5, .2, 0, None,
+            0, 0, 2, 1, None, 1.5, 1,
         )
 
 
@@ -146,7 +146,7 @@ def test_native_csv_escaping_and_fasta_wrapping(tmp_path, record_id):
     )
     _filter_native(
         graph,
-        paths, targets, 100, 10, 2, 0, 5, .2, 0, None, .3, 1, None, 1.5, 1,
+        paths, targets, 100, 10, .5, .2, 0, None, .3, 2, 0, 1, None, 1.5, 1,
         fasta_path=str(fasta_path), csv_path=str(csv_path),
     )
     header = f'0-{record_id}-0:100'

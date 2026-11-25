@@ -64,16 +64,18 @@ class Config(BaseModel):
 
         kmerlen (int): K-mer length. [21]
         windowsize (int): Window size for minimizer sketch. [200]
-        stringency (int): Raise the estimated target threshold from the weighted mean (0) to all targets (10). [5]
+        tar_weight (float): Linearly interpolate from the target-prevalence weighted mean (0) to presence
+            in all target assemblies (1), then round up. [0.5]
+        neg_rank (float): Nearest-rank quantile of non-target prevalence among retained nodes with
+            n_tar >= n_tar_th, from minimum (0) to maximum (1). Lower is generally stricter. [0.2]
         min_len (int): Minimum length of output signatures. [200]
         max_len (int | None): Estimated maximum length of output signatures. If None, no explicit limit is applied (capped by `max_nodes_cap`). [None]
         run_blast (bool): If True, evaluate signature sequences with BLAST. [False]
         blast_neg_only (bool, deprecated): If True, only include non-target assemblies in the BLAST database. [False]
 
-        n_tar_th (int | None): Minimum mean target prevalence. Overrides estimation using `stringency`. [None]
-        n_neg_th (int | None): Maximum mean non-target prevalence. Overrides estimation using `neg_quantile`. [None]
-        neg_quantile (float): Quantile of non-target prevalence among nodes meeting the target threshold. [0.2]
         edge_w_th_mul (float): Multiplier for determining the threshold for low-weight edges. [0.3]
+        n_tar_th (int | None): Minimum mean target prevalence. Overrides estimation using `tar_weight`. [None]
+        n_neg_th (int | None): Maximum mean non-target prevalence. Overrides estimation using `neg_rank`. [None]
         min_nodes_floor (int): Lowest possible value for `min_nodes` (see `RunState`), regardless of `min_len`. [3]
         max_nodes_cap (int | None): If `max_len` is None, `max_nodes` (see `RunState`) cannot be higher than this value. None for no limit. [100]
         consec_kmer_mul (float): Multiplier of window size for the maximum position difference between consecutive k-mers. [1.5]
@@ -108,17 +110,17 @@ class Config(BaseModel):
     # Signature options
     kmerlen: int = Field(default=21, ge=5)
     windowsize: int = Field(default=200, ge=1)
-    stringency: int = Field(default=5, ge=0, le=10)
+    tar_weight: float = Field(default=0.5, ge=0, le=1)
+    neg_rank: float = Field(default=0.2, ge=0, le=1)
     min_len: int = Field(default=200, ge=0)
     max_len: int | None = Field(default=None, ge=1)
     run_blast: bool = False
     blast_neg_only: bool = False # NOTE: need to fix when this is turned on
 
     # Graph filtering options (not included in CLI)
+    edge_w_th_mul: float = Field(default=0.3, ge=0, le=1)
     n_tar_th: int | None = Field(default=None, ge=0, strict=True)
     n_neg_th: int | None = Field(default=None, ge=0, strict=True)
-    neg_quantile: float = Field(default=0.2, ge=0, le=1)
-    edge_w_th_mul: float = Field(default=0.3, ge=0, le=1)
     min_nodes_floor: int = Field(default=3, ge=0)
     max_nodes_cap: int | None = Field(default=100, ge=1)
     consec_kmer_mul: float = Field(default=1.5, ge=1)
@@ -203,6 +205,7 @@ class Config(BaseModel):
         return self
 
     model_config = {
+        'extra': 'forbid',
         'frozen': True,
         'slots': True,
         'validate_default': True,

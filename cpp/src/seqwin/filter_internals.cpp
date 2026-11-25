@@ -95,7 +95,11 @@ GraphTopology prune_graph(
     ArrayView<std::uint32_t> prevalences,
     ArrayView<Edge> edges,
     const TargetCounts& target_counts,
-    const FilterConfig& config,
+    std::size_t total_tar,
+    std::size_t total_neg,
+    double edge_weight_th,
+    double tar_weight,
+    std::optional<std::size_t> n_tar_th,
     FilteredGraph& filtered,
     ThreadPool& pool
 ) {
@@ -112,7 +116,7 @@ GraphTopology prune_graph(
     // Scan the prefix of edges (sorted by weight)
     // Keep edges with sufficient weight and target support
     filtered.edges.clear();
-    const std::size_t th = filtered.edge_weight_th;
+    const std::size_t th = edge_weight_th;
     // Store each retained edge as two endpoint records
     std::vector<Endpoint> endpoints;
     target_counts.with([&](const auto& n_tar_at) {
@@ -167,32 +171,36 @@ GraphTopology prune_graph(
             const auto node_idx = connected[i];
             const std::size_t n_tar = n_tar_at(node_idx);
             const auto prevalence = prevalences[node_idx];
-            if (n_tar > prevalence || n_tar > filtered.total_tar) {
-                throw std::invalid_argument("Invalid target prevalence for retained node");
+            if (n_tar > prevalence || n_tar > total_tar) {
+                throw std::invalid_argument("Filtered node n_tar is invalid");
             }
             const std::size_t n_neg = prevalence - n_tar;
-            if (n_neg > filtered.total_neg) {
-                throw std::invalid_argument("Invalid non-target prevalence for retained node");
+            if (n_neg > total_neg) {
+                throw std::invalid_argument("Filtered node n_neg exceeds total_neg");
             }
             filtered.nodes[i] = FilteredNode{
                 node_idx,
                 static_cast<std::uint32_t>(n_tar),
                 static_cast<std::uint32_t>(n_neg)
             };
-            sum_n_tar += n_tar;
-            sum_presence += n_tar * n_tar;
+            if (!n_tar_th) {
+                sum_n_tar += n_tar;
+                sum_presence += n_tar * n_tar;
+            }
         }
     });
 
-    if (config.n_tar_th) {
-        filtered.n_tar_th = *config.n_tar_th;
+    if (n_tar_th) {
+        filtered.n_tar_th = *n_tar_th;
     } else if (sum_n_tar == 0) {
         filtered.n_tar_th = 0;
     } else {
         const double mean_presence = sum_presence / sum_n_tar;
-        const double total = filtered.total_tar;
-        const double threshold = total - (1.0 - config.stringency / 10.0) * (total - mean_presence);
-        filtered.n_tar_th = static_cast<std::size_t>(std::clamp(std::ceil(threshold), 0.0, total));
+        const double total = total_tar;
+        const double threshold = (1.0 - tar_weight) * mean_presence + tar_weight * total;
+        filtered.n_tar_th = static_cast<std::size_t>(
+            std::clamp(std::ceil(threshold), 0.0, total)
+        );
     }
 
     return GraphTopology(
@@ -203,13 +211,15 @@ GraphTopology prune_graph(
 
 void get_subgraphs(
     const GraphTopology& graph,
+    const NoInitArray<FilteredNode>& nodes,
+    std::size_t total_tar,
+    std::int64_t n_tar_th,
+    std::int64_t n_neg_th,
+    std::size_t min_nodes,
+    std::optional<std::size_t> max_nodes,
     FilteredGraph& filtered
 ) {
     // GraphTopology represents nodes by indices into the retained nodes
-    const auto& nodes = filtered.nodes;
-    const std::int64_t n_tar_th = filtered.n_tar_th;
-    const std::int64_t n_neg_th = filtered.n_neg_th;
-    const auto allowed_absences = filtered.total_tar - filtered.n_tar_th;
     std::vector<std::size_t> seeds;
     seeds.reserve(nodes.size());
     for (std::size_t node = 0; node < nodes.size(); ++node) {
@@ -235,11 +245,13 @@ void get_subgraphs(
 
     // Marks nodes accepted in any of the subgraphs
     std::vector<std::uint8_t> used(nodes.size(), 0);
-    // Includes rejected nodes until the current seed expansion finishes
-    std::vector<std::uint8_t> seen(nodes.size(), 0);
+    // Nodes encountered in the most recent seed expansion, labeled with seed_i
+    std::vector<std::uint16_t> seen(nodes.size(), 0);
+    // Identifier of the current seed, which may wrap around on overflow
+    std::uint16_t seed_i = 0;
 
-    std::vector<std::size_t> encountered;
-    const std::size_t max_nodes_value = filtered.max_nodes.value_or(
+    const auto n_absence_th = total_tar - n_tar_th;
+    const std::size_t max_nodes_value = max_nodes.value_or(
         std::numeric_limits<std::size_t>::max()
     );
     for (const auto seed : seeds) {
@@ -247,31 +259,33 @@ void get_subgraphs(
             continue;
         }
 
+        if (++seed_i == 0) {
+            std::fill(seen.begin(), seen.end(), 0);
+            seed_i = 1;
+        }
         Subgraph subgraph{seed};
-        seen[seed] = 1;
-        encountered.push_back(seed);
+        seen[seed] = seed_i;
         std::int64_t tar_budget = nodes[seed].n_tar - n_tar_th;
         std::int64_t neg_budget = n_neg_th - nodes[seed].n_neg;
 
         const auto add_neighbors = [&](std::size_t node) {
             for (const auto neighbor : graph.neighbors(node)) {
-                if (used[neighbor] || seen[neighbor]) {
+                if (used[neighbor] || seen[neighbor] == seed_i) {
                     continue;
                 }
-                seen[neighbor] = 1;
-                encountered.push_back(neighbor);
-                const double absences = filtered.total_tar - nodes[neighbor].n_tar;
-                const double presences = nodes[neighbor].n_neg;
+                const double n_absence = total_tar - nodes[neighbor].n_tar;
+                const double n_neg = nodes[neighbor].n_neg;
                 if (
-                    (allowed_absences == 0 && absences != 0.0) ||
-                    (n_neg_th == 0 && presences != 0.0)
+                    (n_absence_th == 0 && n_absence != 0.0) ||
+                    (n_neg_th == 0 && n_neg != 0.0)
                 ) {
                     continue;
                 }
-                const double a = allowed_absences == 0 ? 0.0 : absences / allowed_absences;
-                const double b = n_neg_th == 0 ? 0.0 : presences / n_neg_th;
+                const double a = n_absence_th == 0 ? 0.0 : n_absence / n_absence_th;
+                const double b = n_neg_th == 0 ? 0.0 : n_neg / n_neg_th;
                 frontier.push_back({std::max(a, b), a + b, neighbor});
                 std::push_heap(frontier.begin(), frontier.end(), lower_priority);
+                seen[neighbor] = seed_i;
             }
         };
         add_neighbors(seed);
@@ -292,16 +306,10 @@ void get_subgraphs(
             neg_budget = new_neg_budget;
             add_neighbors(candidate.node);
         }
-
-        // Clear node states for the next seed
-        for (const auto node : encountered) {
-            seen[node] = 0;
-        }
-        encountered.clear();
         frontier.clear();
 
         // Output subgraphs using node indices from the original graph
-        if (subgraph.size() >= filtered.min_nodes) {
+        if (subgraph.size() >= min_nodes) {
             for (auto& node : subgraph) {
                 used[node] = 1;
                 node = nodes[node].idx;

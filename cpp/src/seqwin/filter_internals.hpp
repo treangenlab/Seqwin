@@ -160,8 +160,8 @@ TargetCounts count_target_nodes(
 );
 
 /**
- * @brief Remove edges failing weight or target-support thresholds, estimate the
- * target prevalence threshold from retained nodes, and construct CSR adjacency lists.
+ * @brief Remove edges failing weight or target-support thresholds, calculate
+ * `FilteredGraph::n_tar_th` from retained nodes, and construct CSR adjacency lists.
  *
  * An edge is retained only if its weight is greater than `edge_weight_th` and
  * at least one endpoint occurs in more than `edge_weight_th` target assemblies.
@@ -172,7 +172,11 @@ GraphTopology prune_graph(
     ArrayView<std::uint32_t> prevalences,
     ArrayView<Edge> edges,
     const TargetCounts& target_counts,
-    const FilterConfig& config,
+    std::size_t total_tar,
+    std::size_t total_neg,
+    double edge_weight_th,
+    double tar_weight,
+    std::optional<std::size_t> n_tar_th,
     FilteredGraph& filtered,
     ThreadPool& pool
 );
@@ -183,6 +187,12 @@ GraphTopology prune_graph(
  */
 void get_subgraphs(
     const GraphTopology& graph,
+    const NoInitArray<FilteredNode>& nodes,
+    std::size_t total_tar,
+    std::int64_t n_tar_th,
+    std::int64_t n_neg_th,
+    std::size_t min_nodes,
+    std::optional<std::size_t> max_nodes,
     FilteredGraph& filtered
 );
 

@@ -143,9 +143,14 @@ def main(
         help='Window size for minimizer sketch.',
         rich_help_panel='Signature options'
     ),
-    stringency: int = typer.Option(
-        5, '--stringency', '-s', show_default=True,
-        help='Sets the minimum target prevalence from the weighted mean (0) to presence in all targets (10).',
+    tar_weight: float = typer.Option(
+        0.5, '--tar-weight', show_default=True,
+        help='Interpolate the target threshold from the prevalence-weighted mean (0) to all targets (1).',
+        rich_help_panel='Signature options'
+    ),
+    neg_rank: float = typer.Option(
+        0.2, '--neg-rank', show_default=True,
+        help='Non-target prevalence quantile among target-eligible nodes, from minimum (0) to maximum (1).',
         rich_help_panel='Signature options'
     ),
     min_len: int = typer.Option(
@@ -232,7 +237,8 @@ def main(
             save_graph=save_graph,
             kmerlen=kmerlen,
             windowsize=windowsize,
-            stringency=stringency,
+            tar_weight=tar_weight,
+            neg_rank=neg_rank,
             min_len=min_len,
             max_len=max_len,
             run_blast=run_blast,

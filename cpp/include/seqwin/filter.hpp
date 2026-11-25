@@ -23,13 +23,13 @@ using Subgraph = std::vector<std::size_t>;
 struct FilterConfig {
     std::size_t kmerlen;
     std::size_t windowsize;
-    std::optional<std::size_t> n_tar_th;
-    std::optional<std::size_t> n_neg_th;
-    double stringency;
-    double neg_quantile;
+    double tar_weight;
+    double neg_rank;
     std::size_t min_len;
     std::optional<std::size_t> max_len;
     double edge_w_th_mul;
+    std::optional<std::size_t> n_tar_th;
+    std::optional<std::size_t> n_neg_th;
     std::size_t min_nodes_floor;
     std::optional<std::size_t> max_nodes_cap;
     double consec_kmer_mul;

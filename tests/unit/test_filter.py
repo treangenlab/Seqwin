@@ -40,8 +40,8 @@ def _filter_distinct_weights(tmp_path, edge_weight_th):
     )
     return _filter_native(
         graph,
-        _paths(tmp_path, 5), targets, 5, 10, None, None, 5, .2,
-        0, None, edge_w_th_mul, 1, None, 1.5, 1,
+        _paths(tmp_path, 5), targets, 5, 10, .5, .2,
+        0, None, edge_w_th_mul, None, None, 1, None, 1.5, 1,
     )
 
 
@@ -150,8 +150,8 @@ def _filter_counts(tmp_path, counts, edges, total_tar, total_neg, **options):
         np.array(node_offsets, dtype=np.uintp),
     )
     config = dict(
-        kmerlen=5, windowsize=10, n_tar_th=None, n_neg_th=None, stringency=5,
-        neg_quantile=.2, min_len=0, max_len=None, edge_w_th_mul=0,
+        kmerlen=5, windowsize=10, tar_weight=.5,
+        neg_rank=.2, min_len=0, max_len=None, edge_w_th_mul=0, n_tar_th=None, n_neg_th=None,
         min_nodes_floor=1, max_nodes_cap=None, consec_kmer_mul=1.5,
     )
     config.update(options)
@@ -162,14 +162,14 @@ def _filter_counts(tmp_path, counts, edges, total_tar, total_neg, **options):
 
 
 @pytest.mark.parametrize('n_cpu', (1, 4))
-@pytest.mark.parametrize(('stringency', 'threshold'), ((0, 4), (2, 5), (5, 5), (10, 6)))
-def test_weighted_mean_uses_retained_nodes_only(tmp_path, stringency, threshold, n_cpu):
+@pytest.mark.parametrize(('tar_weight', 'threshold'), ((0, 4), (.2, 5), (.5, 5), (1, 6)))
+def test_weighted_mean_uses_retained_nodes_only(tmp_path, tar_weight, threshold, n_cpu):
     # Each block has weighted mean 96 / 24 = 4. Including isolated node 0 would raise it.
     block = [(1, 0)] * 8 + [(4, 0), (6, 0), (6, 0)]
     counts = [(6, 0)] + block * 32
     edges = [(i, i + 1, 1) for i in range(1, len(counts) - 1)]
     filtered = _filter_counts(
-        tmp_path, counts, edges, 6, 2, stringency=stringency, n_neg_th=2, n_cpu=n_cpu,
+        tmp_path, counts, edges, 6, 2, tar_weight=tar_weight, n_neg_th=2, n_cpu=n_cpu,
     )
     assert filtered.n_tar_th == threshold
     assert filtered.n_neg_th == 2
@@ -181,22 +181,28 @@ def test_nearest_rank_quantile_after_manual_target_override(tmp_path, quantile, 
     counts = [(2, 4), (4, 3), (3, 1), (4, 0), (3, 0), (4, 1)]
     edges = [(i, i + 1, 1) for i in range(5)]
     filtered = _filter_counts(
-        tmp_path, counts, edges, 4, 4, n_tar_th=3, stringency=10, neg_quantile=quantile,
+        tmp_path, counts, edges, 4, 4, n_tar_th=3, tar_weight=1, neg_rank=quantile,
     )
     assert filtered.n_tar_th == 3
     assert filtered.n_neg_th == expected
 
 
-@pytest.mark.parametrize('options', ({'n_tar_th': 3}, {'n_neg_th': 3},
-                                    {'neg_quantile': float('nan')}, {'stringency': -1}))
+@pytest.mark.parametrize('options', ({'n_tar_th': 3}, {'n_neg_th': 3}))
 def test_native_threshold_validation(tmp_path, options):
     with pytest.raises(ValueError, match=next(iter(options))):
         _filter(tmp_path, **options)
 
 
-@pytest.mark.parametrize('options', ({'edge_w_th_mul': 1}, {'stringency': 10}))
+@pytest.mark.parametrize('name', ('tar_weight', 'neg_rank'))
+@pytest.mark.parametrize('value', (-.01, 1.01, float('nan'), float('inf'), float('-inf')))
+def test_native_prevalence_parameter_validation(tmp_path, name, value):
+    with pytest.raises(ValueError, match=name):
+        _filter(tmp_path, **{name: value})
+
+
+@pytest.mark.parametrize('options', ({'edge_w_th_mul': 1}, {'tar_weight': 1}))
 def test_no_retained_or_target_eligible_nodes(tmp_path, options):
-    with pytest.raises(RuntimeError, match='No subgraph met the prevalence thresholds'):
+    with pytest.raises(RuntimeError, match='No subgraph'):
         _filter_counts(tmp_path, [(1, 0), (2, 1)], [(0, 1, 2)], 4, 2, **options)
 
 
@@ -237,13 +243,22 @@ def test_both_budgets_can_be_spent_to_accept_an_imperfect_node(tmp_path):
     assert filtered.subgraphs == [[0, 1]]
 
 
-def test_unsuccessful_expansion_releases_all_encountered_nodes(tmp_path):
+def test_unsuccessful_expansion_releases_all_discovered_nodes(tmp_path):
     # Seed 0 cannot afford node 1. Seed 2 can cross node 1 to reach seed 0.
     filtered = _filter_counts(
         tmp_path, [(4, 2), (3, 0), (6, 2)], [(0, 1, 1), (1, 2, 1)],
         6, 2, n_tar_th=4, n_neg_th=2, min_nodes_floor=3,
     )
     assert filtered.subgraphs == [[2, 1, 0]]
+
+
+def test_next_seed_can_accept_node_rejected_by_successful_expansion(tmp_path):
+    # Seed 0 claims node 1 but cannot afford node 2. Seed 3 can afford it.
+    filtered = _filter_counts(
+        tmp_path, [(4, 0), (4, 0), (3, 0), (5, 0)], [(0, 1, 1), (1, 2, 1), (2, 3, 1)],
+        5, 1, n_tar_th=4, n_neg_th=0, min_nodes_floor=2,
+    )
+    assert filtered.subgraphs == [[0, 1], [3, 2]]
 
 
 @pytest.mark.parametrize(('n_tar_th', 'n_neg_th', 'expected'), (
@@ -300,7 +315,7 @@ def test_original_indices_are_preserved_after_isolated_node_removal(tmp_path):
     )
     result = _filter_native(
         graph,
-        _paths(tmp_path), targets, 5, 10, 2, 2, 5, .2, 0, None, .3, 1, None, 1.5, 1,
+        _paths(tmp_path), targets, 5, 10, .5, .2, 0, None, .3, 2, 2, 1, None, 1.5, 1,
     )
 
     filtered, signatures = result
@@ -366,7 +381,7 @@ def test_target_counts_include_non_target_only_nodes_and_exclude_isolated_nodes(
     )
     filtered, _ = _filter_native(
         graph,
-        _paths(tmp_path), targets, 5, 10, 0, 2, 5, .2, 0, None, 0, 1, None, 1.5, 1,
+        _paths(tmp_path), targets, 5, 10, .5, .2, 0, None, 0, 0, 2, 1, None, 1.5, 1,
     )
 
     np.testing.assert_array_equal(filtered.nodes['idx'], [0, 1, 2, 4])
@@ -394,8 +409,8 @@ def test_built_and_numpy_filter_results_match(tmp_path, targets_dir, non_targets
     results = [
         _filter_native(
             graph=value, assembly_paths=paths, is_targets=targets,
-            kmerlen=17, windowsize=10, n_tar_th=None, n_neg_th=None, stringency=5, neg_quantile=.2,
-            min_len=17, max_len=200, edge_w_th_mul=.3,
+            kmerlen=17, windowsize=10, tar_weight=.5, neg_rank=.2,
+            min_len=17, max_len=200, edge_w_th_mul=.3, n_tar_th=None, n_neg_th=None,
             min_nodes_floor=1, max_nodes_cap=None, consec_kmer_mul=1.5, n_cpu=2,
         )
         for value in (graph, loaded)
@@ -438,7 +453,7 @@ def _filter_assembly_paths(paths, targets=None, **output_paths):
         targets = _inputs()[-1]
     return _filter_native(
         _assembly_path_graph(), paths, targets,
-        5, 10, 1, 2, 5, .2, 0, None, 0, 1, None, 1.5, 1, **output_paths,
+        5, 10, .5, .2, 0, None, 0, 1, 2, 1, None, 1.5, 1, **output_paths,
     )
 
 
