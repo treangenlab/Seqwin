@@ -227,16 +227,16 @@ class FilteredGraph:
         """Number of non-target assemblies."""
         ...
     @property
+    def edge_weight_th(self) -> float:
+        """Graph edge weight threshold."""
+        ...
+    @property
     def n_tar_th(self) -> int:
         """Minimum mean target prevalence in a subgraph."""
         ...
     @property
     def n_neg_th(self) -> int:
         """Maximum mean non-target prevalence in a subgraph."""
-        ...
-    @property
-    def edge_weight_th(self) -> float:
-        """Graph edge weight threshold."""
         ...
     @property
     def min_nodes(self) -> int:

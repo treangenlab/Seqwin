@@ -104,9 +104,9 @@ void bind_python_classes(py::module_& module) {
         .def_readonly("subgraphs", &FilteredGraph::subgraphs)
         .def_readonly("total_tar", &FilteredGraph::total_tar)
         .def_readonly("total_neg", &FilteredGraph::total_neg)
+        .def_readonly("edge_weight_th", &FilteredGraph::edge_weight_th)
         .def_readonly("n_tar_th", &FilteredGraph::n_tar_th)
         .def_readonly("n_neg_th", &FilteredGraph::n_neg_th)
-        .def_readonly("edge_weight_th", &FilteredGraph::edge_weight_th)
         .def_readonly("min_nodes", &FilteredGraph::min_nodes)
         .def_readonly("max_nodes", &FilteredGraph::max_nodes)
         .def(py::pickle(
@@ -135,9 +135,9 @@ void bind_python_classes(py::module_& module) {
                     state[3].cast<std::vector<Subgraph>>(),
                     state[4].cast<std::size_t>(),
                     state[5].cast<std::size_t>(),
+                    state[8].cast<double>(),
                     state[6].cast<std::size_t>(),
                     state[7].cast<std::size_t>(),
-                    state[8].cast<double>(),
                     state[9].cast<std::size_t>(),
                     state[10].cast<std::optional<std::size_t>>()
                 };

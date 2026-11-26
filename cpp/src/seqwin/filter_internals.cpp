@@ -7,6 +7,7 @@
 #include <limits>
 #include <stdexcept>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 #include "seqwin/filter.hpp"
@@ -34,6 +35,16 @@ TargetCounts build_target_counts(
     bool count_targets,
     ThreadPool& pool
 ) {
+    std::vector<std::pair<std::size_t, std::size_t>> assembly_ranges;
+    for (std::size_t i = 0; i < is_targets.size(); ++i) {
+        if (is_targets[i] == count_targets) {
+            if (assembly_ranges.empty() || assembly_ranges.back().second != i) {
+                assembly_ranges.emplace_back(i, i + 1);
+            } else {
+                assembly_ranges.back().second = i + 1;
+            }
+        }
+    }
     NoInitArray<Counter> counts(prevalences.size());
     pool.parallel_for_chunks(
         prevalences.size(), [&](std::size_t start, std::size_t end, std::size_t
@@ -43,19 +54,18 @@ TargetCounts build_target_counts(
             counts.begin() + end,
             Counter{0}
         );
-        for (std::size_t assembly_idx = 0; assembly_idx < is_targets.size(); ++assembly_idx) {
-            if (is_targets[assembly_idx] != count_targets) {
-                continue;
-            }
-            if (node_offsets[assembly_idx] == node_offsets[assembly_idx + 1]) {
-                continue;
-            }
-            const auto* assembly_start = assembly_nodes.data() + node_offsets[assembly_idx];
-            const auto* assembly_end = assembly_nodes.data() + node_offsets[assembly_idx + 1];
-            const auto* first = std::lower_bound(assembly_start, assembly_end, start);
-            const auto* last = std::lower_bound(first, assembly_end, end);
-            for (auto it = first; it != last; ++it) {
-                ++counts[*it];
+        for (const auto& [begin, stop] : assembly_ranges) {
+            for (std::size_t assembly_idx = begin; assembly_idx < stop; ++assembly_idx) {
+                if (node_offsets[assembly_idx] == node_offsets[assembly_idx + 1]) {
+                    continue;
+                }
+                const auto* assembly_start = assembly_nodes.data() + node_offsets[assembly_idx];
+                const auto* assembly_end = assembly_nodes.data() + node_offsets[assembly_idx + 1];
+                const auto* first = std::lower_bound(assembly_start, assembly_end, start);
+                const auto* last = std::lower_bound(first, assembly_end, end);
+                for (auto it = first; it != last; ++it) {
+                    ++counts[*it];
+                }
             }
         }
     });
@@ -140,18 +150,14 @@ GraphTopology prune_graph(
 
     // Offsets into the neighbors array
     std::vector<std::size_t> offsets;
-    offsets.reserve(endpoints.size() + 1);
-    // Unique node indices in endpoints
-    std::vector<std::size_t> connected;
-    connected.reserve(endpoints.size());
+    offsets.reserve(std::min(prevalences.size(), endpoints.size()) + 1);
     // Map endpoint indices to indices of retained nodes
     NoInitArray<std::size_t> node_indices(endpoints.size());
     for (std::size_t i = 0; i < endpoints.size(); ++i) {
         if (i == 0 || endpoints[i].node != endpoints[i - 1].node) {
             offsets.push_back(i);
-            connected.push_back(endpoints[i].node);
         }
-        node_indices[endpoints[i].idx] = connected.size() - 1;
+        node_indices[endpoints[i].idx] = offsets.size() - 1;
     }
     offsets.push_back(endpoints.size());
 
@@ -165,10 +171,10 @@ GraphTopology prune_graph(
     // Populate FilteredGraph::nodes and calculate n_tar_th
     std::size_t sum_n_tar = 0;
     double sum_presence = 0.0;
-    filtered.nodes = NoInitArray<FilteredNode>(connected.size());
+    filtered.nodes = NoInitArray<FilteredNode>(offsets.size() - 1);
     target_counts.with([&](const auto& n_tar_at) {
-        for (std::size_t i = 0; i < connected.size(); ++i) {
-            const auto node_idx = connected[i];
+        for (std::size_t i = 0; i < filtered.nodes.size(); ++i) {
+            const auto node_idx = endpoints[offsets[i]].node;
             const std::size_t n_tar = n_tar_at(node_idx);
             const auto prevalence = prevalences[node_idx];
             if (n_tar > prevalence || n_tar > total_tar) {
@@ -219,18 +225,6 @@ void get_subgraphs(
     std::optional<std::size_t> max_nodes,
     FilteredGraph& filtered
 ) {
-    // GraphTopology represents nodes by indices into the retained nodes
-    std::vector<std::size_t> seeds;
-    seeds.reserve(nodes.size());
-    for (std::size_t node = 0; node < nodes.size(); ++node) {
-        if (nodes[node].n_tar >= n_tar_th && nodes[node].n_neg <= n_neg_th) {
-            seeds.push_back(node);
-        }
-    }
-    log_python(
-        " - Expanding subgraphs from " + std::to_string(seeds.size()) + " seed nodes..."
-    );
-
     struct FrontierNode {
         double max_score;
         double sum_score;
@@ -243,24 +237,35 @@ void get_subgraphs(
     // Reuse heap storage across seeds
     std::vector<FrontierNode> frontier;
 
-    // Marks nodes accepted in any of the subgraphs
-    std::vector<std::uint8_t> used(nodes.size(), 0);
-    // Nodes encountered in the most recent seed expansion, labeled with seed_i
+    // Nodes encountered in the current seed expansion are labeled with seed_i
+    // Nodes accepted in any of the subgraphs are labeled with used
     std::vector<std::uint16_t> seen(nodes.size(), 0);
-    // Identifier of the current seed, which may wrap around on overflow
+    // Identifier for the current seed, which may wrap around on overflow
     std::uint16_t seed_i = 0;
+    constexpr auto used = std::numeric_limits<std::uint16_t>::max();
 
+    std::size_t n_seeds = 0;
     const auto n_absence_th = total_tar - n_tar_th;
+    const double n_absence_th_inv = n_absence_th == 0 ? 0.0 : 1.0 / n_absence_th;
+    const double n_neg_th_inv = n_neg_th == 0 ? 0.0 : 1.0 / n_neg_th;
     const std::size_t max_nodes_value = max_nodes.value_or(
         std::numeric_limits<std::size_t>::max()
     );
-    for (const auto seed : seeds) {
-        if (used[seed]) {
+    for (std::size_t seed = 0; seed < nodes.size(); ++seed) {
+        if (nodes[seed].n_tar < n_tar_th || nodes[seed].n_neg > n_neg_th) {
+            continue;
+        }
+        ++n_seeds;
+        if (seen[seed] == used) {
             continue;
         }
 
-        if (++seed_i == 0) {
-            std::fill(seen.begin(), seen.end(), 0);
+        if (++seed_i == used) {
+            for (auto& state : seen) {
+                if (state != used) {
+                    state = 0;
+                }
+            }
             seed_i = 1;
         }
         Subgraph subgraph{seed};
@@ -270,9 +275,10 @@ void get_subgraphs(
 
         const auto add_neighbors = [&](std::size_t node) {
             for (const auto neighbor : graph.neighbors(node)) {
-                if (used[neighbor] || seen[neighbor] == seed_i) {
+                if (seen[neighbor] == used || seen[neighbor] == seed_i) {
                     continue;
                 }
+                seen[neighbor] = seed_i;
                 const double n_absence = total_tar - nodes[neighbor].n_tar;
                 const double n_neg = nodes[neighbor].n_neg;
                 if (
@@ -281,16 +287,17 @@ void get_subgraphs(
                 ) {
                     continue;
                 }
-                const double a = n_absence_th == 0 ? 0.0 : n_absence / n_absence_th;
-                const double b = n_neg_th == 0 ? 0.0 : n_neg / n_neg_th;
+                const double a = n_absence * n_absence_th_inv;
+                const double b = n_neg * n_neg_th_inv;
                 frontier.push_back({std::max(a, b), a + b, neighbor});
                 std::push_heap(frontier.begin(), frontier.end(), lower_priority);
-                seen[neighbor] = seed_i;
             }
         };
-        add_neighbors(seed);
+        if (max_nodes_value > 1) {
+            add_neighbors(seed);
+        }
 
-        while (!frontier.empty() && subgraph.size() < max_nodes_value) {
+        while (!frontier.empty()) {
             std::pop_heap(frontier.begin(), frontier.end(), lower_priority);
             const auto candidate = frontier.back();
             frontier.pop_back();
@@ -302,6 +309,9 @@ void get_subgraphs(
                 continue;
             }
             subgraph.push_back(candidate.node);
+            if (subgraph.size() == max_nodes_value) {
+                break;
+            }
             tar_budget = new_tar_budget;
             neg_budget = new_neg_budget;
             add_neighbors(candidate.node);
@@ -311,12 +321,13 @@ void get_subgraphs(
         // Output subgraphs using node indices from the original graph
         if (subgraph.size() >= min_nodes) {
             for (auto& node : subgraph) {
-                used[node] = 1;
+                seen[node] = used;
                 node = nodes[node].idx;
             }
             filtered.subgraphs.push_back(std::move(subgraph));
         }
     }
+    log_python(" - Found " + std::to_string(n_seeds) + " seed nodes");
 }
 
 } // namespace seqwin::internal

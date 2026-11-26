@@ -23,22 +23,9 @@ namespace seqwin::internal {
  */
 class TargetCounts {
 public:
+    template <typename Counter>
     TargetCounts(
-        NoInitArray<std::uint8_t>&& counts, bool counts_targets, ArrayView<std::uint32_t> prevalences
-    )
-        : counts_(std::move(counts))
-        , counts_targets_(counts_targets)
-        , prevalences_(prevalences)
-    {}
-    TargetCounts(
-        NoInitArray<std::uint16_t>&& counts, bool counts_targets, ArrayView<std::uint32_t> prevalences
-    )
-        : counts_(std::move(counts))
-        , counts_targets_(counts_targets)
-        , prevalences_(prevalences)
-    {}
-    TargetCounts(
-        NoInitArray<std::uint32_t>&& counts, bool counts_targets, ArrayView<std::uint32_t> prevalences
+        NoInitArray<Counter>&& counts, bool counts_targets, ArrayView<std::uint32_t> prevalences
     )
         : counts_(std::move(counts))
         , counts_targets_(counts_targets)
@@ -73,6 +60,10 @@ public:
         );
     }
 
+    void reset() noexcept {
+        std::visit([](auto& counts) { counts.reset(); }, counts_);
+    }
+
 private:
     std::variant<
         NoInitArray<std::uint8_t>,
@@ -88,23 +79,6 @@ private:
  */
 class GraphTopology {
 public:
-    class NeighborRange {
-    public:
-        using Iterator = const std::size_t*;
-
-        NeighborRange(Iterator begin, Iterator end)
-            : begin_(begin)
-            , end_(end)
-        {}
-
-        Iterator begin() const noexcept { return begin_; }
-        Iterator end() const noexcept { return end_; }
-
-    private:
-        Iterator begin_;
-        Iterator end_;
-    };
-
     GraphTopology(
         std::vector<std::size_t>&& offsets,
         NoInitArray<std::size_t>&& neighbors
@@ -125,20 +99,23 @@ public:
         }
     }
 
-    std::size_t size() const noexcept
-    {
-        return offsets_.size() - 1;
+    std::size_t size() const noexcept {
+        return offsets_.empty() ? 0 : offsets_.size() - 1;
     }
 
-    NeighborRange neighbors(std::size_t node_index) const
-    {
+    ArrayView<std::size_t> neighbors(std::size_t node_index) const {
         if (neighbors_.empty()) {
-            return {nullptr, nullptr};
+            return {nullptr, 0};
         }
         return {
             neighbors_.data() + offsets_[node_index],
-            neighbors_.data() + offsets_[node_index + 1]
+            offsets_[node_index + 1] - offsets_[node_index]
         };
+    }
+
+    void reset() noexcept {
+        std::vector<std::size_t>().swap(offsets_);
+        neighbors_.reset();
     }
 
 private:
@@ -206,13 +183,13 @@ std::vector<Signature> extract_signatures(
     ArrayView<std::uint32_t> record_offsets,
     const std::vector<std::string>& assembly_paths,
     ArrayView<bool> is_targets,
+    std::size_t total_tar,
     std::size_t kmerlen,
     std::size_t windowsize,
     std::size_t min_len,
     double consec_kmer_mul,
     const std::optional<std::string>& fasta_path,
     const std::optional<std::string>& csv_path,
-    std::size_t total_tar,
     ThreadPool& pool
 );
 

@@ -66,12 +66,12 @@ struct FilteredGraph {
     std::size_t total_tar;
     /** Number of non-target assemblies. */
     std::size_t total_neg;
+    /** Graph edge weight threshold. */
+    double edge_weight_th;
     /** Minimum mean target prevalence in a subgraph. */
     std::size_t n_tar_th;
     /** Maximum mean non-target prevalence in a subgraph. */
     std::size_t n_neg_th;
-    /** Graph edge weight threshold. */
-    double edge_weight_th;
     /** Minimum number of nodes for a subgraph. */
     std::size_t min_nodes;
     /** Maximum number of nodes for a subgraph. */
