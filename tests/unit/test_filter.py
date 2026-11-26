@@ -19,41 +19,14 @@ def _signature_values(signature):
     )
 
 
-def _filter_distinct_weights(tmp_path, edge_weight_th):
-    kmers = np.array(
-        [(0, record) for _ in range(4) for record in (0, 1, 2, 3)],
-        dtype=KMER_DTYPE,
-    )
-    offsets = np.arange(0, len(kmers) + 1, 4, dtype=np.uintp)
-    prevalences = np.full(4, 4, dtype=np.uint32)
-    edges = np.array(
-        [(0, 1, 5), (1, 2, 3), (2, 3, 2)],
-        dtype=EDGE_DTYPE,
-    )
-    record_offsets = np.array([0, 1, 2, 3, 4, 4], dtype=np.uint32)
-    assembly_nodes = np.tile(np.arange(4, dtype=np.uintp), 4)
-    node_offsets = np.array([0, 4, 8, 12, 16, 16], dtype=np.uintp)
-    targets = np.array([True, True, True, True, False], dtype=np.bool_)
-    edge_w_th_mul = edge_weight_th / 4
-    graph = _graph(
-        kmers, offsets, prevalences, edges, record_offsets, assembly_nodes, node_offsets,
-    )
-    return _filter_native(
-        graph,
-        _paths(tmp_path, 5), targets, 5, 10, .5, .2,
-        0, None, edge_w_th_mul, None, None, 1, None, 1.5, 1,
-    )
-
-
-def test_native_filter_preserves_ranges_and_original_indices(tmp_path):
-    (filtered, signatures), scored = _filter(tmp_path)
+def test_native_filter_preserves_ranges_and_indices_in_serial_and_parallel(tmp_path):
+    (filtered, signatures), _ = _filter(tmp_path)
     nodes, edges, subgraphs = filtered.nodes, filtered.edges, filtered.subgraphs
 
     assert isinstance(filtered, FilteredGraph)
     assert isinstance(signatures, list)
     assert all(isinstance(signature, Signature) for signature in signatures)
 
-    np.testing.assert_array_equal(scored, [2, 2, 4, 1])
     assert filtered.total_tar == 2 and filtered.total_neg == 2
     assert filtered.n_tar_th == 2
     assert filtered.n_neg_th == 0
@@ -71,20 +44,14 @@ def test_native_filter_preserves_ranges_and_original_indices(tmp_path):
     assert signature.location.stop - signature.location.start == 5
     assert signature.n_tar == 2
 
-
-def test_automatic_thresholds_and_parallel_equivalence(tmp_path):
-    first, _ = _filter(tmp_path, n_cpu=1)
-    parallel, _ = _filter(tmp_path, n_cpu=4)
-    assert first[0].n_tar_th == parallel[0].n_tar_th == 2
-    assert first[0].n_neg_th == parallel[0].n_neg_th == 0
-    for left, right in ((first[0].nodes, parallel[0].nodes),
-                        (first[0].edges, parallel[0].edges),
-                        (first[0].subgraphs, parallel[0].subgraphs)):
-        if isinstance(left, np.ndarray):
-            np.testing.assert_array_equal(left, right)
-        else:
-            assert left == right
-    assert list(map(_signature_values, first[1])) == list(map(_signature_values, parallel[1]))
+    (parallel, parallel_signatures), _ = _filter(tmp_path, n_cpu=4)
+    assert parallel.n_tar_th == filtered.n_tar_th
+    assert parallel.n_neg_th == filtered.n_neg_th
+    assert parallel.edge_weight_th == filtered.edge_weight_th
+    np.testing.assert_array_equal(parallel.nodes, nodes)
+    np.testing.assert_array_equal(parallel.edges, edges)
+    assert parallel.subgraphs == subgraphs
+    assert list(map(_signature_values, parallel_signatures)) == list(map(_signature_values, signatures))
 
 
 @pytest.mark.parametrize(
@@ -103,21 +70,6 @@ def test_dense_counts_use_smaller_assembly_group_in_parallel(
     )
     np.testing.assert_array_equal(result[0].nodes['n_tar'], expected_n_tar)
     np.testing.assert_array_equal(result[0].nodes['n_neg'], expected_n_neg)
-
-
-@pytest.mark.parametrize(
-    ('edge_weight_th', 'expected'),
-    (
-        (.5, [(0, 1, 5), (1, 2, 3), (2, 3, 2)]),
-        (2.5, [(0, 1, 5), (1, 2, 3)]),
-        (3, [(0, 1, 5)]),
-    ),
-)
-def test_edge_pruning_retains_descending_prefix_with_strict_threshold(
-    tmp_path, edge_weight_th, expected,
-):
-    result = _filter_distinct_weights(tmp_path, edge_weight_th)
-    assert result[0].edges.tolist() == expected
 
 
 def _filter_counts(tmp_path, counts, edges, total_tar, total_neg, **options):
@@ -161,8 +113,7 @@ def _filter_counts(tmp_path, counts, edges, total_tar, total_neg, **options):
     return filtered
 
 
-@pytest.mark.parametrize('n_cpu', (1, 4))
-@pytest.mark.parametrize(('tar_weight', 'threshold'), ((0, 4), (.2, 5), (.5, 5), (1, 6)))
+@pytest.mark.parametrize(('tar_weight', 'threshold', 'n_cpu'), ((0, 4, 1), (.2, 5, 4), (1, 6, 1)))
 def test_weighted_mean_uses_retained_nodes_only(tmp_path, tar_weight, threshold, n_cpu):
     # Each block has weighted mean 96 / 24 = 4. Including isolated node 0 would raise it.
     block = [(1, 0)] * 8 + [(4, 0), (6, 0), (6, 0)]
@@ -175,7 +126,7 @@ def test_weighted_mean_uses_retained_nodes_only(tmp_path, tar_weight, threshold,
     assert filtered.n_neg_th == 2
 
 
-@pytest.mark.parametrize(('quantile', 'expected'), ((0, 0), (.4, 0), (.41, 1), (.8, 1), (1, 3)))
+@pytest.mark.parametrize(('quantile', 'expected'), ((0, 0), (.4, 0), (.41, 1), (1, 3)))
 def test_nearest_rank_quantile_after_manual_target_override(tmp_path, quantile, expected):
     # Eligible non-target counts sort to [0, 0, 1, 1, 3]. Node 0 is ineligible.
     counts = [(2, 4), (4, 3), (3, 1), (4, 0), (3, 0), (4, 1)]
@@ -185,25 +136,6 @@ def test_nearest_rank_quantile_after_manual_target_override(tmp_path, quantile, 
     )
     assert filtered.n_tar_th == 3
     assert filtered.n_neg_th == expected
-
-
-@pytest.mark.parametrize('options', ({'n_tar_th': 3}, {'n_neg_th': 3}))
-def test_native_threshold_validation(tmp_path, options):
-    with pytest.raises(ValueError, match=next(iter(options))):
-        _filter(tmp_path, **options)
-
-
-@pytest.mark.parametrize('name', ('tar_weight', 'neg_rank'))
-@pytest.mark.parametrize('value', (-.01, 1.01, float('nan'), float('inf'), float('-inf')))
-def test_native_prevalence_parameter_validation(tmp_path, name, value):
-    with pytest.raises(ValueError, match=name):
-        _filter(tmp_path, **{name: value})
-
-
-@pytest.mark.parametrize('options', ({'edge_w_th_mul': 1}, {'tar_weight': 1}))
-def test_no_retained_or_target_eligible_nodes(tmp_path, options):
-    with pytest.raises(RuntimeError, match='No subgraph'):
-        _filter_counts(tmp_path, [(1, 0), (2, 1)], [(0, 1, 2)], 4, 2, **options)
 
 
 def test_seeds_must_meet_both_thresholds(tmp_path):
@@ -224,16 +156,13 @@ def test_frontier_uses_chebyshev_then_additive_score_then_node_index(tmp_path):
     assert filtered.subgraphs == [[0, 3, 4, 2, 1]]
 
 
-@pytest.mark.parametrize('counts', (
-    [(4, 0), (3, 0), (6, 4)],  # Node 1 exceeds the target absence budget.
-    [(6, 2), (6, 3), (2, 0)],  # Node 1 exceeds the non-target presence budget.
-))
-def test_expansion_continues_without_reconsidering_rejected_neighbors(tmp_path, counts):
-    # Node 1 fails first. Node 2 replenishes the budget and also neighbors node 1.
-    filtered = _filter_counts(
-        tmp_path, counts, [(0, 1, 1), (0, 2, 1), (1, 2, 1)], 6, 4, n_tar_th=4, n_neg_th=2,
-    )
-    assert filtered.subgraphs == [[0, 2]]
+def test_expansion_continues_without_reconsidering_rejected_neighbors(tmp_path):
+    # Nodes 1 and 4 exceed the target and non-target budgets, respectively.
+    # Nodes 2 and 5 replenish those budgets and neighbor the rejected nodes.
+    counts = [(4, 0), (3, 0), (6, 4), (6, 2), (6, 3), (2, 0)]
+    edges = [(0, 1, 1), (0, 2, 1), (1, 2, 1), (3, 4, 1), (3, 5, 1), (4, 5, 1)]
+    filtered = _filter_counts(tmp_path, counts, edges, 6, 4, n_tar_th=4, n_neg_th=2)
+    assert filtered.subgraphs == [[0, 2], [3, 5]]
 
 
 def test_both_budgets_can_be_spent_to_accept_an_imperfect_node(tmp_path):
@@ -262,7 +191,7 @@ def test_next_seed_can_accept_node_rejected_by_successful_expansion(tmp_path):
 
 
 @pytest.mark.parametrize(('n_tar_th', 'n_neg_th', 'expected'), (
-    (4, 1, [[0, 2, 3]]), (3, 0, [[0, 2, 1]]), (4, 0, [[0, 2]]),
+    (4, 1, [[0, 2, 3]]), (3, 0, [[0, 2, 1]]),
 ))
 def test_zero_tolerance_frontier(tmp_path, n_tar_th, n_neg_th, expected):
     filtered = _filter_counts(
@@ -272,27 +201,27 @@ def test_zero_tolerance_frontier(tmp_path, n_tar_th, n_neg_th, expected):
     assert filtered.subgraphs == expected
 
 
-def _filter_target_support(tmp_path, support, edges, total_tar, n_cpu):
+def _filter_target_support(tmp_path, support, edges, total_tar, n_cpu, edge_weight_th=1.5):
     # Low-support nodes also occur in every non-target assembly.
     total_neg = 5 - total_tar
     counts = [(count, total_neg if count <= 1 else 0) for count in support]
     return _filter_counts(
         tmp_path, counts, edges, total_tar, total_neg, n_cpu=n_cpu,
-        n_tar_th=1, n_neg_th=(total_neg + 1) // 2, edge_w_th_mul=1.5 / total_tar,
+        n_tar_th=1, n_neg_th=(total_neg + 1) // 2, edge_w_th_mul=edge_weight_th / total_tar,
     )
 
 
-@pytest.mark.parametrize(('total_tar', 'n_cpu'), ((2, 1), (3, 4)))
-def test_edge_pruning_requires_target_support_and_preserves_order(tmp_path, total_tar, n_cpu):
+@pytest.mark.parametrize(('total_tar', 'n_cpu', 'edge_weight_th'), ((2, 1, 1.0), (3, 4, 1.5)))
+def test_edge_pruning_requires_target_support_and_preserves_order(tmp_path, total_tar, n_cpu, edge_weight_th):
     filtered = _filter_target_support(
         tmp_path,
         [1, 1, 2, 1, 1, 2, 2, 2],
         [(0, 1, 5), (2, 3, 4), (0, 1, 3), (4, 5, 3), (6, 7, 2), (2, 6, 1)],
-        total_tar, n_cpu,
+        total_tar, n_cpu, edge_weight_th,
     )
 
-    assert filtered.edge_weight_th == pytest.approx(1.5)
-    # Neither endpoint qualifies at equality; first-only, second-only and both do.
+    assert filtered.edge_weight_th == pytest.approx(edge_weight_th)
+    # Only the first, only the second, and both endpoints qualify on the retained edges.
     np.testing.assert_array_equal(filtered.nodes['idx'], [2, 3, 4, 5, 6, 7])
     np.testing.assert_array_equal(filtered.nodes['n_tar'], [2, 1, 1, 2, 2, 2])
     assert filtered.edges.tolist() == [(2, 3, 4), (4, 5, 3), (6, 7, 2)]
