@@ -41,8 +41,8 @@ def _extract_signature(tmp_path, *, target_records, edge_data):
         graph=graph,
         assembly_paths=_paths(tmp_path, len(records), sequence_length=64),
         is_targets=np.array([True] * len(target_records) + [False], dtype=np.bool_),
-        jaccard=None, kmerlen=5, windowsize=5, penalty_th=.9, stringency=5,
-        min_len=0, max_len=None, penalty_th_cap=.2, edge_w_th_mul=0,
+        kmerlen=5, windowsize=5, tar_weight=.5, neg_rank=.2,
+        min_len=0, max_len=None, edge_w_th_mul=0, n_tar_th=1, n_neg_th=0,
         min_nodes_floor=1, max_nodes_cap=None, consec_kmer_mul=2, n_cpu=1,
     )
     signature, = signatures
@@ -99,7 +99,7 @@ def test_signature_representative_score_tie(tmp_path):
 def test_signature_extraction_uses_final_original_node_range(tmp_path):
     (filtered, signatures), _ = _filter(
         tmp_path,
-        penalty_th=2.0, edge_w_th_mul=0, min_nodes_floor=1,
+        n_tar_th=0, n_neg_th=2, edge_w_th_mul=0, min_nodes_floor=1,
     )
 
     assert filtered.nodes['idx'][-1] == 3
@@ -120,8 +120,8 @@ def test_signature_extraction_rejects_invalid_final_node_range(tmp_path, final_s
     graph = _graph(kmers, offsets, prevalences, edges, record_offsets, assembly_nodes, node_offsets)
     with pytest.raises(ValueError, match=message):
         _filter_native(
-            graph, _paths(tmp_path), targets, None, 5, 10, 2.0, 5, 0, None,
-            .2, 0, 1, None, 1.5, 1,
+            graph, _paths(tmp_path), targets, 5, 10, .5, .2, 0, None,
+            0, 0, 2, 1, None, 1.5, 1,
         )
 
 
@@ -146,7 +146,7 @@ def test_native_csv_escaping_and_fasta_wrapping(tmp_path, record_id):
     )
     _filter_native(
         graph,
-        paths, targets, None, 100, 10, .3, 5, 0, None, .2, .3, 1, None, 1.5, 1,
+        paths, targets, 100, 10, .5, .2, 0, None, .3, 2, 0, 1, None, 1.5, 1,
         fasta_path=str(fasta_path), csv_path=str(csv_path),
     )
     header = f'0-{record_id}-0:100'

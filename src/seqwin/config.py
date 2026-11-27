@@ -17,7 +17,6 @@ Functions:
 
 Attributes:
 -----------
-- HAS_MASH (bool)
 - HAS_BLAST (bool)
 - HAS_DATASETS (bool)
 - WORKINGDIR (WorkingDir)
@@ -34,14 +33,11 @@ from functools import cached_property
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from types import MappingProxyType
 
-import numpy as np
-from numpy.typing import NDArray
 from pydantic import BaseModel, SecretStr, ValidationInfo, Field, computed_field, field_validator, model_validator
 
 from .ncbi import Level, Source, Task
 from ._version import __version__
 
-HAS_MASH = shutil.which("mash") is not None
 HAS_BLAST = (shutil.which("makeblastdb") is not None) and (shutil.which("blastn") is not None)
 HAS_DATASETS = shutil.which("datasets") is not None
 
@@ -68,25 +64,23 @@ class Config(BaseModel):
 
         kmerlen (int): K-mer length. [21]
         windowsize (int): Window size for minimizer sketch. [200]
-        penalty_th (float | None): Node penalty threshold, from 0 to 1. If None, Seqwin computes it automatically (capped by `penalty_th_cap`). [None]
-        run_mash (bool): If True, use MinHash sketches (Mash) to estimate `penalty_th`; else use minimizer sketches (faster but might be biased). [False]
-        stringency (int): If `penalty_th` is None, multiply the computed penalty threshold with `(1 - x/10)`. [5]
+        tar_weight (float): Weight for estimating the target prevalence threshold (0-1). Higher values favor higher target prevalence. [0.5]
+        neg_rank (float): Quantile for estimating the non-target prevalence threshold (0-1). Lower values favor lower non-target prevalence. [0.2]
         min_len (int): Minimum length of output signatures. [200]
-        max_len (int | None): Estimated maximum length of output signatures. If None, no explicit limit is applied (capped by `max_nodes_cap`). [None]
+        max_len (int | None): Estimated maximum length of output signatures. If None, use `max_nodes_cap` to limit subgraph size. [None]
         run_blast (bool): If True, evaluate signature sequences with BLAST. [False]
         blast_neg_only (bool, deprecated): If True, only include non-target assemblies in the BLAST database. [False]
 
-        penalty_th_cap (float): If `penalty_th` is None, penalty threshold cannot be higher than this value. [0.2]
-        edge_w_th_mul (float): Multiplier for determining the threshold for low-weight edges. [0.3]
-        min_nodes_floor (int): Lowest possible value for `min_nodes` (see `RunState`), regardless of `min_len`. [3]
-        max_nodes_cap (int | None): If `max_len` is None, `max_nodes` (see `RunState`) cannot be higher than this value. None for no limit. [100]
+        edge_w_th_mul (float): Multiplier of the number of target assemblies for determining the edge weight threshold (0-1). [0.3]
+        n_tar_th (int | None): Minimum mean target prevalence of a subgraph. If provided, overrides estimation using `tar_weight`. [None]
+        n_neg_th (int | None): Maximum mean non-target prevalence of a subgraph. If provided, overrides estimation using `neg_rank`. [None]
+        min_nodes_floor (int): Lower bound for the minimum subgraph size. [3]
+        max_nodes_cap (int | None): Maximum subgraph size if `max_len` is None. None for no limit. [100]
         consec_kmer_mul (float): Multiplier of window size for the maximum position difference between consecutive k-mers. [1.5]
-
-        sketchsize (int): Sketch size for Mash (MinHash) sketch. [1000]
 
         level (Level): NCBI download option. Limit to genomes ≥ this assembly level ('contig' < 'scaffold' < 'chromosome' < 'complete'). ['contig']
         source (Source): NCBI download option. Genome source ('genbank' or 'refseq'). ['genbank']
-        annotated (bool): NCBI download option. If True, limit to GenBank (submitter) or RefSeq annotated genomes, based on the selection of source. [False]
+        annotated (bool): NCBI download option. If True, limit to annotated genomes. [False]
         exclude_mag (bool): NCBI download option. If True, exclude metagenome-assembled genomes (MAGs). [False]
         gzip (bool): NCBI download option. If True, download genome sequences in gzip format. [True]
         api_key (SecretStr | None): NCBI API key passed to the Datasets command-line tools. [None]
@@ -114,23 +108,20 @@ class Config(BaseModel):
     # Signature options
     kmerlen: int = Field(default=21, ge=5)
     windowsize: int = Field(default=200, ge=1)
-    penalty_th: float | None = Field(default=None, ge=0, le=1)
-    run_mash: bool = False
-    stringency: int = Field(default=5, ge=0, le=10)
+    tar_weight: float = Field(default=0.5, ge=0, le=1)
+    neg_rank: float = Field(default=0.2, ge=0, le=1)
     min_len: int = Field(default=200, ge=0)
     max_len: int | None = Field(default=None, ge=1)
     run_blast: bool = False
     blast_neg_only: bool = False # NOTE: need to fix when this is turned on
 
     # Graph filtering options (not included in CLI)
-    penalty_th_cap: float = Field(default=0.2, ge=0, le=1)
     edge_w_th_mul: float = Field(default=0.3, ge=0, le=1)
+    n_tar_th: int | None = Field(default=None, ge=0, strict=True)
+    n_neg_th: int | None = Field(default=None, ge=0, strict=True)
     min_nodes_floor: int = Field(default=3, ge=0)
     max_nodes_cap: int | None = Field(default=100, ge=1)
     consec_kmer_mul: float = Field(default=1.5, ge=1)
-
-    # Mash parameters (not included in CLI)
-    sketchsize: int = Field(default=1000, ge=1)
 
     # NCBI download options
     level: Level = Level.contig
@@ -212,6 +203,7 @@ class Config(BaseModel):
         return self
 
     model_config = {
+        'extra': 'forbid',
         'frozen': True,
         'slots': True,
         'validate_default': True,
@@ -225,10 +217,8 @@ class RunState:
 
     Attributes:
         working_dir (Path): Working directory, defined by prefix and title.
-        jaccard (NDArray[np.float64] | None): Pairwise assembly Jaccard matrix.
     """
     working_dir: Path
-    jaccard: NDArray[np.float64] | None = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -241,7 +231,6 @@ class WorkingDir:
         assemblies_dir (str): Directory for downloaded assemblies. ['assemblies']
         assemblies_csv (str): Assembly indices, paths, and is_target saved as CSV. ['assemblies.csv']
         graph (str): Directory of NumPy arrays representing the minimizer graph. ['graph']
-        mash (str): Mash sketch of all assemblies (.msh will be added by Mash). ['sketches']
         blast_dir (str): Directory for the BLAST database. ['blastdb']
         blast_log (str): Console output of the makeblastdb command, inside `blast_dir`. ['makeblastdb.log']
         signatures_fasta (str): Sequences and coordinates of candidate signatures. ['signatures.fasta']
@@ -253,7 +242,6 @@ class WorkingDir:
     assemblies_dir: str = 'assemblies'
     assemblies_csv: str = 'assemblies.csv'
     graph: str = 'graph'
-    mash: str = 'sketches'
     blast_dir: str = 'blastdb'
     blast_log: str = 'makeblastdb.log'
     signatures_fasta: str = 'signatures.fasta'

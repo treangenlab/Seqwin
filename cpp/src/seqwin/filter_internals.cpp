@@ -5,8 +5,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
-#include <queue>
 #include <stdexcept>
+#include <tuple>
+#include <utility>
 #include <vector>
 
 #include "seqwin/filter.hpp"
@@ -18,12 +19,10 @@ namespace seqwin::internal {
 namespace {
 
 /**
- * @brief For each graph node, count its occurrences in target or non-target assemblies.
+ * @brief Calculate the target or non-target prevalence of each graph node.
  *
- * Partitions the node index range across worker threads. Each worker scans target/non-target
- * assemblies and updates counts only for nodes in its assigned range. Because node indices in
- * each assembly slice of `assembly_nodes` is sorted, this range can be determined with binary
- * search on each assembly slice.
+ * Partition the node index range across worker threads. Each worker uses binary search
+ * on sorted assembly node indices to count nodes within its assigned range.
  */
 template <typename Counter>
 TargetCounts build_target_counts(
@@ -34,6 +33,17 @@ TargetCounts build_target_counts(
     bool count_targets,
     ThreadPool& pool
 ) {
+    // Group consecutive assemblies in the selected group into index ranges
+    std::vector<std::pair<std::size_t, std::size_t>> assembly_ranges;
+    for (std::size_t i = 0; i < is_targets.size(); ++i) {
+        if (is_targets[i] == count_targets) {
+            if (assembly_ranges.empty() || assembly_ranges.back().second != i) {
+                assembly_ranges.emplace_back(i, i + 1);
+            } else {
+                assembly_ranges.back().second = i + 1;
+            }
+        }
+    }
     NoInitArray<Counter> counts(prevalences.size());
     pool.parallel_for_chunks(
         prevalences.size(), [&](std::size_t start, std::size_t end, std::size_t
@@ -43,19 +53,18 @@ TargetCounts build_target_counts(
             counts.begin() + end,
             Counter{0}
         );
-        for (std::size_t assembly_idx = 0; assembly_idx < is_targets.size(); ++assembly_idx) {
-            if (is_targets[assembly_idx] != count_targets) {
-                continue;
-            }
-            if (node_offsets[assembly_idx] == node_offsets[assembly_idx + 1]) {
-                continue;
-            }
-            const auto* assembly_start = assembly_nodes.data() + node_offsets[assembly_idx];
-            const auto* assembly_end = assembly_nodes.data() + node_offsets[assembly_idx + 1];
-            const auto* first = std::lower_bound(assembly_start, assembly_end, start);
-            const auto* last = std::lower_bound(first, assembly_end, end);
-            for (auto it = first; it != last; ++it) {
-                ++counts[*it];
+        for (const auto& [begin, stop] : assembly_ranges) {
+            for (std::size_t assembly_idx = begin; assembly_idx < stop; ++assembly_idx) {
+                if (node_offsets[assembly_idx] == node_offsets[assembly_idx + 1]) {
+                    continue;
+                }
+                const auto* assembly_start = assembly_nodes.data() + node_offsets[assembly_idx];
+                const auto* assembly_end = assembly_nodes.data() + node_offsets[assembly_idx + 1];
+                const auto* first = std::lower_bound(assembly_start, assembly_end, start);
+                const auto* last = std::lower_bound(first, assembly_end, end);
+                for (auto it = first; it != last; ++it) {
+                    ++counts[*it];
+                }
             }
         }
     });
@@ -91,71 +100,6 @@ TargetCounts count_target_nodes(
     );
 }
 
-std::pair<double, double> expected_presence(
-    ArrayView<std::uint32_t> prevalences,
-    const TargetCounts& target_counts,
-    std::size_t total_tar,
-    std::size_t total_neg,
-    ThreadPool& pool
-) {
-    /**
-     * Sums over all nodes, for penalty threshold calculation.
-     * For all k-mers in targets, calculate their total presence in targets or non-targets.
-     */
-    struct NodeSums {
-        std::size_t n_tar = 0;
-        double presence_tar = 0.0; // `(node.n_tar / total_tar) * node.n_tar`
-        double presence_neg = 0.0; // `(node.n_neg / total_neg) * node.n_tar`
-    };
-    std::vector<NodeSums> node_sums(pool.size());
-    const double total_tar_inv = 1.0 / total_tar;
-    const double total_neg_inv = 1.0 / total_neg;
-
-    target_counts.with([&](const auto& n_tar_at) {
-        pool.parallel_for_chunks(prevalences.size(), [&](
-            std::size_t start, std::size_t end, std::size_t chunk_id
-        ) {
-            NodeSums sums;
-
-            for (std::size_t node_idx = start; node_idx < end; ++node_idx) {
-                const std::size_t n_tar = n_tar_at(node_idx);
-                if (n_tar == 0) {
-                    continue;
-                }
-                if (n_tar > std::numeric_limits<std::uint32_t>::max()) {
-                    throw std::invalid_argument("Node n_tar exceeds uint32 range");
-                }
-                const auto prevalence = prevalences[node_idx];
-                if (n_tar > prevalence) {
-                    throw std::invalid_argument("Node n_tar exceeds prevalence");
-                }
-                const std::size_t n_neg = prevalence - n_tar;
-                if (n_neg > std::numeric_limits<std::uint32_t>::max()) {
-                    throw std::invalid_argument("Node n_neg exceeds uint32 range");
-                }
-                sums.n_tar += n_tar;
-                sums.presence_tar += n_tar * total_tar_inv * n_tar;
-                sums.presence_neg += n_neg * total_neg_inv * n_tar;
-            }
-            node_sums[chunk_id] = sums;
-        });
-    });
-    NodeSums totals;
-    for (const auto& sums : node_sums) {
-        totals.n_tar += sums.n_tar;
-        totals.presence_tar += sums.presence_tar;
-        totals.presence_neg += sums.presence_neg;
-    }
-    if (totals.n_tar == 0) {
-        throw std::invalid_argument("No target minimizer available for threshold estimation");
-    }
-
-    return {
-        1.0 - totals.presence_tar / totals.n_tar,
-        totals.presence_neg / totals.n_tar
-    };
-}
-
 GraphTopology prune_graph(
     ArrayView<std::uint32_t> prevalences,
     ArrayView<Edge> edges,
@@ -163,6 +107,8 @@ GraphTopology prune_graph(
     std::size_t total_tar,
     std::size_t total_neg,
     double edge_weight_th,
+    double tar_weight,
+    std::optional<std::size_t> n_tar_th,
     FilteredGraph& filtered,
     ThreadPool& pool
 ) {
@@ -177,7 +123,7 @@ GraphTopology prune_graph(
     };
 
     // Scan the prefix of edges (sorted by weight)
-    // Keep edges with sufficient weight and target support
+    // // Keep edges with sufficient weight and target prevalence
     filtered.edges.clear();
     const std::size_t th = edge_weight_th;
     // Store each retained edge as two endpoint records
@@ -203,18 +149,14 @@ GraphTopology prune_graph(
 
     // Offsets into the neighbors array
     std::vector<std::size_t> offsets;
-    offsets.reserve(endpoints.size() + 1);
-    // Unique node indices in endpoints
-    std::vector<std::size_t> connected;
-    connected.reserve(endpoints.size());
+    offsets.reserve(std::min(prevalences.size(), endpoints.size()) + 1);
     // Map endpoint indices to indices of retained nodes
     NoInitArray<std::size_t> node_indices(endpoints.size());
     for (std::size_t i = 0; i < endpoints.size(); ++i) {
         if (i == 0 || endpoints[i].node != endpoints[i - 1].node) {
             offsets.push_back(i);
-            connected.push_back(endpoints[i].node);
         }
-        node_indices[endpoints[i].idx] = connected.size() - 1;
+        node_indices[endpoints[i].idx] = offsets.size() - 1;
     }
     offsets.push_back(endpoints.size());
 
@@ -225,37 +167,46 @@ GraphTopology prune_graph(
         neighbors[i] = node_indices[endpoints[i].idx ^ 1];
     });
 
-    // Calculate the penalty of each retained node
-    filtered.nodes = NoInitArray<FilteredNode>(connected.size());
-    const double total_tar_inv = 1.0 / total_tar;
-    const double total_neg_inv = 1.0 / total_neg;
-
+    // Populate FilteredGraph::nodes and calculate n_tar_th
+    std::size_t sum_n_tar = 0;
+    double sum_presence = 0.0;
+    filtered.nodes = NoInitArray<FilteredNode>(offsets.size() - 1);
     target_counts.with([&](const auto& n_tar_at) {
-        pool.parallel_for(connected.size(), [&](std::size_t i) {
-            const auto node_idx = connected[i];
+        for (std::size_t i = 0; i < filtered.nodes.size(); ++i) {
+            const auto node_idx = endpoints[offsets[i]].node;
             const std::size_t n_tar = n_tar_at(node_idx);
-            if (n_tar > std::numeric_limits<std::uint32_t>::max()) {
-                throw std::invalid_argument("Filtered node n_tar exceeds uint32 range");
-            }
             const auto prevalence = prevalences[node_idx];
-            if (n_tar > prevalence) {
-                throw std::invalid_argument("Filtered node n_tar exceeds prevalence");
+            if (n_tar > prevalence || n_tar > total_tar) {
+                throw std::invalid_argument("Filtered node n_tar is invalid");
             }
             const std::size_t n_neg = prevalence - n_tar;
-            if (n_neg > std::numeric_limits<std::uint32_t>::max()) {
-                throw std::invalid_argument("Filtered node n_neg exceeds uint32 range");
+            if (n_neg > total_neg) {
+                throw std::invalid_argument("Filtered node n_neg exceeds total_neg");
             }
-
-            const double frac_tar = n_tar * total_tar_inv;
-            const double frac_neg = n_neg * total_neg_inv;
             filtered.nodes[i] = FilteredNode{
                 node_idx,
                 static_cast<std::uint32_t>(n_tar),
-                static_cast<std::uint32_t>(n_neg),
-                std::sqrt((1.0 - frac_tar) * (1.0 - frac_tar) + frac_neg * frac_neg)
+                static_cast<std::uint32_t>(n_neg)
             };
-        });
+            if (!n_tar_th) {
+                sum_n_tar += n_tar;
+                sum_presence += n_tar * n_tar;
+            }
+        }
     });
+
+    if (n_tar_th) {
+        filtered.n_tar_th = *n_tar_th;
+    } else if (sum_n_tar == 0) {
+        filtered.n_tar_th = 0;
+    } else {
+        const double mean_presence = sum_presence / sum_n_tar;
+        const double total = total_tar;
+        const double threshold = (1.0 - tar_weight) * mean_presence + tar_weight * total;
+        filtered.n_tar_th = static_cast<std::size_t>(
+            std::clamp(std::ceil(threshold), 0.0, total)
+        );
+    }
 
     return GraphTopology(
         std::move(offsets),
@@ -263,105 +214,119 @@ GraphTopology prune_graph(
     );
 }
 
-void get_subgraphs(
+void grow_subgraphs(
     const GraphTopology& graph,
     const NoInitArray<FilteredNode>& nodes,
-    double penalty_th,
+    std::size_t total_tar,
+    std::int64_t n_tar_th,
+    std::int64_t n_neg_th,
     std::size_t min_nodes,
     std::optional<std::size_t> max_nodes,
     FilteredGraph& filtered
 ) {
-    // GraphTopology represents nodes by indices into the retained nodes
-    std::vector<std::size_t> seeds;
-    seeds.reserve(nodes.size());
-    for (std::size_t node = 0; node < nodes.size(); ++node) {
-        if (nodes[node].penalty <= penalty_th) {
-            seeds.push_back(node);
-        }
-    }
-    log_python(
-        " - Expanding subgraphs from " + std::to_string(seeds.size()) +
-        " seed nodes (penalty<=" + std::to_string(penalty_th) + ")..."
-    );
-
     struct FrontierNode {
-        double penalty;
+        double max_score;
+        double sum_score;
         std::size_t node;
     };
     const auto lower_priority = [](const FrontierNode& left, const FrontierNode& right) {
-        if (left.penalty != right.penalty) {
-            return left.penalty > right.penalty;
-        }
-        return left.node > right.node;
+        return std::tie(left.max_score, left.sum_score, left.node) >
+               std::tie(right.max_score, right.sum_score, right.node);
     };
     // Reuse heap storage across seeds
     std::vector<FrontierNode> frontier;
 
-    // Marks nodes accepted in any of the subgraphs
-    std::vector<std::uint8_t> used(nodes.size(), 0);
-    // Marks nodes in the frontier or accepted into the current subgraph
-    // Cleared for each seed
-    std::vector<std::uint8_t> seen(nodes.size(), 0);
+    // Nodes encountered in the current seed expansion are labeled with seed_i
+    // Nodes accepted in any of the subgraphs are labeled with used
+    std::vector<std::uint16_t> seen(nodes.size(), 0);
+    // Identifier for the current seed, which may wrap around on overflow
+    std::uint16_t seed_i = 0;
+    constexpr auto used = std::numeric_limits<std::uint16_t>::max();
 
+    std::size_t n_seeds = 0;
+    const auto n_absence_th = total_tar - n_tar_th;
+    const double n_absence_th_inv = n_absence_th == 0 ? 0.0 : 1.0 / n_absence_th;
+    const double n_neg_th_inv = n_neg_th == 0 ? 0.0 : 1.0 / n_neg_th;
     const std::size_t max_nodes_value = max_nodes.value_or(
         std::numeric_limits<std::size_t>::max()
     );
-    for (const auto seed : seeds) {
-        if (used[seed]) {
+    for (std::size_t seed = 0; seed < nodes.size(); ++seed) {
+        if (nodes[seed].n_tar < n_tar_th || nodes[seed].n_neg > n_neg_th) {
+            continue;
+        }
+        ++n_seeds;
+        if (seen[seed] == used) {
             continue;
         }
 
+        if (++seed_i == used) {
+            for (auto& state : seen) {
+                if (state != used) {
+                    state = 0;
+                }
+            }
+            seed_i = 1;
+        }
         Subgraph subgraph{seed};
-        seen[seed] = 1;
-        double sum_penalty = nodes[seed].penalty;
+        seen[seed] = seed_i;
+        std::int64_t tar_budget = nodes[seed].n_tar - n_tar_th;
+        std::int64_t neg_budget = n_neg_th - nodes[seed].n_neg;
 
         const auto add_neighbors = [&](std::size_t node) {
             for (const auto neighbor : graph.neighbors(node)) {
-                if (!used[neighbor] && !seen[neighbor]) {
-                    frontier.push_back({nodes[neighbor].penalty, neighbor});
-                    std::push_heap(frontier.begin(), frontier.end(), lower_priority);
-                    seen[neighbor] = 1;
+                if (seen[neighbor] == used || seen[neighbor] == seed_i) {
+                    continue;
                 }
+                seen[neighbor] = seed_i;
+                const double n_absence = total_tar - nodes[neighbor].n_tar;
+                const double n_neg = nodes[neighbor].n_neg;
+                if (
+                    (n_absence_th == 0 && n_absence != 0.0) ||
+                    (n_neg_th == 0 && n_neg != 0.0)
+                ) {
+                    continue;
+                }
+                const double a = n_absence * n_absence_th_inv;
+                const double b = n_neg * n_neg_th_inv;
+                frontier.push_back({std::max(a, b), a + b, neighbor});
+                std::push_heap(frontier.begin(), frontier.end(), lower_priority);
             }
         };
-        add_neighbors(seed);
+        if (max_nodes_value > 1) {
+            add_neighbors(seed);
+        }
 
-        while (!frontier.empty() && subgraph.size() < max_nodes_value) {
+        while (!frontier.empty()) {
             std::pop_heap(frontier.begin(), frontier.end(), lower_priority);
             const auto candidate = frontier.back();
             frontier.pop_back();
 
-            const double new_sum_penalty = sum_penalty + candidate.penalty;
-            if (new_sum_penalty / (subgraph.size() + 1) <= penalty_th) {
-                subgraph.push_back(candidate.node);
-                sum_penalty = new_sum_penalty;
-                add_neighbors(candidate.node);
-            } else {
-                // All remaining candidates have at least this penalty, so they
-                // cannot lower the subgraph average below the threshold.
-                seen[candidate.node] = 0;
+            const auto& node = nodes[candidate.node];
+            const auto new_tar_budget = tar_budget + (node.n_tar - n_tar_th);
+            const auto new_neg_budget = neg_budget + (n_neg_th - node.n_neg);
+            if (new_tar_budget < 0 || new_neg_budget < 0) {
+                continue;
+            }
+            subgraph.push_back(candidate.node);
+            if (subgraph.size() == max_nodes_value) {
                 break;
             }
-        }
-
-        // Clear node states for the next seed
-        for (const auto& candidate : frontier) {
-            seen[candidate.node] = 0;
-        }
-        for (const auto node : subgraph) {
-            seen[node] = 0;
+            tar_budget = new_tar_budget;
+            neg_budget = new_neg_budget;
+            add_neighbors(candidate.node);
         }
         frontier.clear();
 
         // Output subgraphs using node indices from the original graph
         if (subgraph.size() >= min_nodes) {
             for (auto& node : subgraph) {
-                used[node] = 1;
+                seen[node] = used;
                 node = nodes[node].idx;
             }
             filtered.subgraphs.push_back(std::move(subgraph));
         }
     }
+    log_python(" - Found " + std::to_string(n_seeds) + " eligible seed nodes");
 }
 
 } // namespace seqwin::internal

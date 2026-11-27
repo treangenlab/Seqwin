@@ -27,11 +27,10 @@ constexpr int pickle_version = 1;
 static_assert(sizeof(std::size_t) == 8, "Seqwin requires a 64-bit platform");
 static_assert(std::is_trivially_copyable_v<seqwin::FilteredNode>);
 static_assert(std::is_standard_layout_v<seqwin::FilteredNode>);
-static_assert(sizeof(seqwin::FilteredNode) == 24);
+static_assert(sizeof(seqwin::FilteredNode) == 16);
 static_assert(offsetof(seqwin::FilteredNode, idx) == 0);
 static_assert(offsetof(seqwin::FilteredNode, n_tar) == 8);
 static_assert(offsetof(seqwin::FilteredNode, n_neg) == 12);
-static_assert(offsetof(seqwin::FilteredNode, penalty) == 16);
 static_assert(std::is_trivially_copyable_v<seqwin::Edge>);
 static_assert(std::is_standard_layout_v<seqwin::Edge>);
 static_assert(sizeof(seqwin::Edge) == 24);
@@ -105,10 +104,9 @@ void bind_python_classes(py::module_& module) {
         .def_readonly("subgraphs", &FilteredGraph::subgraphs)
         .def_readonly("total_tar", &FilteredGraph::total_tar)
         .def_readonly("total_neg", &FilteredGraph::total_neg)
-        .def_readonly("e_absence_tar", &FilteredGraph::e_absence_tar)
-        .def_readonly("e_presence_neg", &FilteredGraph::e_presence_neg)
-        .def_readonly("penalty_th", &FilteredGraph::penalty_th)
         .def_readonly("edge_weight_th", &FilteredGraph::edge_weight_th)
+        .def_readonly("n_tar_th", &FilteredGraph::n_tar_th)
+        .def_readonly("n_neg_th", &FilteredGraph::n_neg_th)
         .def_readonly("min_nodes", &FilteredGraph::min_nodes)
         .def_readonly("max_nodes", &FilteredGraph::max_nodes)
         .def(py::pickle(
@@ -120,16 +118,15 @@ void bind_python_classes(py::module_& module) {
                     value.subgraphs,
                     value.total_tar,
                     value.total_neg,
-                    value.e_absence_tar,
-                    value.e_presence_neg,
-                    value.penalty_th,
+                    value.n_tar_th,
+                    value.n_neg_th,
                     value.edge_weight_th,
                     value.min_nodes,
                     value.max_nodes
                 );
             },
             [](const py::tuple& state) {
-                if (state.size() != 12 || state[0].cast<int>() != pickle_version) {
+                if (state.size() != 11 || state[0].cast<int>() != pickle_version) {
                     throw std::runtime_error("Invalid FilteredGraph pickle state or version");
                 }
                 return FilteredGraph{
@@ -138,12 +135,11 @@ void bind_python_classes(py::module_& module) {
                     state[3].cast<std::vector<Subgraph>>(),
                     state[4].cast<std::size_t>(),
                     state[5].cast<std::size_t>(),
-                    state[6].cast<std::optional<double>>(),
-                    state[7].cast<std::optional<double>>(),
                     state[8].cast<double>(),
-                    state[9].cast<double>(),
-                    state[10].cast<std::size_t>(),
-                    state[11].cast<std::optional<std::size_t>>()
+                    state[6].cast<std::size_t>(),
+                    state[7].cast<std::size_t>(),
+                    state[9].cast<std::size_t>(),
+                    state[10].cast<std::optional<std::size_t>>()
                 };
             }
         ))

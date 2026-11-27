@@ -15,30 +15,19 @@
 namespace seqwin::internal {
 
 /**
- * @brief Dense assembly occurrence counts for every graph node.
+ * @brief Memory-efficient storage for accessing node target prevalence.
  *
- * It stores whichever assembly group (target/non-target) is smaller using the
- * narrowest safe counter type. Consumers access target counts without needing
- * to know which group is stored.
+ * Store the prevalence of each node in the smaller assembly group using
+ * the narrowest safe counter type. Derive target prevalence from total
+ * and non-target prevalence when necessary.
  */
 class TargetCounts {
 public:
+    template <typename Counter>
     TargetCounts(
-        NoInitArray<std::uint8_t>&& counts, bool counts_targets, ArrayView<std::uint32_t> prevalences
-    )
-        : counts_(std::move(counts))
-        , counts_targets_(counts_targets)
-        , prevalences_(prevalences)
-    {}
-    TargetCounts(
-        NoInitArray<std::uint16_t>&& counts, bool counts_targets, ArrayView<std::uint32_t> prevalences
-    )
-        : counts_(std::move(counts))
-        , counts_targets_(counts_targets)
-        , prevalences_(prevalences)
-    {}
-    TargetCounts(
-        NoInitArray<std::uint32_t>&& counts, bool counts_targets, ArrayView<std::uint32_t> prevalences
+        NoInitArray<Counter>&& counts,
+        bool counts_targets,
+        ArrayView<std::uint32_t> prevalences
     )
         : counts_(std::move(counts))
         , counts_targets_(counts_targets)
@@ -73,6 +62,10 @@ public:
         );
     }
 
+    void reset() noexcept {
+        std::visit([](auto& counts) { counts.reset(); }, counts_);
+    }
+
 private:
     std::variant<
         NoInitArray<std::uint8_t>,
@@ -84,27 +77,11 @@ private:
 };
 
 /**
- * @brief Undirected graph stored as CSR adjacency lists. Nodes are represented by compact indices.
+ * @brief Undirected graph stored as CSR adjacency lists.
+ * Nodes are represented by compact indices.
  */
 class GraphTopology {
 public:
-    class NeighborRange {
-    public:
-        using Iterator = const std::size_t*;
-
-        NeighborRange(Iterator begin, Iterator end)
-            : begin_(begin)
-            , end_(end)
-        {}
-
-        Iterator begin() const noexcept { return begin_; }
-        Iterator end() const noexcept { return end_; }
-
-    private:
-        Iterator begin_;
-        Iterator end_;
-    };
-
     GraphTopology(
         std::vector<std::size_t>&& offsets,
         NoInitArray<std::size_t>&& neighbors
@@ -125,20 +102,23 @@ public:
         }
     }
 
-    std::size_t size() const noexcept
-    {
-        return offsets_.size() - 1;
+    std::size_t size() const noexcept {
+        return offsets_.empty() ? 0 : offsets_.size() - 1;
     }
 
-    NeighborRange neighbors(std::size_t node_index) const
-    {
+    ArrayView<std::size_t> neighbors(std::size_t node_index) const {
         if (neighbors_.empty()) {
-            return {nullptr, nullptr};
+            return {nullptr, 0};
         }
         return {
             neighbors_.data() + offsets_[node_index],
-            neighbors_.data() + offsets_[node_index + 1]
+            offsets_[node_index + 1] - offsets_[node_index]
         };
+    }
+
+    void reset() noexcept {
+        std::vector<std::size_t>().swap(offsets_);
+        neighbors_.reset();
     }
 
 private:
@@ -147,7 +127,10 @@ private:
 };
 
 /**
- * @brief For each graph node, count its occurrences in target assemblies (`n_tar`).
+ * @brief Calculate the target prevalence of each graph node.
+ *
+ * Count nodes in the smaller assembly group using the narrowest safe
+ * counter type to reduce memory usage.
  */
 TargetCounts count_target_nodes(
     ArrayView<std::uint32_t> prevalences,
@@ -160,25 +143,16 @@ TargetCounts count_target_nodes(
 );
 
 /**
- * @brief For k-mers in target assemblies, calculate their expected absence
- * in target assemblies, and expected presence in non-target assemblies.
- */
-std::pair<double, double> expected_presence(
-    ArrayView<std::uint32_t> prevalences,
-    const TargetCounts& target_counts,
-    std::size_t total_tar,
-    std::size_t total_neg,
-    ThreadPool& pool
-);
-
-/**
- * @brief Remove edges failing weight or target-support thresholds, calculate
- * penalty scores for retained nodes, and construct CSR adjacency lists.
+ * @brief Filter edges, determine the target prevalence threshold,
+ * and construct CSR adjacency lists.
  *
- * An edge is retained only if its weight is greater than `edge_weight_th` and
- * at least one endpoint occurs in more than `edge_weight_th` target assemblies.
+ * An edge is retained only if its weight and the target prevalence
+ * of at least one endpoint exceed `edge_weight_th`.
  *
- * Retained nodes and edges are stored directly in `filtered`.
+ * If `n_tar_th` is not provided, interpolate between the mean target
+ * presence of retained nodes and `total_tar`, using `tar_weight`.
+ *
+ * Retained nodes, edges, and the threshold are stored in `filtered`.
  */
 GraphTopology prune_graph(
     ArrayView<std::uint32_t> prevalences,
@@ -187,25 +161,38 @@ GraphTopology prune_graph(
     std::size_t total_tar,
     std::size_t total_neg,
     double edge_weight_th,
+    double tar_weight,
+    std::optional<std::size_t> n_tar_th,
     FilteredGraph& filtered,
     ThreadPool& pool
 );
 
 /**
- * @brief Grow disjoint low-penalty subgraphs from eligible seeds.
- * Generated subgraphs are stored directly in `filtered`.
+ * @brief Greedily grow disjoint subgraphs from eligible seeds.
+ *
+ * A seed must satisfy both target and non-target prevalence thresholds. During expansion,
+ * prioritize nodes with high target prevalence and low non-target prevalence.
+ *
+ * A node is accepted only if it keeps the subgraph's mean prevalences within the limits.
+ *
+ * Subgraphs satisfying the size limits are stored in `filtered`.
  */
-void get_subgraphs(
+void grow_subgraphs(
     const GraphTopology& graph,
     const NoInitArray<FilteredNode>& nodes,
-    double penalty_th,
+    std::size_t total_tar,
+    std::int64_t n_tar_th,
+    std::int64_t n_neg_th,
     std::size_t min_nodes,
     std::optional<std::size_t> max_nodes,
     FilteredGraph& filtered
 );
 
 /**
- * @brief Extract signatures from low-penalty subgraphs.
+ * @brief Extract a signature from each subgraph in parallel.
+ *
+ * Return valid signatures in subgraph order. Write signature sequences
+ * and metadata to FASTA and CSV if output paths are provided.
  */
 std::vector<Signature> extract_signatures(
     const std::vector<Subgraph>& subgraphs,
@@ -214,13 +201,13 @@ std::vector<Signature> extract_signatures(
     ArrayView<std::uint32_t> record_offsets,
     const std::vector<std::string>& assembly_paths,
     ArrayView<bool> is_targets,
+    std::size_t total_tar,
     std::size_t kmerlen,
     std::size_t windowsize,
     std::size_t min_len,
     double consec_kmer_mul,
     const std::optional<std::string>& fasta_path,
     const std::optional<std::string>& csv_path,
-    std::size_t total_tar,
     ThreadPool& pool
 );
 

@@ -84,9 +84,12 @@ void write_csv_field(std::ostream& out, std::string_view value) {
 }
 
 /**
- * @brief Extract a signature from one low-penalty subgraph.
+ * @brief Extract a signature from one subgraph.
  *
- * Return `std::nullopt` if the signature is invalid.
+ * Select the longest consecutive k-mer run from each assembly.
+ * Choose the canonical k-mer order that maximizes the product of run size and target prevalence.
+ *
+ * Return `std::nullopt` if no valid signature is found.
  */
 std::optional<Signature> extract_worker(
     std::size_t subgraph_idx,
@@ -95,15 +98,15 @@ std::optional<Signature> extract_worker(
     ArrayView<std::size_t> offsets,
     ArrayView<std::uint32_t> record_offsets,
     ArrayView<bool> is_targets,
+    std::size_t total_tar,
     std::size_t kmerlen,
     std::size_t windowsize,
     std::size_t min_len,
-    double consec_kmer_mul,
-    std::size_t total_tar
+    double consec_kmer_mul
 ) {
     // Collect and position-sort all k-mers included in the subgraph
     std::vector<SubgraphKmer> sg_kmers; // K-mers of the current subgraph
-    // Each node in a low-penalty subgraph should contain roughly total_tar k-mers
+    // Each node in a subgraph should contain roughly total_tar k-mers
     sg_kmers.reserve(2 * total_tar * subgraph.size());
     for (const auto node_idx : subgraph) {
         if (offsets.empty() || node_idx >= offsets.size() - 1) {
@@ -231,8 +234,9 @@ std::optional<Signature> extract_worker(
         ++cnt.count;
         ++(is_forward ? cnt.forward_count : cnt.reverse_count);
     }
+    // Subgraph has no k-mers in target assemblies
     if (canonical_counts.empty()) {
-        throw std::invalid_argument("subgraph has no k-mers in target assemblies");
+        return std::nullopt;
     }
 
     // Choose the highest-scoring canonical order
@@ -404,13 +408,13 @@ std::vector<Signature> extract_signatures(
     ArrayView<std::uint32_t> record_offsets,
     const std::vector<std::string>& assembly_paths,
     ArrayView<bool> is_targets,
+    std::size_t total_tar,
     std::size_t kmerlen,
     std::size_t windowsize,
     std::size_t min_len,
     double consec_kmer_mul,
     const std::optional<std::string>& fasta_path,
     const std::optional<std::string>& csv_path,
-    std::size_t total_tar,
     ThreadPool& pool
 ) {
     if (subgraphs.empty()) {
@@ -426,11 +430,11 @@ std::vector<Signature> extract_signatures(
             offsets,
             record_offsets,
             is_targets,
+            total_tar,
             kmerlen,
             windowsize,
             min_len,
-            consec_kmer_mul,
-            total_tar
+            consec_kmer_mul
         );
     });
 

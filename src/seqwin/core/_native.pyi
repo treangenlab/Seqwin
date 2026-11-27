@@ -198,7 +198,7 @@ class Graph:
         ...
 
 class FilteredGraph:
-    """Includes filtered graph arrays, low-penalty subgraphs, and calculated values.
+    """Includes filtered graph arrays, subgraphs, and calculated values.
 
     Filtered nodes and edges follow their original order.
     """
@@ -206,18 +206,17 @@ class FilteredGraph:
     def nodes(self) -> NDArray[np.void]:
         """Nodes retained by edge filtering.
             - 'idx' (uintp): Node index in the original graph.
-            - 'n_tar' (uint32): Number of target assemblies containing this node's k-mer.
-            - 'n_neg' (uint32): Number of non-target assemblies containing this node's k-mer.
-            - 'penalty' (float64): Node penalty score.
+            - 'n_tar' (uint32): Target prevalence (number of target assemblies containing this node's k-mer).
+            - 'n_neg' (uint32): Non-target prevalence (number of non-target assemblies containing this node's k-mer).
         """
         ...
     @property
     def edges(self) -> NDArray[np.void]:
-        """Edges passing weight and target-support thresholds."""
+        """Edges with sufficient weight and target prevalence at either endpoint."""
         ...
     @property
     def subgraphs(self) -> list[list[int]]:
-        """Low-penalty subgraphs represented by node indices of the original graph."""
+        """Subgraphs represented by node indices of the original graph."""
         ...
     @property
     def total_tar(self) -> int:
@@ -228,28 +227,24 @@ class FilteredGraph:
         """Number of non-target assemblies."""
         ...
     @property
-    def e_absence_tar(self) -> float | None:
-        """Expected k-mer absence in target assemblies."""
-        ...
-    @property
-    def e_presence_neg(self) -> float | None:
-        """Expected k-mer presence in non-target assemblies."""
-        ...
-    @property
-    def penalty_th(self) -> float:
-        """Node penalty threshold (user input or auto-computed)."""
-        ...
-    @property
     def edge_weight_th(self) -> float:
         """Graph edge weight threshold."""
         ...
     @property
+    def n_tar_th(self) -> int:
+        """Minimum mean target prevalence of a subgraph."""
+        ...
+    @property
+    def n_neg_th(self) -> int:
+        """Maximum mean non-target prevalence of a subgraph."""
+        ...
+    @property
     def min_nodes(self) -> int:
-        """Minimum number of nodes for a low-penalty subgraph."""
+        """Minimum number of nodes for a subgraph."""
         ...
     @property
     def max_nodes(self) -> int | None:
-        """Maximum number of nodes for a low-penalty subgraph."""
+        """Maximum number of nodes for a subgraph."""
         ...
 
 class SubgraphLoc:
@@ -286,7 +281,7 @@ class SubgraphLoc:
         ...
 
 class Signature:
-    """A signature is extracted from a low-penalty subgraph, represented by a
+    """A signature is extracted from a subgraph, represented by a
     consecutive k-mer run (a.k.a. the representative) found in target assemblies.
 
     Forward and reversed k-mer orders are treated as the same canonical ordering.
@@ -296,7 +291,7 @@ class Signature:
     """
     @property
     def subgraph_idx(self) -> int:
-        """Index of the low-penalty subgraph that produced the signature."""
+        """Index of the subgraph that produced the signature."""
         ...
     @property
     def location(self) -> SubgraphLoc:
@@ -315,15 +310,15 @@ def _filter_native(
     graph: Graph,
     assembly_paths: Sequence[str | Path] | AssemblyPaths,
     is_targets: NDArray[np.bool_],
-    jaccard: NDArray[np.float64] | None,
     kmerlen: int,
     windowsize: int,
-    penalty_th: float | None,
-    stringency: float,
+    tar_weight: float,
+    neg_rank: float,
     min_len: int,
     max_len: int | None,
-    penalty_th_cap: float,
     edge_w_th_mul: float,
+    n_tar_th: int | None,
+    n_neg_th: int | None,
     min_nodes_floor: int,
     max_nodes_cap: int | None,
     consec_kmer_mul: float,
@@ -333,4 +328,6 @@ def _filter_native(
 ) -> tuple[
     FilteredGraph,
     list[Signature],
-]: ...
+]:
+    """Filter the minimizer graph and extract signatures from subgraphs."""
+    ...
