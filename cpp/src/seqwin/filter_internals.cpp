@@ -19,12 +19,10 @@ namespace seqwin::internal {
 namespace {
 
 /**
- * @brief For each graph node, count its occurrences in target or non-target assemblies.
+ * @brief Calculate the target or non-target prevalence of each graph node.
  *
- * Partitions the node index range across worker threads. Each worker scans target/non-target
- * assemblies and updates counts only for nodes in its assigned range. Because node indices in
- * each assembly slice of `assembly_nodes` is sorted, this range can be determined with binary
- * search on each assembly slice.
+ * Partition the node index range across worker threads. Each worker uses binary search
+ * on sorted assembly node indices to count nodes within its assigned range.
  */
 template <typename Counter>
 TargetCounts build_target_counts(
@@ -35,6 +33,7 @@ TargetCounts build_target_counts(
     bool count_targets,
     ThreadPool& pool
 ) {
+    // Group consecutive assemblies in the selected group into index ranges
     std::vector<std::pair<std::size_t, std::size_t>> assembly_ranges;
     for (std::size_t i = 0; i < is_targets.size(); ++i) {
         if (is_targets[i] == count_targets) {
@@ -124,7 +123,7 @@ GraphTopology prune_graph(
     };
 
     // Scan the prefix of edges (sorted by weight)
-    // Keep edges with sufficient weight and target support
+    // // Keep edges with sufficient weight and target prevalence
     filtered.edges.clear();
     const std::size_t th = edge_weight_th;
     // Store each retained edge as two endpoint records
@@ -215,7 +214,7 @@ GraphTopology prune_graph(
     );
 }
 
-void get_subgraphs(
+void grow_subgraphs(
     const GraphTopology& graph,
     const NoInitArray<FilteredNode>& nodes,
     std::size_t total_tar,
@@ -327,7 +326,7 @@ void get_subgraphs(
             filtered.subgraphs.push_back(std::move(subgraph));
         }
     }
-    log_python(" - Found " + std::to_string(n_seeds) + " seed nodes");
+    log_python(" - Found " + std::to_string(n_seeds) + " eligible seed nodes");
 }
 
 } // namespace seqwin::internal

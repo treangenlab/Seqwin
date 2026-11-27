@@ -86,7 +86,10 @@ void write_csv_field(std::ostream& out, std::string_view value) {
 /**
  * @brief Extract a signature from one subgraph.
  *
- * Return `std::nullopt` if the signature is invalid.
+ * Select the longest consecutive k-mer run from each assembly.
+ * Choose the canonical k-mer order that maximizes the product of run size and target prevalence.
+ *
+ * Return `std::nullopt` if no valid signature is found.
  */
 std::optional<Signature> extract_worker(
     std::size_t subgraph_idx,

@@ -44,9 +44,9 @@ struct FilterConfig {
 struct FilteredNode {
     /** Node index in the original graph. */
     std::size_t idx;
-    /** Number of target assemblies containing this node's k-mer. */
+    /** Target prevalence (number of target assemblies containing this node's k-mer). */
     std::uint32_t n_tar;
-    /** Number of non-target assemblies containing this node's k-mer. */
+    /** Non-target prevalence (number of non-target assemblies containing this node's k-mer). */
     std::uint32_t n_neg;
 };
 
@@ -58,7 +58,7 @@ struct FilteredNode {
 struct FilteredGraph {
     /** Nodes retained by edge filtering. */
     NoInitArray<FilteredNode> nodes;
-    /** Edges passing weight and target-support thresholds. */
+    /** Edges with sufficient weight and target prevalence at either endpoint. */
     std::vector<Edge> edges;
     /** Subgraphs represented by node indices of the original graph. */
     std::vector<Subgraph> subgraphs;
@@ -68,9 +68,9 @@ struct FilteredGraph {
     std::size_t total_neg;
     /** Graph edge weight threshold. */
     double edge_weight_th;
-    /** Minimum mean target prevalence in a subgraph. */
+    /** Minimum mean target prevalence of a subgraph. */
     std::size_t n_tar_th;
-    /** Maximum mean non-target prevalence in a subgraph. */
+    /** Maximum mean non-target prevalence of a subgraph. */
     std::size_t n_neg_th;
     /** Minimum number of nodes for a subgraph. */
     std::size_t min_nodes;

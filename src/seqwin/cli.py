@@ -145,12 +145,12 @@ def main(
     ),
     tar_weight: float = typer.Option(
         0.5, '--tar-weight', show_default=True,
-        help='Interpolate the target threshold from the prevalence-weighted mean (0) to all targets (1).',
+        help='Weight for estimating the target prevalence threshold (0-1). Higher values favor higher target prevalence.',
         rich_help_panel='Signature options'
     ),
     neg_rank: float = typer.Option(
         0.2, '--neg-rank', show_default=True,
-        help='Non-target prevalence quantile among target-eligible nodes, from minimum (0) to maximum (1).',
+        help='Quantile for estimating the non-target prevalence threshold (0-1). Lower values favor lower non-target prevalence.',
         rich_help_panel='Signature options'
     ),
     min_len: int = typer.Option(
@@ -160,7 +160,7 @@ def main(
     ),
     max_len: int | None = typer.Option(
         None, '--max-len', show_default=False,
-        help='Estimated maximum length of output signatures. If not provided, no explicit limit is applied.',
+        help='Estimated maximum length of output signatures.',
         rich_help_panel='Signature options'
     ),
     run_blast: bool = typer.Option(
@@ -182,7 +182,7 @@ def main(
     ),
     annotated: bool = typer.Option(
         False, '--annotated', show_default=False,
-        help='Only include annotated genomes.',
+        help='Limit to annotated genomes.',
         rich_help_panel='NCBI download options'
     ),
     exclude_mag: bool = typer.Option(

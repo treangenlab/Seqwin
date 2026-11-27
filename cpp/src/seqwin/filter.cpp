@@ -35,7 +35,7 @@ void calculate_thresholds(
     if (max_nodes) {
         if (*max_nodes < min_nodes) {
             throw std::invalid_argument(
-                "min_nodes exceeds max_nodes. Try decrease --min-len or increase max_nodes_cap"
+                "min_nodes exceeds max_nodes. Try decreasing min_len or increasing max_len or max_nodes_cap"
             );
         }
         internal::log_python(
@@ -55,7 +55,10 @@ void calculate_thresholds(
 }
 
 /**
- * @brief Calculate `FilteredGraph::n_neg_th`.
+ * @brief Determine the non-target prevalence threshold.
+ *
+ * If `n_neg_th` is not provided, use the nearest-rank quantile (`neg_rank`) of non-target
+ * prevalence among retained nodes whose target prevalence is at least `n_tar_th`.
  */
 std::size_t neg_threshold(
     const NoInitArray<FilteredNode>& nodes,
@@ -143,7 +146,7 @@ std::pair<FilteredGraph, std::vector<Signature>> filter(
     );
     internal::ThreadPool pool(config.n_cpu);
 
-    internal::log_python(" - Counting target node occurrences...");
+    internal::log_python(" - Calculating target prevalence of graph nodes...");
     auto target_counts = internal::count_target_nodes(
         graph.nodes.prevalences,
         graph.assembly_nodes,
@@ -154,7 +157,7 @@ std::pair<FilteredGraph, std::vector<Signature>> filter(
         pool
     );
 
-    internal::log_python(" - Filtering graph and calculating node prevalences...");
+    internal::log_python(" - Filtering graph and determining prevalence thresholds...");
     auto graph_topology = internal::prune_graph(
         graph.nodes.prevalences,
         graph.edges,
@@ -176,17 +179,24 @@ std::pair<FilteredGraph, std::vector<Signature>> filter(
     );
     internal::log_python(
         " - Removed " + std::to_string(graph.edges.size() - filtered.edges.size()) +
-        " edges failing weight/target-support thresholds, " +
+        " edges failing weight/target prevalence thresholds, " +
         std::to_string(filtered.edges.size()) + " edges left"
     );
     internal::log_python(
         " - Removed " + std::to_string(graph.nodes.prevalences.size() - filtered.nodes.size()) +
         " isolated nodes, " + std::to_string(filtered.nodes.size()) + " nodes left"
     );
-    internal::log_python(" - Target prevalence threshold: " + std::to_string(filtered.n_tar_th));
-    internal::log_python(" - Non-target prevalence threshold: " + std::to_string(filtered.n_neg_th));
+    internal::log_python(
+        " - Target prevalence threshold: " + std::to_string(filtered.n_tar_th) +
+        (config.n_tar_th.has_value() ? " (user-specified)" : " (estimated)")
+    );
+    internal::log_python(
+        " - Non-target prevalence threshold: " + std::to_string(filtered.n_neg_th) +
+        (config.n_neg_th.has_value() ? " (user-specified)" : " (estimated)")
+    );
 
-    internal::get_subgraphs(
+    internal::log_python(" - Growing subgraphs...");
+    internal::grow_subgraphs(
         graph_topology,
         filtered.nodes,
         filtered.total_tar,
@@ -198,9 +208,7 @@ std::pair<FilteredGraph, std::vector<Signature>> filter(
     );
     graph_topology.reset();
     if (filtered.subgraphs.empty()) {
-        throw std::runtime_error(
-            "No subgraph was found. Try decrease --tar-weight, or increase --neg-rank"
-        );
+        throw std::runtime_error("No subgraphs found. Try relaxing the prevalence thresholds");
     }
     internal::log_python(" - Found " + std::to_string(filtered.subgraphs.size()) + " subgraphs");
 

@@ -206,13 +206,13 @@ class FilteredGraph:
     def nodes(self) -> NDArray[np.void]:
         """Nodes retained by edge filtering.
             - 'idx' (uintp): Node index in the original graph.
-            - 'n_tar' (uint32): Number of target assemblies containing this node's k-mer.
-            - 'n_neg' (uint32): Number of non-target assemblies containing this node's k-mer.
+            - 'n_tar' (uint32): Target prevalence (number of target assemblies containing this node's k-mer).
+            - 'n_neg' (uint32): Non-target prevalence (number of non-target assemblies containing this node's k-mer).
         """
         ...
     @property
     def edges(self) -> NDArray[np.void]:
-        """Edges passing weight and target-support thresholds."""
+        """Edges with sufficient weight and target prevalence at either endpoint."""
         ...
     @property
     def subgraphs(self) -> list[list[int]]:
@@ -232,11 +232,11 @@ class FilteredGraph:
         ...
     @property
     def n_tar_th(self) -> int:
-        """Minimum mean target prevalence in a subgraph."""
+        """Minimum mean target prevalence of a subgraph."""
         ...
     @property
     def n_neg_th(self) -> int:
-        """Maximum mean non-target prevalence in a subgraph."""
+        """Maximum mean non-target prevalence of a subgraph."""
         ...
     @property
     def min_nodes(self) -> int:
@@ -328,4 +328,6 @@ def _filter_native(
 ) -> tuple[
     FilteredGraph,
     list[Signature],
-]: ...
+]:
+    """Filter the minimizer graph and extract signatures from subgraphs."""
+    ...

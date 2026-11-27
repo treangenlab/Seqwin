@@ -15,17 +15,19 @@
 namespace seqwin::internal {
 
 /**
- * @brief Dense assembly occurrence counts for every graph node.
+ * @brief Memory-efficient storage for accessing node target prevalence.
  *
- * It stores whichever assembly group (target/non-target) is smaller using the
- * narrowest safe counter type. Consumers access target counts without needing
- * to know which group is stored.
+ * Store the prevalence of each node in the smaller assembly group using
+ * the narrowest safe counter type. Derive target prevalence from total
+ * and non-target prevalence when necessary.
  */
 class TargetCounts {
 public:
     template <typename Counter>
     TargetCounts(
-        NoInitArray<Counter>&& counts, bool counts_targets, ArrayView<std::uint32_t> prevalences
+        NoInitArray<Counter>&& counts,
+        bool counts_targets,
+        ArrayView<std::uint32_t> prevalences
     )
         : counts_(std::move(counts))
         , counts_targets_(counts_targets)
@@ -75,7 +77,8 @@ private:
 };
 
 /**
- * @brief Undirected graph stored as CSR adjacency lists. Nodes are represented by compact indices.
+ * @brief Undirected graph stored as CSR adjacency lists.
+ * Nodes are represented by compact indices.
  */
 class GraphTopology {
 public:
@@ -124,7 +127,10 @@ private:
 };
 
 /**
- * @brief For each graph node, count its occurrences in target assemblies (`n_tar`).
+ * @brief Calculate the target prevalence of each graph node.
+ *
+ * Count nodes in the smaller assembly group using the narrowest safe
+ * counter type to reduce memory usage.
  */
 TargetCounts count_target_nodes(
     ArrayView<std::uint32_t> prevalences,
@@ -137,13 +143,16 @@ TargetCounts count_target_nodes(
 );
 
 /**
- * @brief Remove edges failing weight or target-support thresholds, calculate
- * `FilteredGraph::n_tar_th` from retained nodes, and construct CSR adjacency lists.
+ * @brief Filter edges, determine the target prevalence threshold,
+ * and construct CSR adjacency lists.
  *
- * An edge is retained only if its weight is greater than `edge_weight_th` and
- * at least one endpoint occurs in more than `edge_weight_th` target assemblies.
+ * An edge is retained only if its weight and the target prevalence
+ * of at least one endpoint exceed `edge_weight_th`.
  *
- * Retained nodes and edges are stored directly in `filtered`.
+ * If `n_tar_th` is not provided, interpolate between the mean target
+ * presence of retained nodes and `total_tar`, using `tar_weight`.
+ *
+ * Retained nodes, edges, and the threshold are stored in `filtered`.
  */
 GraphTopology prune_graph(
     ArrayView<std::uint32_t> prevalences,
@@ -159,10 +168,16 @@ GraphTopology prune_graph(
 );
 
 /**
- * @brief Grow disjoint subgraphs from eligible seeds.
- * Generated subgraphs are stored directly in `filtered`.
+ * @brief Greedily grow disjoint subgraphs from eligible seeds.
+ *
+ * A seed must satisfy both target and non-target prevalence thresholds. During expansion,
+ * prioritize nodes with high target prevalence and low non-target prevalence.
+ *
+ * A node is accepted only if it keeps the subgraph's mean prevalences within the limits.
+ *
+ * Subgraphs satisfying the size limits are stored in `filtered`.
  */
-void get_subgraphs(
+void grow_subgraphs(
     const GraphTopology& graph,
     const NoInitArray<FilteredNode>& nodes,
     std::size_t total_tar,
@@ -174,7 +189,10 @@ void get_subgraphs(
 );
 
 /**
- * @brief Extract signatures from subgraphs.
+ * @brief Extract a signature from each subgraph in parallel.
+ *
+ * Return valid signatures in subgraph order. Write signature sequences
+ * and metadata to FASTA and CSV if output paths are provided.
  */
 std::vector<Signature> extract_signatures(
     const std::vector<Subgraph>& subgraphs,
