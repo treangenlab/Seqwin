@@ -1,36 +1,33 @@
-2026-09-03 23:04:33 | INFO     | Running Seqwin v0.5.0
-2026-09-03 23:04:33 | INFO     | Run configurations saved as /scratch0/xw66/Seqwin/tests/seqwin-out/config.json
-2026-09-03 23:04:33 | INFO     | Found 72 assemblies from /scratch0/xw66/Seqwin/tests/targets.txt
-2026-09-03 23:04:33 | INFO     | Found 99 assemblies from /scratch0/xw66/Seqwin/tests/non-targets.txt
-2026-09-03 23:04:33 | INFO     | Loaded 72 target assemblies and 99 non-target assemblies, 171 in total.
-2026-09-03 23:04:33 | INFO     | Assembly indices and paths saved as /scratch0/xw66/Seqwin/tests/seqwin-out/assemblies.csv
-2026-09-03 23:04:33 | INFO     | Building minimizer graph from 171 assemblies...
-2026-09-03 23:04:38 | INFO     |  - Merging from 4 threads...
-2026-09-03 23:04:38 | INFO     |  - Found 8346500 minimizers
-2026-09-03 23:04:38 | INFO     |  - Found 469602 nodes (unique minimizers)
-2026-09-03 23:04:38 | INFO     |  - Found 702824 weighted edges
-2026-09-03 23:04:38 | INFO     |  - Finished in 0:00:05.818048
-2026-09-03 23:04:38 | INFO     | Filtering minimizer graph...
-2026-09-03 23:04:38 | INFO     |  - Calculating node penalty scores...
-2026-09-03 23:04:38 | INFO     |  - Calculating penalty threshold...
-2026-09-03 23:04:38 | INFO     |  - Expected k-mer absence in targets: 0.35616
-2026-09-03 23:04:38 | INFO     |  - Expected k-mer presence in non-targets: 0.25351
-2026-09-03 23:04:38 | INFO     |  - Calculated penalty threshold: 0.15024
-2026-09-03 23:04:38 | INFO     |  - Subgraph size limit is set to [3, 100]
-2026-09-03 23:04:38 | INFO     |  - Filtering graph edges and nodes...
-2026-09-03 23:04:38 | INFO     |  - Removed 568390 edges with weight<18.355, 134434 edges left
-2026-09-03 23:04:38 | INFO     |  - Removed 350391 isolated nodes, 119211 nodes left
-2026-09-03 23:04:38 | INFO     |  - Expanding subgraphs from 1793 seed nodes (penalty<=0.150241)...
-2026-09-03 23:04:38 | INFO     |  - Found 218 low-penalty subgraphs
-2026-09-03 23:04:38 | INFO     |  - 62463 k-mers left
-2026-09-03 23:04:38 | INFO     |  - Finished in 0:00:00.035465
-2026-09-03 23:04:39 | INFO     | Finding a representative for each low-penalty subgraph...
-2026-09-03 23:04:39 | INFO     |  - Processing each subgraph...
-2026-09-03 23:04:39 | INFO     |  - Found 157 candidate signatures
-2026-09-03 23:04:39 | INFO     |  - Fetching the representative sequence for each candidate...
-2026-09-03 23:04:39 | INFO     |  - 5 assemblies to be loaded
-2026-09-03 23:04:39 | INFO     |  - Finished in 0:00:00.877386
-2026-09-03 23:04:39 | WARNING  | Signature evaluation is turned off, skip running BLAST
-2026-09-03 23:04:39 | INFO     | Candidate signatures saved as /scratch0/xw66/Seqwin/tests/seqwin-out/signatures.fasta
-2026-09-03 23:04:39 | INFO     | Metrics of candidate signatures saved as /scratch0/xw66/Seqwin/tests/seqwin-out/signatures.csv
-2026-09-03 23:04:39 | INFO     | Run instance (includes all run data) saved as /scratch0/xw66/Seqwin/tests/seqwin-out/results.seqwin
+2026-11-27 13:45:49 | INFO     | Created output directory /scratch0/xw66/Seqwin/tests/seqwin-out
+2026-11-27 13:45:49 | INFO     | Running Seqwin v0.5.0
+2026-11-27 13:45:49 | INFO     | Run configurations saved as /scratch0/xw66/Seqwin/tests/seqwin-out/config.json
+2026-11-27 13:45:49 | INFO     | Found 72 assemblies from /scratch0/xw66/Seqwin/tests/targets.txt
+2026-11-27 13:45:49 | INFO     | Found 99 assemblies from /scratch0/xw66/Seqwin/tests/non-targets.txt
+2026-11-27 13:45:49 | INFO     | Loaded 72 target assemblies and 99 non-target assemblies, 171 in total.
+2026-11-27 13:45:49 | INFO     | Assembly indices and paths saved as /scratch0/xw66/Seqwin/tests/seqwin-out/assemblies.csv
+2026-11-27 13:45:49 | INFO     | Building minimizer graph from 171 assemblies...
+2026-11-27 13:45:58 | INFO     |  - Merging from 4 workers...
+2026-11-27 13:45:58 | INFO     |  - Building assembly-to-node index...
+2026-11-27 13:45:58 | INFO     |  - Found 8346500 minimizers
+2026-11-27 13:45:58 | INFO     |  - Found 469602 nodes (unique minimizers)
+2026-11-27 13:45:58 | INFO     |  - Found 702824 weighted edges
+2026-11-27 13:45:58 | INFO     |  - Finished in 0:00:08.873506
+2026-11-27 13:45:58 | INFO     | Filtering minimizer graph...
+2026-11-27 13:45:58 | INFO     |  - Subgraph size limit is set to [3, 100]
+2026-11-27 13:45:58 | INFO     |  - Calculating target prevalence of graph nodes...
+2026-11-27 13:45:58 | INFO     |  - Filtering graph and determining prevalence thresholds...
+2026-11-27 13:45:58 | INFO     |  - Removed 627090 edges failing weight/target prevalence thresholds, 75734 edges left
+2026-11-27 13:45:58 | INFO     |  - Removed 400103 isolated nodes, 69499 nodes left
+2026-11-27 13:45:58 | INFO     |  - Target prevalence threshold: 65 (estimated)
+2026-11-27 13:45:58 | INFO     |  - Non-target prevalence threshold: 33 (estimated)
+2026-11-27 13:45:58 | INFO     |  - Growing subgraphs...
+2026-11-27 13:45:58 | INFO     |  - Found 2490 eligible seed nodes
+2026-11-27 13:45:58 | INFO     |  - Found 420 subgraphs
+2026-11-27 13:45:58 | INFO     |  - Finding a representative for each subgraph...
+2026-11-27 13:45:58 | INFO     |  - Found 332 valid signatures
+2026-11-27 13:45:58 | INFO     |  - Fetching signature sequences (7 assemblies to be loaded)...
+2026-11-27 13:45:58 | INFO     |  - Signature sequences saved as /scratch0/xw66/Seqwin/tests/seqwin-out/signatures.fasta
+2026-11-27 13:45:58 | INFO     |  - Signature metadata saved as /scratch0/xw66/Seqwin/tests/seqwin-out/signatures.csv
+2026-11-27 13:45:58 | INFO     |  - Finished in 0:00:00.121953
+2026-11-27 13:45:58 | WARNING  | Signature evaluation is turned off, skip running BLAST
+2026-11-27 13:45:58 | INFO     | Run instance (includes all run data) saved as /scratch0/xw66/Seqwin/tests/seqwin-out/results.seqwin
