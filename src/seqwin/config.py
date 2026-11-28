@@ -71,7 +71,7 @@ class Config(BaseModel):
         run_blast (bool): If True, evaluate signature sequences with BLAST. [False]
         blast_neg_only (bool, deprecated): If True, only include non-target assemblies in the BLAST database. [False]
 
-        edge_w_th_mul (float): Multiplier of the number of target assemblies for determining the edge weight threshold (0-1). [0.3]
+        edge_weight_th_mul (float): Multiplier of the number of target assemblies for determining the edge weight threshold (0-1). [0.3]
         n_tar_th (int | None): Minimum mean target prevalence of a subgraph. If provided, overrides estimation using `tar_weight`. [None]
         n_neg_th (int | None): Maximum mean non-target prevalence of a subgraph. If provided, overrides estimation using `neg_rank`. [None]
         min_nodes_floor (int): Lower bound for the minimum subgraph size. [3]
@@ -116,7 +116,7 @@ class Config(BaseModel):
     blast_neg_only: bool = False # NOTE: need to fix when this is turned on
 
     # Graph filtering options (not included in CLI)
-    edge_w_th_mul: float = Field(default=0.3, ge=0, le=1)
+    edge_weight_th_mul: float = Field(default=0.3, ge=0, le=1)
     n_tar_th: int | None = Field(default=None, ge=0, strict=True)
     n_neg_th: int | None = Field(default=None, ge=0, strict=True)
     min_nodes_floor: int = Field(default=3, ge=0)

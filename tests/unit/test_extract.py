@@ -42,7 +42,7 @@ def _extract_signature(tmp_path, *, target_records, edge_data):
         assembly_paths=_paths(tmp_path, len(records), sequence_length=64),
         is_targets=np.array([True] * len(target_records) + [False], dtype=np.bool_),
         kmerlen=5, windowsize=5, tar_weight=.5, neg_rank=.2,
-        min_len=0, max_len=None, edge_w_th_mul=0, n_tar_th=1, n_neg_th=0,
+        min_len=0, max_len=None, edge_weight_th_mul=0, n_tar_th=1, n_neg_th=0,
         min_nodes_floor=1, max_nodes_cap=None, consec_kmer_mul=2, n_cpu=1,
     )
     signature, = signatures
@@ -97,13 +97,13 @@ def test_signature_representative_score_tie(tmp_path):
 
 
 def test_signature_extraction_uses_final_original_node_range(tmp_path):
-    (filtered, signatures), _ = _filter(
+    (retained, signatures), _ = _filter(
         tmp_path,
-        n_tar_th=0, n_neg_th=2, edge_w_th_mul=0, min_nodes_floor=1,
+        n_tar_th=0, n_neg_th=2, edge_weight_th_mul=0, min_nodes_floor=1,
     )
 
-    assert filtered.nodes['idx'][-1] == 3
-    assert any(3 in subgraph for subgraph in filtered.subgraphs)
+    assert retained.nodes['idx'][-1] == 3
+    assert any(3 in subgraph for subgraph in retained.subgraphs)
     assert signatures
 
 

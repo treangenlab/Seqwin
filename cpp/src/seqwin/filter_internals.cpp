@@ -25,7 +25,7 @@ namespace {
  * on sorted assembly node indices to count nodes within its assigned range.
  */
 template <typename Counter>
-TargetCounts build_target_counts(
+TargetPrevalences build_target_prevalences(
     ArrayView<std::uint32_t> prevalences,
     ArrayView<std::size_t> assembly_nodes,
     ArrayView<std::size_t> node_offsets,
@@ -68,12 +68,12 @@ TargetCounts build_target_counts(
             }
         }
     });
-    return TargetCounts(std::move(counts), count_targets, prevalences);
+    return TargetPrevalences(std::move(counts), count_targets, prevalences);
 }
 
 } // namespace
 
-TargetCounts count_target_nodes(
+TargetPrevalences calculate_target_prevalences(
     ArrayView<std::uint32_t> prevalences,
     ArrayView<std::size_t> assembly_nodes,
     ArrayView<std::size_t> node_offsets,
@@ -84,32 +84,32 @@ TargetCounts count_target_nodes(
 ) {
     // The smaller assembly group is counted using the narrowest safe counter type
     const bool count_targets = total_tar <= total_neg;
-    const std::size_t counted_assemblies = count_targets ? total_tar : total_neg;
-    if (counted_assemblies <= std::numeric_limits<std::uint8_t>::max()) {
-        return build_target_counts<std::uint8_t>(
+    const std::size_t group_size = count_targets ? total_tar : total_neg;
+    if (group_size <= std::numeric_limits<std::uint8_t>::max()) {
+        return build_target_prevalences<std::uint8_t>(
             prevalences, assembly_nodes, node_offsets, is_targets, count_targets, pool
         );
     }
-    if (counted_assemblies <= std::numeric_limits<std::uint16_t>::max()) {
-        return build_target_counts<std::uint16_t>(
+    if (group_size <= std::numeric_limits<std::uint16_t>::max()) {
+        return build_target_prevalences<std::uint16_t>(
             prevalences, assembly_nodes, node_offsets, is_targets, count_targets, pool
         );
     }
-    return build_target_counts<std::uint32_t>(
+    return build_target_prevalences<std::uint32_t>(
         prevalences, assembly_nodes, node_offsets, is_targets, count_targets, pool
     );
 }
 
 GraphTopology prune_graph(
-    ArrayView<std::uint32_t> prevalences,
     ArrayView<Edge> edges,
-    const TargetCounts& target_counts,
+    ArrayView<std::uint32_t> prevalences,
+    const TargetPrevalences& target_prevalences,
     std::size_t total_tar,
     std::size_t total_neg,
     double edge_weight_th,
     double tar_weight,
     std::optional<std::size_t> n_tar_th,
-    FilteredGraph& filtered,
+    RetainedGraph& retained,
     ThreadPool& pool
 ) {
     // One endpoint occurrence of a retained edge
@@ -123,12 +123,12 @@ GraphTopology prune_graph(
     };
 
     // Scan the prefix of edges (sorted by weight)
-    // // Keep edges with sufficient weight and target prevalence
-    filtered.edges.clear();
+    // Keep edges with sufficient weight and target prevalence
+    retained.edges.clear();
     const std::size_t th = edge_weight_th;
     // Store each retained edge as two endpoint records
     std::vector<Endpoint> endpoints;
-    target_counts.with([&](const auto& n_tar_at) {
+    target_prevalences.with([&](const auto& n_tar_at) {
         for (std::size_t i = 0; i < edges.size(); ++i) {
             const auto& edge = edges[i];
             if (edge.weight <= th) {
@@ -138,8 +138,8 @@ GraphTopology prune_graph(
                 throw std::invalid_argument("Edge endpoint does not correspond to a node");
             }
             if (n_tar_at(edge.first) > th || n_tar_at(edge.second) > th) {
-                const auto n_retained = filtered.edges.size();
-                filtered.edges.push_back(edge);
+                const auto n_retained = retained.edges.size();
+                retained.edges.push_back(edge);
                 endpoints.push_back({edge.first, n_retained * 2});
                 endpoints.push_back({edge.second, n_retained * 2 + 1});
             }
@@ -167,23 +167,23 @@ GraphTopology prune_graph(
         neighbors[i] = node_indices[endpoints[i].idx ^ 1];
     });
 
-    // Populate FilteredGraph::nodes and calculate n_tar_th
+    // Populate RetainedGraph::nodes and calculate n_tar_th
     std::size_t sum_n_tar = 0;
     double sum_presence = 0.0;
-    filtered.nodes = NoInitArray<FilteredNode>(offsets.size() - 1);
-    target_counts.with([&](const auto& n_tar_at) {
-        for (std::size_t i = 0; i < filtered.nodes.size(); ++i) {
+    retained.nodes = NoInitArray<RetainedNode>(offsets.size() - 1);
+    target_prevalences.with([&](const auto& n_tar_at) {
+        for (std::size_t i = 0; i < retained.nodes.size(); ++i) {
             const auto node_idx = endpoints[offsets[i]].node;
             const std::size_t n_tar = n_tar_at(node_idx);
             const auto prevalence = prevalences[node_idx];
             if (n_tar > prevalence || n_tar > total_tar) {
-                throw std::invalid_argument("Filtered node n_tar is invalid");
+                throw std::invalid_argument("Retained node n_tar is invalid");
             }
             const std::size_t n_neg = prevalence - n_tar;
             if (n_neg > total_neg) {
-                throw std::invalid_argument("Filtered node n_neg exceeds total_neg");
+                throw std::invalid_argument("Retained node n_neg exceeds total_neg");
             }
-            filtered.nodes[i] = FilteredNode{
+            retained.nodes[i] = RetainedNode{
                 node_idx,
                 static_cast<std::uint32_t>(n_tar),
                 static_cast<std::uint32_t>(n_neg)
@@ -196,14 +196,14 @@ GraphTopology prune_graph(
     });
 
     if (n_tar_th) {
-        filtered.n_tar_th = *n_tar_th;
+        retained.n_tar_th = *n_tar_th;
     } else if (sum_n_tar == 0) {
-        filtered.n_tar_th = 0;
+        retained.n_tar_th = 0;
     } else {
         const double mean_presence = sum_presence / sum_n_tar;
         const double total = total_tar;
         const double threshold = (1.0 - tar_weight) * mean_presence + tar_weight * total;
-        filtered.n_tar_th = static_cast<std::size_t>(
+        retained.n_tar_th = static_cast<std::size_t>(
             std::clamp(std::ceil(threshold), 0.0, total)
         );
     }
@@ -216,13 +216,13 @@ GraphTopology prune_graph(
 
 void grow_subgraphs(
     const GraphTopology& graph,
-    const NoInitArray<FilteredNode>& nodes,
+    const NoInitArray<RetainedNode>& nodes,
     std::size_t total_tar,
     std::int64_t n_tar_th,
     std::int64_t n_neg_th,
     std::size_t min_nodes,
     std::optional<std::size_t> max_nodes,
-    FilteredGraph& filtered
+    RetainedGraph& retained
 ) {
     struct FrontierNode {
         double max_score;
@@ -323,7 +323,7 @@ void grow_subgraphs(
                 seen[node] = used;
                 node = nodes[node].idx;
             }
-            filtered.subgraphs.push_back(std::move(subgraph));
+            retained.subgraphs.push_back(std::move(subgraph));
         }
     }
     log_python(" - Found " + std::to_string(n_seeds) + " eligible seed nodes");

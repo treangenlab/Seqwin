@@ -21,16 +21,16 @@ namespace seqwin::internal {
  * the narrowest safe counter type. Derive target prevalence from total
  * and non-target prevalence when necessary.
  */
-class TargetCounts {
+class TargetPrevalences {
 public:
     template <typename Counter>
-    TargetCounts(
+    TargetPrevalences(
         NoInitArray<Counter>&& counts,
-        bool counts_targets,
+        bool count_targets,
         ArrayView<std::uint32_t> prevalences
     )
         : counts_(std::move(counts))
-        , counts_targets_(counts_targets)
+        , count_targets_(count_targets)
         , prevalences_(prevalences)
     {}
 
@@ -44,7 +44,7 @@ public:
     void with(Fn&& fn) const {
         std::visit(
             [&](const auto& counts) {
-                if (counts_targets_) {
+                if (count_targets_) {
                     fn([&](std::size_t node_idx) -> std::size_t {
                         return counts[node_idx];
                     });
@@ -72,7 +72,7 @@ private:
         NoInitArray<std::uint16_t>,
         NoInitArray<std::uint32_t>
     > counts_;
-    bool counts_targets_;
+    bool count_targets_;
     ArrayView<std::uint32_t> prevalences_;
 };
 
@@ -132,7 +132,7 @@ private:
  * Count nodes in the smaller assembly group using the narrowest safe
  * counter type to reduce memory usage.
  */
-TargetCounts count_target_nodes(
+TargetPrevalences calculate_target_prevalences(
     ArrayView<std::uint32_t> prevalences,
     ArrayView<std::size_t> assembly_nodes,
     ArrayView<std::size_t> node_offsets,
@@ -152,18 +152,18 @@ TargetCounts count_target_nodes(
  * If `n_tar_th` is not provided, interpolate between the mean target
  * presence of retained nodes and `total_tar`, using `tar_weight`.
  *
- * Retained nodes, edges, and the threshold are stored in `filtered`.
+ * Retained nodes, edges, and the threshold are stored in `retained`.
  */
 GraphTopology prune_graph(
-    ArrayView<std::uint32_t> prevalences,
     ArrayView<Edge> edges,
-    const TargetCounts& target_counts,
+    ArrayView<std::uint32_t> prevalences,
+    const TargetPrevalences& target_prevalences,
     std::size_t total_tar,
     std::size_t total_neg,
     double edge_weight_th,
     double tar_weight,
     std::optional<std::size_t> n_tar_th,
-    FilteredGraph& filtered,
+    RetainedGraph& retained,
     ThreadPool& pool
 );
 
@@ -175,17 +175,17 @@ GraphTopology prune_graph(
  *
  * A node is accepted only if it keeps the subgraph's mean prevalences within the limits.
  *
- * Subgraphs satisfying the size limits are stored in `filtered`.
+ * Subgraphs satisfying the size limits are stored in `retained`.
  */
 void grow_subgraphs(
     const GraphTopology& graph,
-    const NoInitArray<FilteredNode>& nodes,
+    const NoInitArray<RetainedNode>& nodes,
     std::size_t total_tar,
     std::int64_t n_tar_th,
     std::int64_t n_neg_th,
     std::size_t min_nodes,
     std::optional<std::size_t> max_nodes,
-    FilteredGraph& filtered
+    RetainedGraph& retained
 );
 
 /**

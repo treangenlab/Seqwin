@@ -62,7 +62,7 @@ def _inputs():
     )
 
 
-def _filter(tmp_path, *, targets=None, tar_weight=.5, neg_rank=0.2, edge_w_th_mul=0.3,
+def _filter(tmp_path, *, targets=None, tar_weight=.5, neg_rank=0.2, edge_weight_th_mul=0.3,
             n_tar_th=None, n_neg_th=None, min_nodes_floor=1, max_nodes_cap=None, n_cpu=1, **output_paths):
     kmers, offsets, prevalences, edges, record_offsets, default_targets = _inputs()
     if targets is None:
@@ -75,7 +75,7 @@ def _filter(tmp_path, *, targets=None, tar_weight=.5, neg_rank=0.2, edge_w_th_mu
     result = _filter_native(
         graph,
         _paths(tmp_path), targets, 5, 10,
-        tar_weight, neg_rank, 0, None, edge_w_th_mul, n_tar_th, n_neg_th, min_nodes_floor,
+        tar_weight, neg_rank, 0, None, edge_weight_th_mul, n_tar_th, n_neg_th, min_nodes_floor,
         max_nodes_cap, 1.5, n_cpu, **output_paths,
     )
     return result, prevalences

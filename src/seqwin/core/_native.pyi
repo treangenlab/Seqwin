@@ -197,14 +197,14 @@ class Graph:
         """
         ...
 
-class FilteredGraph:
-    """Includes filtered graph arrays, subgraphs, and calculated values.
+class RetainedGraph:
+    """Retained graph nodes and edges, generated subgraphs, and filtering thresholds.
 
-    Filtered nodes and edges follow their original order.
+    Retained nodes and edges follow their original order.
     """
     @property
     def nodes(self) -> NDArray[np.void]:
-        """Nodes retained by edge filtering.
+        """Nodes that are endpoints of at least one retained edge.
             - 'idx' (uintp): Node index in the original graph.
             - 'n_tar' (uint32): Target prevalence (number of target assemblies containing this node's k-mer).
             - 'n_neg' (uint32): Non-target prevalence (number of non-target assemblies containing this node's k-mer).
@@ -316,7 +316,7 @@ def _filter_native(
     neg_rank: float,
     min_len: int,
     max_len: int | None,
-    edge_w_th_mul: float,
+    edge_weight_th_mul: float,
     n_tar_th: int | None,
     n_neg_th: int | None,
     min_nodes_floor: int,
@@ -326,7 +326,7 @@ def _filter_native(
     fasta_path: str | None = None,
     csv_path: str | None = None,
 ) -> tuple[
-    FilteredGraph,
+    RetainedGraph,
     list[Signature],
 ]:
     """Filter the minimizer graph and extract signatures from subgraphs."""

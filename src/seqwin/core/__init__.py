@@ -10,7 +10,7 @@ Classes:
 - FastaRecord
 - Nodes
 - Graph
-- FilteredGraph
+- RetainedGraph
 - SubgraphLoc
 - Signature
 
@@ -20,6 +20,6 @@ Functions:
 """
 
 from ._native import (
-    AssemblyPaths, FastaRecord, Nodes, Graph, FilteredGraph, SubgraphLoc, Signature,
+    AssemblyPaths, FastaRecord, Nodes, Graph, RetainedGraph, SubgraphLoc, Signature,
     read_fasta,
 )

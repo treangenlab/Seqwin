@@ -23,7 +23,7 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-from .core import Graph, FilteredGraph, Signature
+from .core import Graph, RetainedGraph, Signature
 from .core._native import _filter_native
 from .assemblies import Assemblies, get_assemblies
 from .evaluation import SignatureMetrics, eval_signatures_seqwin
@@ -57,7 +57,7 @@ def _build_graph(assemblies: Assemblies, config: Config) -> Graph:
 
 def _filter_graph(
     graph: Graph, assemblies: Assemblies, config: Config, state: RunState
-) -> tuple[FilteredGraph, list[Signature]]:
+) -> tuple[RetainedGraph, list[Signature]]:
     """Filter the minimizer graph and extract signatures from subgraphs.
     """
     logger.info('Filtering minimizer graph...')
@@ -68,7 +68,7 @@ def _filter_graph(
     file_to_write(fasta_path, config.overwrite)
     file_to_write(csv_path, config.overwrite)
 
-    filtered, signatures = _filter_native(
+    retained, signatures = _filter_native(
         graph=graph,
         assembly_paths=assemblies.paths,
         is_targets=assemblies.is_targets,
@@ -78,7 +78,7 @@ def _filter_graph(
         neg_rank=config.neg_rank,
         min_len=config.min_len,
         max_len=config.max_len,
-        edge_w_th_mul=config.edge_w_th_mul,
+        edge_weight_th_mul=config.edge_weight_th_mul,
         n_tar_th=config.n_tar_th,
         n_neg_th=config.n_neg_th,
         min_nodes_floor=config.min_nodes_floor,
@@ -90,7 +90,7 @@ def _filter_graph(
     )
 
     print_time_delta(time() - tik)
-    return filtered, signatures
+    return retained, signatures
 
 
 class Seqwin(object):
@@ -100,17 +100,17 @@ class Seqwin(object):
         config (Config): See `Config` in `config.py`.
         state (RunState): See `RunState` in `config.py`.
         assemblies (Assemblies): See `Assemblies` in `assemblies.py`.
-        filtered (FilteredGraph | None): Filtered minimizer graph.
+        retained (RetainedGraph | None): Retained minimizer graph.
         signatures (tuple[Signature] | None): Extracted signatures.
         metrics (tuple[SignatureMetrics] | None): Evaluation metrics parallel to `signatures`.
     """
     __module__ = 'seqwin'
 
-    __slots__ = ('config', 'state', 'assemblies', 'filtered', 'signatures', 'metrics')
+    __slots__ = ('config', 'state', 'assemblies', 'retained', 'signatures', 'metrics')
     config: Config
     state: RunState
     assemblies: Assemblies
-    filtered: FilteredGraph | None
+    retained: RetainedGraph | None
     signatures: tuple[Signature, ...] | None
     metrics: tuple[SignatureMetrics, ...] | None
 
@@ -164,7 +164,7 @@ class Seqwin(object):
         self.config = config
         self.state = RunState(working_dir=working_dir)
         self.assemblies = get_assemblies(config, self.state)
-        self.filtered = None
+        self.retained = None
         self.signatures = None
         self.metrics = None
 
@@ -186,8 +186,8 @@ class Seqwin(object):
             graph.save(graph_path)
             logger.info(f'Raw minimizer graph saved as {graph_path}')
 
-        filtered, signatures = _filter_graph(graph, assemblies, config, state)
-        self.filtered = filtered
+        retained, signatures = _filter_graph(graph, assemblies, config, state)
+        self.retained = retained
         self.signatures = tuple(signatures)
 
         if config.run_blast and HAS_BLAST:
@@ -202,8 +202,8 @@ class Seqwin(object):
                 working_dir / WORKINGDIR.signatures_fasta,
                 working_dir / WORKINGDIR.signatures_csv,
                 blastdb,
-                filtered.total_tar,
-                filtered.total_neg,
+                retained.total_tar,
+                retained.total_neg,
                 config.n_cpu,
             )
             self.metrics = tuple(metrics)

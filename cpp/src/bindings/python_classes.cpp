@@ -25,12 +25,12 @@ namespace {
 constexpr int pickle_version = 1;
 
 static_assert(sizeof(std::size_t) == 8, "Seqwin requires a 64-bit platform");
-static_assert(std::is_trivially_copyable_v<seqwin::FilteredNode>);
-static_assert(std::is_standard_layout_v<seqwin::FilteredNode>);
-static_assert(sizeof(seqwin::FilteredNode) == 16);
-static_assert(offsetof(seqwin::FilteredNode, idx) == 0);
-static_assert(offsetof(seqwin::FilteredNode, n_tar) == 8);
-static_assert(offsetof(seqwin::FilteredNode, n_neg) == 12);
+static_assert(std::is_trivially_copyable_v<seqwin::RetainedNode>);
+static_assert(std::is_standard_layout_v<seqwin::RetainedNode>);
+static_assert(sizeof(seqwin::RetainedNode) == 16);
+static_assert(offsetof(seqwin::RetainedNode, idx) == 0);
+static_assert(offsetof(seqwin::RetainedNode, n_tar) == 8);
+static_assert(offsetof(seqwin::RetainedNode, n_neg) == 12);
 static_assert(std::is_trivially_copyable_v<seqwin::Edge>);
 static_assert(std::is_standard_layout_v<seqwin::Edge>);
 static_assert(sizeof(seqwin::Edge) == 24);
@@ -76,7 +76,7 @@ Container bytes_to_array(const py::bytes& value, const char* name) {
     }
     if (size % sizeof(T) != 0) {
         throw std::runtime_error(
-            std::string("Invalid FilteredGraph pickle: ") + name +
+            std::string("Invalid RetainedGraph pickle: ") + name +
             " byte length is not a multiple of the record size"
         );
     }
@@ -92,25 +92,25 @@ Container bytes_to_array(const py::bytes& value, const char* name) {
 void bind_python_classes(py::module_& module) {
     bind_python_graph(module);
 
-    py::class_<FilteredGraph>(module, "FilteredGraph")
+    py::class_<RetainedGraph>(module, "RetainedGraph")
         .def_property_readonly("nodes", [](py::object self) {
-            const auto& filtered = self.cast<const FilteredGraph&>();
-            return to_numpy(filtered.nodes, self);
+            const auto& retained = self.cast<const RetainedGraph&>();
+            return to_numpy(retained.nodes, self);
         })
         .def_property_readonly("edges", [](py::object self) {
-            const auto& filtered = self.cast<const FilteredGraph&>();
-            return to_numpy(filtered.edges, self);
+            const auto& retained = self.cast<const RetainedGraph&>();
+            return to_numpy(retained.edges, self);
         })
-        .def_readonly("subgraphs", &FilteredGraph::subgraphs)
-        .def_readonly("total_tar", &FilteredGraph::total_tar)
-        .def_readonly("total_neg", &FilteredGraph::total_neg)
-        .def_readonly("edge_weight_th", &FilteredGraph::edge_weight_th)
-        .def_readonly("n_tar_th", &FilteredGraph::n_tar_th)
-        .def_readonly("n_neg_th", &FilteredGraph::n_neg_th)
-        .def_readonly("min_nodes", &FilteredGraph::min_nodes)
-        .def_readonly("max_nodes", &FilteredGraph::max_nodes)
+        .def_readonly("subgraphs", &RetainedGraph::subgraphs)
+        .def_readonly("total_tar", &RetainedGraph::total_tar)
+        .def_readonly("total_neg", &RetainedGraph::total_neg)
+        .def_readonly("edge_weight_th", &RetainedGraph::edge_weight_th)
+        .def_readonly("n_tar_th", &RetainedGraph::n_tar_th)
+        .def_readonly("n_neg_th", &RetainedGraph::n_neg_th)
+        .def_readonly("min_nodes", &RetainedGraph::min_nodes)
+        .def_readonly("max_nodes", &RetainedGraph::max_nodes)
         .def(py::pickle(
-            [](const FilteredGraph& value) {
+            [](const RetainedGraph& value) {
                 return py::make_tuple(
                     pickle_version,
                     array_to_bytes(value.nodes),
@@ -127,10 +127,10 @@ void bind_python_classes(py::module_& module) {
             },
             [](const py::tuple& state) {
                 if (state.size() != 11 || state[0].cast<int>() != pickle_version) {
-                    throw std::runtime_error("Invalid FilteredGraph pickle state or version");
+                    throw std::runtime_error("Invalid RetainedGraph pickle state or version");
                 }
-                return FilteredGraph{
-                    bytes_to_array<NoInitArray<FilteredNode>>(state[1].cast<py::bytes>(), "nodes"),
+                return RetainedGraph{
+                    bytes_to_array<NoInitArray<RetainedNode>>(state[1].cast<py::bytes>(), "nodes"),
                     bytes_to_array<std::vector<Edge>>(state[2].cast<py::bytes>(), "edges"),
                     state[3].cast<std::vector<Subgraph>>(),
                     state[4].cast<std::size_t>(),

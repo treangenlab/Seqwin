@@ -27,7 +27,7 @@ struct FilterConfig {
     double neg_rank;
     std::size_t min_len;
     std::optional<std::size_t> max_len;
-    double edge_w_th_mul;
+    double edge_weight_th_mul;
     std::optional<std::size_t> n_tar_th;
     std::optional<std::size_t> n_neg_th;
     std::size_t min_nodes_floor;
@@ -40,8 +40,10 @@ struct FilterConfig {
 
 /**
  * @brief Graph node retained by edge filtering.
+ *
+ * A node is retained if it is an endpoint of at least one retained edge.
  */
-struct FilteredNode {
+struct RetainedNode {
     /** Node index in the original graph. */
     std::size_t idx;
     /** Target prevalence (number of target assemblies containing this node's k-mer). */
@@ -51,13 +53,13 @@ struct FilteredNode {
 };
 
 /**
- * @brief Includes filtered graph arrays, subgraphs, and calculated values.
+ * @brief Retained graph nodes and edges, generated subgraphs, and filtering thresholds.
  *
- * Filtered nodes and edges follow their original order.
+ * Retained nodes and edges follow their original order.
  */
-struct FilteredGraph {
-    /** Nodes retained by edge filtering. */
-    NoInitArray<FilteredNode> nodes;
+struct RetainedGraph {
+    /** Nodes that are endpoints of at least one retained edge. */
+    NoInitArray<RetainedNode> nodes;
     /** Edges with sufficient weight and target prevalence at either endpoint. */
     std::vector<Edge> edges;
     /** Subgraphs represented by node indices of the original graph. */
@@ -81,7 +83,7 @@ struct FilteredGraph {
 /**
  * @brief Filter the k-mer graph and extract signatures from subgraphs.
  */
-std::pair<FilteredGraph, std::vector<Signature>> filter(
+std::pair<RetainedGraph, std::vector<Signature>> filter(
     const GraphView& graph,
     const std::vector<std::string>& assembly_paths,
     ArrayView<bool> is_targets,

@@ -72,7 +72,7 @@ using namespace seqwin::bindings;
 
 PYBIND11_MODULE(_native, m) {
     PYBIND11_NUMPY_DTYPE(seqwin::Kmer, pos, record_idx);
-    PYBIND11_NUMPY_DTYPE(seqwin::FilteredNode, idx, n_tar, n_neg);
+    PYBIND11_NUMPY_DTYPE(seqwin::RetainedNode, idx, n_tar, n_neg);
     PYBIND11_NUMPY_DTYPE(seqwin::Edge, first, second, weight);
 
     py::tuple names(seqwin::METADATA_NAMES.size());
@@ -120,7 +120,7 @@ PYBIND11_MODULE(_native, m) {
            double neg_rank,
            std::size_t min_len,
            std::optional<std::size_t> max_len,
-           double edge_w_th_mul,
+           double edge_weight_th_mul,
            std::optional<std::size_t> n_tar_th,
            std::optional<std::size_t> n_neg_th,
            std::size_t min_nodes_floor,
@@ -147,7 +147,7 @@ PYBIND11_MODULE(_native, m) {
                 neg_rank,
                 min_len,
                 max_len,
-                edge_w_th_mul,
+                edge_weight_th_mul,
                 n_tar_th,
                 n_neg_th,
                 min_nodes_floor,
@@ -158,7 +158,7 @@ PYBIND11_MODULE(_native, m) {
                 csv_path
             };
 
-            std::pair<seqwin::FilteredGraph, std::vector<seqwin::Signature>> out;
+            std::pair<seqwin::RetainedGraph, std::vector<seqwin::Signature>> out;
             {
                 py::gil_scoped_release release;
                 out = seqwin::filter(
@@ -179,7 +179,7 @@ PYBIND11_MODULE(_native, m) {
         py::arg("neg_rank"),
         py::arg("min_len"),
         py::arg("max_len"),
-        py::arg("edge_w_th_mul"),
+        py::arg("edge_weight_th_mul"),
         py::arg("n_tar_th"),
         py::arg("n_neg_th"),
         py::arg("min_nodes_floor"),

@@ -16,15 +16,15 @@ namespace seqwin {
 namespace {
 
 /**
- * @brief Calculate filtering thresholds from `config` and store them in `filtered`.
+ * @brief Calculate filtering thresholds from `config` and store them in `retained`.
  */
 void calculate_thresholds(
     std::size_t total_tar,
     const FilterConfig& config,
-    FilteredGraph& filtered
+    RetainedGraph& retained
 ) {
     // Calculate edge weight threshold
-    const double edge_weight_th = config.edge_w_th_mul * total_tar;
+    const double edge_weight_th = config.edge_weight_th_mul * total_tar;
 
     // Calculate size range of subgraphs
     const std::size_t gap_len = config.windowsize / 2 + config.windowsize % 2;
@@ -49,9 +49,9 @@ void calculate_thresholds(
         );
     }
 
-    filtered.edge_weight_th = edge_weight_th;
-    filtered.min_nodes = min_nodes;
-    filtered.max_nodes = max_nodes;
+    retained.edge_weight_th = edge_weight_th;
+    retained.min_nodes = min_nodes;
+    retained.max_nodes = max_nodes;
 }
 
 /**
@@ -60,8 +60,8 @@ void calculate_thresholds(
  * If `n_neg_th` is not provided, use the nearest-rank quantile (`neg_rank`) of non-target
  * prevalence among retained nodes whose target prevalence is at least `n_tar_th`.
  */
-std::size_t neg_threshold(
-    const NoInitArray<FilteredNode>& nodes,
+std::size_t get_n_neg_th(
+    const NoInitArray<RetainedNode>& nodes,
     std::size_t n_tar_th,
     double neg_rank,
     std::optional<std::size_t> n_neg_th
@@ -88,7 +88,7 @@ std::size_t neg_threshold(
 
 } // namespace
 
-std::pair<FilteredGraph, std::vector<Signature>> filter(
+std::pair<RetainedGraph, std::vector<Signature>> filter(
     const GraphView& graph,
     const std::vector<std::string>& assembly_paths,
     ArrayView<bool> is_targets,
@@ -110,8 +110,8 @@ std::pair<FilteredGraph, std::vector<Signature>> filter(
     if (!(config.neg_rank >= 0.0 && config.neg_rank <= 1.0)) {
         throw std::invalid_argument("neg_rank must be between 0 and 1");
     }
-    if (!(config.edge_w_th_mul >= 0.0 && config.edge_w_th_mul <= 1.0)) {
-        throw std::invalid_argument("edge_w_th_mul must be between 0 and 1");
+    if (!(config.edge_weight_th_mul >= 0.0 && config.edge_weight_th_mul <= 1.0)) {
+        throw std::invalid_argument("edge_weight_th_mul must be between 0 and 1");
     }
     if (!std::isfinite(config.consec_kmer_mul) || config.consec_kmer_mul <= 0.0) {
         throw std::invalid_argument("consec_kmer_mul must be finite and greater than zero");
@@ -123,104 +123,104 @@ std::pair<FilteredGraph, std::vector<Signature>> filter(
         throw std::invalid_argument("Both fasta_path and csv_path are required for signature output");
     }
 
-    FilteredGraph filtered;
-    filtered.total_tar = std::count(is_targets.begin(), is_targets.end(), true);
-    filtered.total_neg = is_targets.size() - filtered.total_tar;
-    if (filtered.total_tar == 0) {
+    RetainedGraph retained;
+    retained.total_tar = std::count(is_targets.begin(), is_targets.end(), true);
+    retained.total_neg = is_targets.size() - retained.total_tar;
+    if (retained.total_tar == 0) {
         throw std::invalid_argument("is_targets must contain at least one target assembly");
     }
-    if (filtered.total_neg == 0) {
+    if (retained.total_neg == 0) {
         throw std::invalid_argument("is_targets must contain at least one non-target assembly");
     }
-    if (config.n_tar_th && *config.n_tar_th > filtered.total_tar) {
+    if (config.n_tar_th && *config.n_tar_th > retained.total_tar) {
         throw std::invalid_argument("n_tar_th exceeds the number of target assemblies");
     }
-    if (config.n_neg_th && *config.n_neg_th > filtered.total_neg) {
+    if (config.n_neg_th && *config.n_neg_th > retained.total_neg) {
         throw std::invalid_argument("n_neg_th exceeds the number of non-target assemblies");
     }
 
     calculate_thresholds(
-        filtered.total_tar,
+        retained.total_tar,
         config,
-        filtered
+        retained
     );
     internal::ThreadPool pool(config.n_cpu);
 
     internal::log_python(" - Calculating target prevalence of graph nodes...");
-    auto target_counts = internal::count_target_nodes(
+    auto target_prevalences = internal::calculate_target_prevalences(
         graph.nodes.prevalences,
         graph.assembly_nodes,
         graph.node_offsets,
         is_targets,
-        filtered.total_tar,
-        filtered.total_neg,
+        retained.total_tar,
+        retained.total_neg,
         pool
     );
 
     internal::log_python(" - Filtering graph and determining prevalence thresholds...");
     auto graph_topology = internal::prune_graph(
-        graph.nodes.prevalences,
         graph.edges,
-        target_counts,
-        filtered.total_tar,
-        filtered.total_neg,
-        filtered.edge_weight_th,
+        graph.nodes.prevalences,
+        target_prevalences,
+        retained.total_tar,
+        retained.total_neg,
+        retained.edge_weight_th,
         config.tar_weight,
         config.n_tar_th,
-        filtered,
+        retained,
         pool
     );
-    target_counts.reset();
-    filtered.n_neg_th = neg_threshold(
-        filtered.nodes,
-        filtered.n_tar_th,
+    target_prevalences.reset();
+    retained.n_neg_th = get_n_neg_th(
+        retained.nodes,
+        retained.n_tar_th,
         config.neg_rank,
         config.n_neg_th
     );
     internal::log_python(
-        " - Removed " + std::to_string(graph.edges.size() - filtered.edges.size()) +
+        " - Removed " + std::to_string(graph.edges.size() - retained.edges.size()) +
         " edges failing weight/target prevalence thresholds, " +
-        std::to_string(filtered.edges.size()) + " edges left"
+        std::to_string(retained.edges.size()) + " edges left"
     );
     internal::log_python(
-        " - Removed " + std::to_string(graph.nodes.prevalences.size() - filtered.nodes.size()) +
-        " isolated nodes, " + std::to_string(filtered.nodes.size()) + " nodes left"
+        " - Removed " + std::to_string(graph.nodes.prevalences.size() - retained.nodes.size()) +
+        " isolated nodes, " + std::to_string(retained.nodes.size()) + " nodes left"
     );
     internal::log_python(
-        " - Target prevalence threshold: " + std::to_string(filtered.n_tar_th) +
+        " - Target prevalence threshold: " + std::to_string(retained.n_tar_th) +
         (config.n_tar_th.has_value() ? " (user-specified)" : " (estimated)")
     );
     internal::log_python(
-        " - Non-target prevalence threshold: " + std::to_string(filtered.n_neg_th) +
+        " - Non-target prevalence threshold: " + std::to_string(retained.n_neg_th) +
         (config.n_neg_th.has_value() ? " (user-specified)" : " (estimated)")
     );
 
     internal::log_python(" - Growing subgraphs...");
     internal::grow_subgraphs(
         graph_topology,
-        filtered.nodes,
-        filtered.total_tar,
-        filtered.n_tar_th,
-        filtered.n_neg_th,
-        filtered.min_nodes,
-        filtered.max_nodes,
-        filtered
+        retained.nodes,
+        retained.total_tar,
+        retained.n_tar_th,
+        retained.n_neg_th,
+        retained.min_nodes,
+        retained.max_nodes,
+        retained
     );
     graph_topology.reset();
-    if (filtered.subgraphs.empty()) {
+    if (retained.subgraphs.empty()) {
         throw std::runtime_error("No subgraphs found. Try relaxing the prevalence thresholds");
     }
-    internal::log_python(" - Found " + std::to_string(filtered.subgraphs.size()) + " subgraphs");
+    internal::log_python(" - Found " + std::to_string(retained.subgraphs.size()) + " subgraphs");
 
     internal::log_python(" - Finding a representative for each subgraph...");
     auto signatures = internal::extract_signatures(
-        filtered.subgraphs,
+        retained.subgraphs,
         graph.nodes.kmers,
         graph.nodes.offsets,
         graph.record_offsets,
         assembly_paths,
         is_targets,
-        filtered.total_tar,
+        retained.total_tar,
         config.kmerlen,
         config.windowsize,
         config.min_len,
@@ -230,7 +230,7 @@ std::pair<FilteredGraph, std::vector<Signature>> filter(
         pool
     );
 
-    return {std::move(filtered), std::move(signatures)};
+    return {std::move(retained), std::move(signatures)};
 }
 
 } // namespace seqwin
